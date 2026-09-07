@@ -24,6 +24,7 @@ from .runner import (
     check_docker,
     check_hardlinks,
     check_port_free,
+    check_writable,
     remove_volume,
     running_project_dir,
     volume_exists,
@@ -270,6 +271,13 @@ def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
                 )
             else:
                 checks.append(check_port_free(port, sid))
+    # AVANT l'espace disque et les hardlinks, et surtout avant toute ecriture :
+    # les deux racines doivent etre inscriptibles. C'est le controle qui
+    # manquait. Sans lui, un chemin impossible ne se signalait qu'en
+    # avertissement — sur la ligne des hardlinks, qui parle d'autre chose — et
+    # l'installation mourait plus loin sur « [Errno 30] Read-only file system ».
+    checks.append(check_writable(cfg.data_root, t("racine des donnees")))
+    checks.append(check_writable(cfg.config_root, t("racine des configurations")))
     checks.append(check_disk_space(cfg.data_root))
     checks.append(check_hardlinks(cfg.data_root))
     checks.append(check_existing_config(cfg))

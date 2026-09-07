@@ -119,6 +119,16 @@ class ProfileDefaults:
     source: str
 
 
+def _sous_le_dossier_personnel(*parties: str) -> str:
+    """Chemin absolu sous le dossier personnel, resolu MAINTENANT.
+
+    Un `~` laisse tel quel serait ecrit dans `.env` puis dans
+    `docker-compose.yml`, ou Docker ne l'etend pas : il creerait un dossier
+    litteralement nomme `~`. Le defaut doit donc etre absolu des sa lecture.
+    """
+    return str(Path.home().joinpath(*parties))
+
+
 PROFILE_DEFAULTS: dict[PlatformProfile, ProfileDefaults] = {
     PlatformProfile.GENERIC_LINUX: ProfileDefaults(
         config_root="/opt/plugarr/config",
@@ -143,6 +153,27 @@ PROFILE_DEFAULTS: dict[PlatformProfile, ProfileDefaults] = {
         pgid=1000,
         prefer_detection=False,
         source="sans effet sous Docker Desktop : Windows ne porte pas ces droits",
+    ),
+    PlatformProfile.MACOS: ProfileDefaults(
+        # SOUS LE DOSSIER PERSONNEL, et ce n'est pas un gout. Depuis Catalina la
+        # racine de macOS est un volume systeme signe, monte en LECTURE SEULE :
+        # `/srv` n'y existe pas et ne peut pas y etre cree. Sans ce profil, un
+        # utilisateur Mac heritait de `generic-linux` et de son `/srv/data`, donc
+        # de « [Errno 30] Read-only file system: '/srv' » des le premier
+        # lancement — signale par un utilisateur, capture a l'appui.
+        #
+        # `/Users` fait partie des dossiers que Docker Desktop partage par
+        # defaut : le montage fonctionne sans rien avoir a regler. `/opt`, lui,
+        # est bien inscriptible sur macOS mais n'est PAS partage — le dossier se
+        # creerait et le montage echouerait plus tard, ce qui est pire.
+        config_root=_sous_le_dossier_personnel("plugarr", "config"),
+        data_root=_sous_le_dossier_personnel("plugarr", "data"),
+        # Valeurs de repli seulement : le premier compte macOS est 501:20
+        # (staff), mais rien ne le garantit. La detection passe devant.
+        puid=501,
+        pgid=20,
+        prefer_detection=True,
+        source="utilisateur courant",
     ),
     PlatformProfile.UNRAID: ProfileDefaults(
         config_root="/mnt/user/appdata/plugarr",
@@ -240,40 +271,92 @@ def create_tree(data_root: str | Path, config_root: str | Path, service_ids: lis
     return created
 
 
+def _dossiers_absents(chemin: Path) -> list[Path]:
+    """Les dossiers de cette chaine qui n'existent pas encore, du plus profond
+    au plus haut. C'est exactement ce qu'un `mkdir(parents=True)` va creer."""
+    manquants: list[Path] = []
+    courant = chemin
+    while not courant.exists() and courant != courant.parent:
+        manquants.append(courant)
+        courant = courant.parent
+    return manquants
+
+
 def hardlink_supported(data_root: str | Path) -> tuple[bool, str]:
     """Teste REELLEMENT qu'un hardlink est possible entre torrents/ et media/.
 
     C'est le diagnostic qui distingue une stack qui recopie 40 Go a chaque import
     d'une stack qui fait un lien instantane. On ne suppose rien, on essaie.
+
+    Et on remet en etat. Essayer demande deux VRAIS dossiers ; les laisser
+    derriere soi faisait mentir `--dry-run`, dont l'ecran annonce « rien n'a
+    encore ete ecrit » pendant que `DATA_ROOT/torrents` et `DATA_ROOT/media`
+    apparaissaient sur le disque — avec toute leur chaine de parents, `mkdir`
+    etant appele avec `parents=True`. Or `--dry-run` est precisement la commande
+    qu'on lance pour regarder sans s'engager : quelqu'un qui compare trois
+    emplacements en laissait trois, et celui qui se trompait de chemin creait
+    une arborescence la ou il s'etait trompe.
+
+    Le menage ne retire QUE ce que ce test a cree, et seulement si c'est reste
+    vide : `rmdir` refuse un dossier non vide, ce qui est la garantie qu'on
+    cherche. Une installation existante n'est donc jamais touchee.
     """
     data_root = Path(data_root)
     src_dir, dst_dir = data_root / "torrents", data_root / "media"
-    try:
-        src_dir.mkdir(parents=True, exist_ok=True)
-        dst_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return False, f"impossible de creer {src_dir} ou {dst_dir}: {exc}"
 
-    fd, src = tempfile.mkstemp(dir=src_dir, prefix=".plugarr-hardlink-")
-    os.close(fd)
-    dst = dst_dir / (Path(src).name + ".link")
+    # Releve AVANT toute creation, et pour les deux chaines : elles partagent
+    # leurs parents, qu'un seul des deux releves suffirait a manquer.
+    a_retirer = set(_dossiers_absents(src_dir)) | set(_dossiers_absents(dst_dir))
     try:
-        os.link(src, dst)
-        return True, t("hardlink OK entre torrents/ et media/")
-    except OSError as exc:
-        return False, t(
-            "hardlink impossible ({erreur}). Les imports recopieront les fichiers "
-            "au lieu de les lier. Verifiez que {source} et {cible} sont sur le "
-            "MEME systeme de fichiers, et que DATA_ROOT est monte d'un seul bloc.",
-            erreur=exc,
-            source=src_dir,
-            cible=dst_dir,
-        )
+        try:
+            src_dir.mkdir(parents=True, exist_ok=True)
+            dst_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            # Le `t()` manquait ici, et lui seul : les deux autres sorties de
+            # cette fonction l'avaient. Un utilisateur macOS en interface
+            # anglaise voyait donc un tableau anglais avec cette ligne — et elle
+            # seule — en francais. L'audit des traductions ne pouvait pas
+            # l'attraper : il releve les `t("...")` presents, jamais un absent.
+            return False, t(
+                "impossible de creer {source} ou {cible} : {erreur}",
+                source=src_dir,
+                cible=dst_dir,
+                erreur=exc,
+            )
+
+        fd, src = tempfile.mkstemp(dir=src_dir, prefix=".plugarr-hardlink-")
+        os.close(fd)
+        dst = dst_dir / (Path(src).name + ".link")
+        try:
+            os.link(src, dst)
+            return True, t("hardlink OK entre torrents/ et media/")
+        except OSError as exc:
+            return False, t(
+                "hardlink impossible ({erreur}). Les imports recopieront les "
+                "fichiers au lieu de les lier. Verifiez que {source} et {cible} "
+                "sont sur le MEME systeme de fichiers, et que DATA_ROOT est "
+                "monte d'un seul bloc.",
+                erreur=exc,
+                source=src_dir,
+                cible=dst_dir,
+            )
+        finally:
+            for p in (dst, Path(src)):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
     finally:
-        for p in (dst, Path(src)):
+        # Du PLUS PROFOND au plus haut : `torrents` et `media` d'abord, leurs
+        # parents ensuite, sinon `rmdir` bute sur un dossier encore occupe par
+        # son propre enfant. Ce `finally` couvre aussi l'echec de `mkdir` a
+        # mi-chemin, ou une partie de la chaine a pu etre creee malgre tout.
+        for dossier in sorted(a_retirer, key=lambda p: len(p.parts), reverse=True):
             try:
-                p.unlink()
+                dossier.rmdir()
             except OSError:
+                # Non vide, ou jamais cree. Dans les deux cas il ne nous
+                # appartient pas : on n'insiste pas.
                 pass
 
 
@@ -283,8 +366,17 @@ def default_profile() -> PlatformProfile:
     Proposer `generic-linux` a un utilisateur Windows le conduisait droit dans le
     piege : il gardait des chemins Linux, et Docker Desktop les creait a la racine
     du disque courant sans que rien ne le signale.
+
+    macOS avait exactement le meme angle mort, en pire : `generic-linux` propose
+    `/srv/data`, que la racine en lecture seule de macOS REFUSE de creer. Le
+    piege Windows produit un dossier au mauvais endroit ; celui-ci produit un
+    « [Errno 30] Read-only file system » et une installation morte.
     """
-    return PlatformProfile.WINDOWS if sys.platform == "win32" else PlatformProfile.GENERIC_LINUX
+    if sys.platform == "win32":
+        return PlatformProfile.WINDOWS
+    if sys.platform == "darwin":
+        return PlatformProfile.MACOS
+    return PlatformProfile.GENERIC_LINUX
 
 
 def path_warning(path: str) -> str | None:

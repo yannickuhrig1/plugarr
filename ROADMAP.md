@@ -5,7 +5,7 @@
 Où en est PlugArr, ce qui vient ensuite, et pourquoi. Tenue à jour à chaque
 séance de travail.
 
-**Dernière mise à jour : 5 septembre 2026** — version publiée : **0.7.1**
+**Dernière mise à jour : 7 septembre 2026** — version publiée : **0.7.2**
 
 ---
 
@@ -229,6 +229,10 @@ autres plutôt qu'en les effaçant.
 
 | Version | |
 |---|---|
+| **0.7.2** | **macOS n'avait aucun profil, et heritait de `/srv/data` — que macOS REFUSE de creer.** Signale par un utilisateur sur r/FrancePirate, capture a l'appui : `[Errno 30] Read-only file system: '/srv'`. Depuis Catalina la racine de macOS est un volume systeme signe, monte en lecture seule. `default_profile()` ne connaissait que `win32` et « tout le reste » : **tout** utilisateur Mac se prenait le mur au premier lancement. Le profil `macos` pose ses chemins sous le dossier personnel — seul endroit a la fois inscriptible ET partage par defaut par Docker Desktop. `/opt` aurait ete pire que `/srv` : inscriptible, donc `mkdir` passe, mais pas partage — l'echec ne serait apparu qu'au `compose up`. |
+| **0.7.2** | **Le preflight ne verifiait NULLE PART qu'on peut ecrire.** Il ne testait que les hardlinks, en non bloquant : une condition fatale sortait en avertissement jaune, sur une ligne qui parle d'autre chose, l'installation partait quand meme et mourait sur sa premiere ecriture avec un errno nu. Rien dans `OSError : [Errno 30]` ne dit quoi changer. `check_writable` est **bloquant**, porte sur les deux racines, essaie reellement d'ecrire plutot que de croire `os.access`, et nomme le remede. Reproduit avant correction sur un tmpfs monte en lecture seule. |
+| **0.7.2** | `--dry-run` annoncait « rien n'a encore ete ecrit » et **ecrivait quand meme**. Trouve en verifiant le correctif precedent. Le controle des hardlinks ne devine pas, il essaie — mais essayer demande deux vrais dossiers, et il les laissait derriere lui avec toute leur chaine de parents. Or `--dry-run` est PRECISEMENT la commande qu'on lance pour regarder sans s'engager : comparer trois emplacements en laissait trois, et une faute de frappe creait une arborescence a l'endroit de la faute. Le menage ne retire que ce que le test a cree, et seulement si c'est reste vide. |
+| **0.7.2** | Un `t()` manquait dans `hardlink_supported`, et lui seul de ses trois sorties : la capture de l'utilisateur montrait un tableau anglais avec **une** ligne en francais. L'audit des traductions ne pouvait pas le voir — il releve les `t("...")` presents, jamais un absent. Un test le voit desormais. |
 | **0.7.1** | **PlugArr ne savait pas qu'une version plus recente de LUI-MEME existait.** Signale a l'usage : « je viens de lancer la 0.6 et elle ne detecte pas la 0.7 ». C'etait juste, et le trou etait beant : la 0.6.0 a livre `plugarr upgrade`, qui aligne les IMAGES des services sur le catalogue **du binaire en cours** — elle supposait donc qu'on avait deja telecharge le dernier, et rien nulle part ne le disait. `__version__` n'etait qu'affiche. `upgrade`, `doctor` et le bouton « chercher les mises a jour » de la console interrogent desormais la derniere release, en **une** requete. |
 | **0.7.1** | **La verification est un CONFORT, et se comporte comme tel.** Elle ne leve jamais : PlugArr marche parfaitement hors ligne, et un NAS derriere un pare-feu ne doit pas voir une erreur parce qu'il ne joint pas GitHub. Nuance qui compte : un echec rend « on ne sait pas », **jamais** « pas de mise a jour » — les confondre laisserait quelqu'un sur une version perimee en croyant etre a jour. Le quota horaire epuise a son propre message. |
 | **0.7.1** | Le message annoncait « vous avez la 0.7.0 » a quelqu'un en 0.6.0 : `cli` et `autoupdate` lisaient chacun leur propre `__version__`. Le resultat porte maintenant la version a laquelle la comparaison a ete faite, et c'est elle qu'on affiche. **Trouve en lisant le message produit**, pas en relisant le code. |

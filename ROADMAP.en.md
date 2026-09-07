@@ -5,7 +5,7 @@
 Where PlugArr stands, what comes next, and why. Kept up to date after every
 working session.
 
-**Last updated: 5 September 2026** — published version: **0.7.1**
+**Last updated: 7 September 2026** — published version: **0.7.2**
 
 ---
 
@@ -229,6 +229,10 @@ than deleting them.
 
 | Version | |
 |---|---|
+| **0.7.2** | **macOS had no profile at all, and inherited `/srv/data` — which macOS REFUSES to create.** Reported by a user on r/FrancePirate, screenshot included: `[Errno 30] Read-only file system: '/srv'`. Since Catalina the macOS root is a signed system volume, mounted read-only. `default_profile()` only knew `win32` and "everything else": **every** Mac user hit the wall on first run. The `macos` profile puts its paths under the home directory — the only place that is both writable AND shared by default by Docker Desktop. `/opt` would have been worse than `/srv`: writable, so `mkdir` succeeds, but not shared — the failure would only have surfaced at `compose up`. |
+| **0.7.2** | **The preflight checked NOWHERE that it could write.** It only tested hardlinks, non-blocking: a fatal condition came out as a yellow warning, on a line about something else, the install went ahead anyway and died on its very first write with a bare errno. Nothing in `OSError : [Errno 30]` says what to change. `check_writable` is **blocking**, covers both roots, actually tries to write rather than trusting `os.access`, and names the remedy. Reproduced before the fix on a read-only tmpfs mount. |
+| **0.7.2** | `--dry-run` announced "nothing written yet" and **wrote anyway**. Found while verifying the previous fix. The hardlink check does not guess, it tries — but trying needs two real directories, and it left them behind, along with their whole chain of parents. Yet `--dry-run` is PRECISELY the command you run to look without committing: comparing three locations left three trees behind, and a typo created a directory where the typo was. The cleanup removes only what the test created, and only if it stayed empty. |
+| **0.7.2** | A `t()` was missing in `hardlink_supported`, and only one of its three exits: the user's screenshot showed an English table with **one** French line. The translation audit could not see it — it collects the `t("...")` calls present, never an absent one. A test sees it now. |
 | **0.7.1** | **PlugArr did not know a newer version of ITSELF existed.** Reported from use: "I have just run 0.6 and it does not detect 0.7". That was right, and the gap was wide open: 0.6.0 shipped `plugarr upgrade`, which aligns the services' IMAGES on the catalogue **of the running binary** — so it assumed the latest binary had already been downloaded, and nothing anywhere said so. `__version__` was only ever displayed. `upgrade`, `doctor` and the console's "check for updates" button now query the latest release, in **one** request. |
 | **0.7.1** | **The check is a CONVENIENCE, and behaves like one.** It never raises: PlugArr works perfectly offline, and a NAS behind a firewall must not see an error because it cannot reach GitHub. The nuance that matters: a failure yields "we do not know", **never** "no update" — confusing the two would leave someone on a stale version believing they were current. An exhausted hourly quota gets its own message. |
 | **0.7.1** | The message announced "you have 0.7.0" to someone on 0.6.0: `cli` and `autoupdate` each read their own `__version__`. The result now carries the version the comparison was made against, and that is what gets displayed. **Found by reading the message produced**, not by re-reading the code. |

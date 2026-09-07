@@ -230,3 +230,45 @@ def test_aucune_adresse_ne_fuit_dans_le_message(monkeypatch):
         detail = _tunnel(monkeypatch, tunnel, hote).detail
         assert tunnel not in detail
         assert hote not in detail
+
+
+# ------------------------------------------------- l'avertissement « --vpn seul »
+
+
+def test_l_avertissement_vpn_est_sous_l_option_vpn():
+    """Il vivait sous `if reprendre:`, et parlait donc a tort et a travers.
+
+    Consequence mesuree en lancant l'executable : une reinstallation de Sonarr
+    et Jellyfin, sans `--vpn` et sans client de telechargement, affichait
+    « --vpn sans client de telechargement » a quelqu'un qui n'avait jamais
+    ecrit `--vpn`. Et il restait muet dans le seul cas ou il sert, puisque
+    `--repartir-de-zero` sautait le bloc entier.
+
+    Le test porte sur la STRUCTURE et non sur le texte : c'est le placement du
+    message qui etait faux, pas sa formulation.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from plugarr import cli
+
+    arbre = ast.parse(textwrap.dedent(inspect.getsource(cli.install)))
+    marqueur = "--vpn sans client de telechargement"
+
+    def porte(noeud) -> bool:
+        return any(
+            isinstance(n, ast.Constant) and isinstance(n.value, str) and marqueur in n.value
+            for n in ast.walk(noeud)
+        )
+
+    blocs = {
+        noeud.test.id: noeud
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.If) and isinstance(noeud.test, ast.Name)
+    }
+
+    assert porte(blocs["vpn"]), "l'avertissement doit vivre sous `if vpn:`"
+    assert not any(porte(n) for n in blocs["reprendre"].body), (
+        "et surtout pas sous `if reprendre:` : il sortirait a chaque reinstallation"
+    )

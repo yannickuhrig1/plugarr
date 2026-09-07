@@ -422,6 +422,16 @@ def install(
             )
             raise typer.Exit(1)
 
+        # Cet avertissement vivait sous `if reprendre:`, pas ici. Il sortait
+        # donc a CHAQUE reinstallation sans client de telechargement, en
+        # parlant d'une option `--vpn` que personne n'avait passee — et il
+        # restait muet dans le seul cas ou il sert : `--vpn` sans client.
+        if not any(cfg.enabled(sid) for sid in catalog.DOWNLOAD_CLIENTS):
+            console.print(
+                "[yellow]--vpn sans client de telechargement : Gluetun ne protegerait "
+                "rien.[/yellow]"
+            )
+
     # Reprendre AVANT le recapitulatif : c'est lui qui doit montrer ce qui sera
     # reellement pose. Reprendre apres reviendrait a annoncer une chose et a en
     # ecrire une autre.
@@ -476,11 +486,6 @@ def install(
                         + ", ".join(sorted(reprise.services))
                     )
                 console.print(t("[dim]`--repartir-de-zero` ignore tout cela.[/dim]"))
-        if not any(cfg.enabled(sid) for sid in catalog.DOWNLOAD_CLIENTS):
-            console.print(
-                "[yellow]--vpn sans client de telechargement : Gluetun ne protegerait "
-                "rien.[/yellow]"
-            )
 
     if not cfg.ids_certain:
         console.print(

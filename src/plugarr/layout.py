@@ -119,6 +119,16 @@ class ProfileDefaults:
     source: str
 
 
+def _sous_le_dossier_personnel(*parties: str) -> str:
+    """Chemin absolu sous le dossier personnel, resolu MAINTENANT.
+
+    Un `~` laisse tel quel serait ecrit dans `.env` puis dans
+    `docker-compose.yml`, ou Docker ne l'etend pas : il creerait un dossier
+    litteralement nomme `~`. Le defaut doit donc etre absolu des sa lecture.
+    """
+    return str(Path.home().joinpath(*parties))
+
+
 PROFILE_DEFAULTS: dict[PlatformProfile, ProfileDefaults] = {
     PlatformProfile.GENERIC_LINUX: ProfileDefaults(
         config_root="/opt/plugarr/config",
@@ -143,6 +153,27 @@ PROFILE_DEFAULTS: dict[PlatformProfile, ProfileDefaults] = {
         pgid=1000,
         prefer_detection=False,
         source="sans effet sous Docker Desktop : Windows ne porte pas ces droits",
+    ),
+    PlatformProfile.MACOS: ProfileDefaults(
+        # SOUS LE DOSSIER PERSONNEL, et ce n'est pas un gout. Depuis Catalina la
+        # racine de macOS est un volume systeme signe, monte en LECTURE SEULE :
+        # `/srv` n'y existe pas et ne peut pas y etre cree. Sans ce profil, un
+        # utilisateur Mac heritait de `generic-linux` et de son `/srv/data`, donc
+        # de « [Errno 30] Read-only file system: '/srv' » des le premier
+        # lancement — signale par un utilisateur, capture a l'appui.
+        #
+        # `/Users` fait partie des dossiers que Docker Desktop partage par
+        # defaut : le montage fonctionne sans rien avoir a regler. `/opt`, lui,
+        # est bien inscriptible sur macOS mais n'est PAS partage — le dossier se
+        # creerait et le montage echouerait plus tard, ce qui est pire.
+        config_root=_sous_le_dossier_personnel("plugarr", "config"),
+        data_root=_sous_le_dossier_personnel("plugarr", "data"),
+        # Valeurs de repli seulement : le premier compte macOS est 501:20
+        # (staff), mais rien ne le garantit. La detection passe devant.
+        puid=501,
+        pgid=20,
+        prefer_detection=True,
+        source="utilisateur courant",
     ),
     PlatformProfile.UNRAID: ProfileDefaults(
         config_root="/mnt/user/appdata/plugarr",
@@ -252,7 +283,17 @@ def hardlink_supported(data_root: str | Path) -> tuple[bool, str]:
         src_dir.mkdir(parents=True, exist_ok=True)
         dst_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        return False, f"impossible de creer {src_dir} ou {dst_dir}: {exc}"
+        # Le `t()` manquait ici, et lui seul : les deux autres sorties de cette
+        # fonction l'avaient. Un utilisateur macOS en interface anglaise voyait
+        # donc un tableau anglais avec cette ligne — et elle seule — en francais.
+        # L'audit des traductions ne pouvait pas l'attraper : il releve les
+        # `t("...")` presents, jamais un `t()` absent.
+        return False, t(
+            "impossible de creer {source} ou {cible} : {erreur}",
+            source=src_dir,
+            cible=dst_dir,
+            erreur=exc,
+        )
 
     fd, src = tempfile.mkstemp(dir=src_dir, prefix=".plugarr-hardlink-")
     os.close(fd)
@@ -283,8 +324,17 @@ def default_profile() -> PlatformProfile:
     Proposer `generic-linux` a un utilisateur Windows le conduisait droit dans le
     piege : il gardait des chemins Linux, et Docker Desktop les creait a la racine
     du disque courant sans que rien ne le signale.
+
+    macOS avait exactement le meme angle mort, en pire : `generic-linux` propose
+    `/srv/data`, que la racine en lecture seule de macOS REFUSE de creer. Le
+    piege Windows produit un dossier au mauvais endroit ; celui-ci produit un
+    « [Errno 30] Read-only file system » et une installation morte.
     """
-    return PlatformProfile.WINDOWS if sys.platform == "win32" else PlatformProfile.GENERIC_LINUX
+    if sys.platform == "win32":
+        return PlatformProfile.WINDOWS
+    if sys.platform == "darwin":
+        return PlatformProfile.MACOS
+    return PlatformProfile.GENERIC_LINUX
 
 
 def path_warning(path: str) -> str | None:

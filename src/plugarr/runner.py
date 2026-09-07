@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -187,6 +188,67 @@ def check_port_free(port: int, label: str) -> Check:
             "deja utilise. Changez le port de {service} dans stack.yml.",
             service=label,
         ),
+    )
+
+
+def check_writable(path: str | Path, label: str) -> Check:
+    """Peut-on REELLEMENT ecrire a cet endroit ? BLOQUANT.
+
+    Le controle qui manquait, et son absence coutait cher. Le preflight ne
+    testait que les hardlinks, en non bloquant : un chemin impossible a creer
+    s'affichait en AVERTISSEMENT jaune, l'installation partait quand meme, et
+    mourait sur sa toute premiere ecriture avec un errno nu :
+
+        OSError : [Errno 30] Read-only file system: '/srv/data'
+
+    Rien dans ce message ne dit quoi changer. Signale par un utilisateur macOS,
+    dont la racine systeme est en lecture seule et pour qui `/srv` — le defaut
+    de `generic-linux`, seul profil qu'on lui proposait — ne peut pas exister.
+
+    On ne suppose rien, on essaie : `os.access` ment sur plus d'un montage.
+    L'essai porte sur le premier ancetre EXISTANT, et ne laisse rien derriere
+    lui — un preflight, a plus forte raison sous `--dry-run`, ne doit pas
+    creer l'arborescence qu'il controle.
+    """
+    cible = Path(path).expanduser()
+    ancetre = cible
+    while not ancetre.exists() and ancetre != ancetre.parent:
+        ancetre = ancetre.parent
+
+    if not ancetre.is_dir():
+        return Check(
+            label,
+            False,
+            t(
+                "{chemin} n'est pas dans un dossier : {obstacle} existe et n'en "
+                "est pas un.",
+                chemin=cible,
+                obstacle=ancetre,
+            ),
+        )
+
+    try:
+        with tempfile.NamedTemporaryFile(dir=ancetre, prefix=".plugarr-ecriture-"):
+            pass
+    except OSError as exc:
+        return Check(
+            label,
+            False,
+            t(
+                "impossible d'ecrire dans {obstacle} ({erreur}). Choisissez un "
+                "autre emplacement : --data-root et --config-root, ou l'ecran "
+                "des chemins dans l'assistant.",
+                obstacle=ancetre,
+                erreur=exc,
+            ),
+        )
+
+    if ancetre == cible:
+        return Check(label, True, t("existe et est inscriptible"))
+    return Check(
+        label,
+        True,
+        t("sera cree dans {parent}, qui est inscriptible", parent=ancetre),
     )
 
 

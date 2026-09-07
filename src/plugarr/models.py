@@ -28,6 +28,7 @@ class PlatformProfile(str, Enum):
     UNRAID = "unraid"
     SYNOLOGY = "synology"
     WINDOWS = "windows"
+    MACOS = "macos"
 
 
 class ServiceSpec(BaseModel):

@@ -130,6 +130,25 @@ def freeze_environment() -> None:
         for nom, detail, valeurs in SHOWN_DOCKER
     ]
 
+    # Le NUMERO DE VERSION sort du bandeau des captures — et de la seulement.
+    # Il reste affiche sur chaque ecran du produit, ou il a une vraie raison
+    # d'etre : c'est la premiere chose a demander quand quelqu'un signale un
+    # probleme. Mais dans une capture, il ne documente rien et coute cher : la
+    # seule 0.7.2 faisait bouger 18 fichiers et 1609 lignes de SVG, sans qu'un
+    # pixel d'interface ait change. La CI comparant les captures a celles du
+    # depot, chaque version obligeait a les regenerer et a relire un diff
+    # entierement faux.
+    #
+    # On ne le remplace par aucune valeur : ecrire « 0.0.0 » serait montrer une
+    # version qui n'existe pas, et une capture ne doit pas mentir sur le
+    # produit. Les captures ne bougent donc plus que lorsque l'INTERFACE bouge,
+    # ce qui est exactement ce qu'elles sont censees documenter.
+    screens.WizardHeader.__init__ = (  # type: ignore[method-assign]
+        lambda self, subtitle: Static.__init__(
+            self, f"plugarr  —  {subtitle}", id="wizard-header"
+        )
+    )
+
     # Le profil propose suit desormais la machine : sans le figer, la capture de
     # l'ecran des chemins montre « windows » ici et « generic-linux » sur la CI.
     # Le depot documente une installation Linux, c'est donc celle-la qu'on montre.

@@ -74,3 +74,25 @@ def _registre_isole(tmp_path_factory, monkeypatch):
     l'installation d'un autre test — voire celle de l'utilisateur.
     """
     monkeypatch.setenv("PLUGARR_HOME", str(tmp_path_factory.mktemp("plugarr-home")))
+
+
+@pytest.fixture(autouse=True)
+def _francais_par_defaut():
+    """La suite est ecrite en francais : la langue ne doit pas venir de la machine.
+
+    PlugArr suit `LANG` au demarrage, ce qui est le bon comportement pour un
+    utilisateur et le mauvais pour une suite de tests : sur un poste en
+    `en_US`, PlugArr rend l'anglais et **67 tests echouent** en cherchant des
+    phrases francaises. Mesure sur un LXC Debian ; la CI, elle, ne le voyait
+    pas, sa locale etant vide et le repli valant deja le francais.
+
+    Un test qui verifie une phrase doit obtenir la meme reponse partout. Ceux
+    qui portent SUR la langue posent la leur explicitement et restent maitres
+    d'eux-memes.
+    """
+    from plugarr import i18n
+
+    avant = i18n.langue()
+    i18n.utiliser("fr")
+    yield
+    i18n.utiliser(avant)

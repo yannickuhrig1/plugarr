@@ -473,11 +473,16 @@ plugarr.log
 
 #: Combien de `stack.yml` precedents sont gardes a cote du courant.
 #:
-#: Cinq n'est pas un chiffre rond choisi au hasard : c'est ce qu'il faut pour
-#: couvrir une serie de relances rapprochees — le comportement reel de
-#: quelqu'un qui essaie de reparer une installation et relance l'executable
-#: quatre fois de suite.
-HISTORIQUE = 5
+#: Douze, et le chiffre vient d'une mesure, pas d'une intuition. Une SEULE
+#: installation reelle sur une pile de cinq services a consomme QUATRE entrees :
+#: `write_artifacts` est appele trois fois par `install` — avant le pre-semis,
+#: apres l'adoption des cles API, apres le cablage — puis une fois de plus par
+#: `wire`, et chaque passage ecrit un contenu different.
+#:
+#: A cinq, deux installations ratees de suite chassaient donc le mot de passe
+#: qui, lui, fonctionnait : exactement ce que cet historique existe pour
+#: empecher. Douze couvre trois installations completes.
+HISTORIQUE = 12
 
 
 def historique(project_dir: Path) -> list[Path]:

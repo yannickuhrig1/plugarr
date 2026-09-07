@@ -76,22 +76,37 @@ def test_une_traduction_aux_mauvais_champs_ne_tue_pas_l_assistant():
 
 
 @pytest.mark.parametrize(
-    ("environnement", "attendu"),
+    ("environnement", "locale_systeme", "attendu"),
     [
-        ({"LANG": "fr_FR.UTF-8"}, "fr"),
-        ({"LANG": "en_US.UTF-8"}, "en"),
-        ({"LC_ALL": "en_GB.UTF-8", "LANG": "fr_FR.UTF-8"}, "en"),
-        ({"LANG": "de_DE.UTF-8"}, "fr"),
+        ({"LANG": "fr_FR.UTF-8"}, None, "fr"),
+        ({"LANG": "en_US.UTF-8"}, None, "en"),
+        ({"LC_ALL": "en_GB.UTF-8", "LANG": "fr_FR.UTF-8"}, None, "en"),
+        # Une langue que PlugArr ne parle pas : on retombe sur la locale de la
+        # machine, puis sur le francais si elle ne dit rien.
+        ({"LANG": "de_DE.UTF-8"}, None, "fr"),
+        ({"LANG": "de_DE.UTF-8"}, "en_US", "en"),
+        ({"LANG": "de_DE.UTF-8"}, "fr_FR", "fr"),
     ],
 )
-def test_la_langue_par_defaut_vient_du_systeme(monkeypatch, environnement, attendu):
+def test_la_langue_par_defaut_vient_du_systeme(
+    monkeypatch, environnement, locale_systeme, attendu
+):
     """Un francophone trouve PlugArr en francais sans rien regler, tout le monde
     d'autre en anglais. C'est le defaut le plus utile pour un projet qui vise
-    les deux publics."""
+    les deux publics.
+
+    **La locale de la MACHINE est simulee, pas subie.** Le test ne remplacait
+    que les variables d'environnement et laissait `locale.getlocale()` repondre
+    ce qu'il voulait : le cas `de_DE` passait sur un poste francais et echouait
+    sur un poste anglais. Constate en lancant la suite sur un LXC Debian en
+    `en_US`. Un test dont le verdict depend de la machine ne verifie pas le
+    code.
+    """
     for variable in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
         monkeypatch.delenv(variable, raising=False)
     for variable, valeur in environnement.items():
         monkeypatch.setenv(variable, valeur)
+    monkeypatch.setattr(i18n.locale, "getlocale", lambda *a: (locale_systeme, "UTF-8"))
 
     assert i18n.langue_du_systeme() == attendu
 

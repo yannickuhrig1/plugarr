@@ -197,18 +197,26 @@ def _announce_page(path: Path, open_page: bool) -> None:
 
 
 def _traiter_config_existante(
-    cfg: StackConfig, reset: bool | None, *, assume_yes: bool
+    cfg: StackConfig, reset: bool | None, *, assume_yes: bool, repris: set[str] | None = None
 ) -> None:
     """Propose de repartir de zero quand une configuration inutilisable est la.
 
     « Inutilisable » a un sens precis : qBittorrent, Transmission, Jellyfin,
-    autobrr et qui ne stockent leur mot de passe que hache. plugarr ne peut ni
-    le relire ni le reinitialiser, et ceux qu'il annonce seront refuses.
+    autobrr et qui ne stockent leur mot de passe que hache. Il ne se relit pas
+    dans LEUR configuration.
+
+    **Mais il se relit dans la notre.** `repris` nomme les services dont les
+    identifiants viennent d'etre repris du `stack.yml` precedent : pour
+    ceux-la, il n'y a plus rien a craindre ni rien a effacer. L'avertissement
+    sortait quand meme, deux lignes sous « Identifiants conserves », et se
+    contredisait mot pour mot. Constate en lancant une reinstallation reelle
+    sur une pile de cinq services.
 
     Sans reponse explicite, on CONSERVE : effacer la configuration de quelqu'un
     par defaut serait inacceptable.
     """
-    concernes = orchestrator.unusable_configs(cfg)
+    repris = repris or set()
+    concernes = [sid for sid in orchestrator.unusable_configs(cfg) if sid not in repris]
     if not concernes:
         return
 
@@ -438,6 +446,10 @@ def install(
     #
     # Une option donnee a la main prime toujours sur ce qu'on herite, sinon
     # elle serait sans effet et personne ne comprendrait pourquoi.
+    #: Services dont les identifiants viennent d'une installation precedente.
+    #: Ils ne sont plus « inutilisables » : l'avertissement qui suit ne les
+    #: concerne pas, et effacer leur configuration serait une perte seche.
+    services_repris: set[str] = set()
     if reprendre:
         try:
             trouvee = reprise_mod.trouver(project_dir, cfg.config_root)
@@ -472,6 +484,7 @@ def install(
                 if donne
             }
             reprise = reprise_mod.appliquer(cfg, ancienne, imposes=imposes)
+            services_repris = set(reprise.services)
             if reprise:
                 console.print(
                     t("[cyan]Installation existante detectee : reglages repris.[/cyan]")
@@ -510,7 +523,7 @@ def install(
     console.print(f"[dim]plugarr {__version__}[/dim]")
     chemin_journal = journal.start(project_dir, "install")
     journal.config(cfg)
-    _traiter_config_existante(cfg, reset_config, assume_yes=yes)
+    _traiter_config_existante(cfg, reset_config, assume_yes=yes, repris=services_repris)
 
     controles = orchestrator.preflight(cfg, project_dir)
     journal.checks(controles)

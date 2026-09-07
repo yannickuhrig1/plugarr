@@ -1286,14 +1286,20 @@ class SummaryScreen(WizardScreen):
         """Affiche le choix garder / repartir de zero, s'il a lieu d'etre.
 
         Le cas : qBittorrent, Transmission, Jellyfin, autobrr et qui ne stockent
-        leur mot de passe que hache. Une configuration heritee d'une installation
-        precedente ne peut donc pas etre reprise — les identifiants annonces
-        seront refuses, avec des messages incomprehensibles.
+        leur mot de passe que hache. Il ne se relit pas dans LEUR configuration.
+
+        **Sauf s'il vient d'etre repris du stack.yml precedent.** Ces
+        services-la ne sont plus en cause : l'avertissement sortait quand meme,
+        juste sous « Identifiants conserves », et disait le contraire de la
+        ligne du dessus. Constate en lancant une reinstallation reelle sur une
+        pile de cinq services.
 
         Le choix par defaut reste « conserver » : effacer la configuration de
         quelqu'un sans qu'il l'ait demande serait inacceptable.
         """
-        concernes = orchestrator.unusable_configs(cfg)
+        reprise = getattr(self.app, "reprise", None)
+        repris = set(getattr(reprise, "services", ()) or ())
+        concernes = [sid for sid in orchestrator.unusable_configs(cfg) if sid not in repris]
         if not concernes:
             return
 

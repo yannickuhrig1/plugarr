@@ -15,6 +15,8 @@ connaitre. Deux causes distinctes, toutes deux mortelles pour l'utilisateur :
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -164,6 +166,58 @@ def test_refuser_la_reprise_ramene_au_repertoire_de_lancement(tmp_path):
     assert app.reprise_depuis is None
 
 
+def _console_muette(monkeypatch):
+    """Recueille ce que la commande dit, sans salir la console partagee."""
+    from plugarr import cli
+
+    dits: list[str] = []
+    monkeypatch.setattr(
+        cli.console, "print", lambda *a, **k: dits.append(" ".join(str(x) for x in a))
+    )
+    return dits
+
+
+def test_un_service_repris_n_est_plus_signale_comme_perdu(tmp_path, monkeypatch):
+    """L'avertissement se contredisait deux lignes sous « Identifiants conserves ».
+
+    Constate en lancant une reinstallation reelle sur une pile de cinq
+    services : PlugArr annoncait « Credentials kept : jellyfin, qbittorrent »
+    puis, juste dessous, « leurs mots de passe ne se relisent pas : ceux qu'il
+    va annoncer seront refuses ». Les deux ne peuvent pas etre vrais.
+
+    Proposer d'effacer leur configuration etait pire que la contradiction :
+    c'est une perte seche pour reparer quelque chose qui marche.
+    """
+    from plugarr import cli
+
+    cfg = _config(tmp_path)
+    dossier = Path(cfg.config_path("jellyfin"))
+    dossier.mkdir(parents=True)
+    (dossier / "data.db").write_text("x", encoding="utf-8")
+
+    dits = _console_muette(monkeypatch)
+
+    cli._traiter_config_existante(cfg, None, assume_yes=True, repris={"jellyfin"})
+
+    assert dits == [], "un service repris n'a plus rien a signaler"
+
+
+def test_un_service_non_repris_est_toujours_signale(tmp_path, monkeypatch):
+    """Le garde-fou reste entier pour ce qui vient VRAIMENT d'ailleurs."""
+    from plugarr import cli
+
+    cfg = _config(tmp_path)
+    dossier = Path(cfg.config_path("jellyfin"))
+    dossier.mkdir(parents=True)
+    (dossier / "data.db").write_text("x", encoding="utf-8")
+
+    dits = _console_muette(monkeypatch)
+
+    cli._traiter_config_existante(cfg, None, assume_yes=True, repris=set())
+
+    assert any("jellyfin" in ligne for ligne in dits)
+
+
 # ------------------------------------------------------------------ l'historique
 
 
@@ -207,6 +261,31 @@ def test_une_ecriture_identique_ne_chasse_pas_l_historique(tmp_path):
     # Une seule entree par contenu distinct : la version qui portait l'ancien
     # mot de passe est toujours la apres cinq relances.
     assert gardes == ["second", "premier"]
+
+
+def test_l_historique_couvre_plusieurs_installations(tmp_path):
+    """Une installation consomme QUATRE entrees, pas une. Mesure, pas suppose.
+
+    `write_artifacts` est appele trois fois par `install` — avant le pre-semis,
+    apres l'adoption des cles API, apres le cablage — puis une fois de plus par
+    `wire`. Constate sur une installation reelle de cinq services : l'historique
+    est monte a `stack.yml.4` en un seul passage.
+
+    A cinq entrees, deux installations ratees de suite chassaient le mot de
+    passe qui fonctionnait. Cet historique existe precisement pour l'empecher.
+    """
+    projet = tmp_path / "projet"
+    par_installation = 4
+    installations = 3
+    ecritures = par_installation * installations
+
+    for _ in range(ecritures):
+        compose.write_artifacts(_config(tmp_path), projet)
+
+    # La premiere ecriture n'historise rien : il n'y a pas encore de fichier a
+    # preserver. N ecritures laissent donc N-1 entrees.
+    assert compose.HISTORIQUE >= ecritures - 1
+    assert len(compose.historique(projet)) == ecritures - 1
 
 
 def test_l_historique_est_borne(tmp_path):

@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import migrations
+from . import migrations, registre
 from .i18n import t
 from .models import StackConfig
 
@@ -52,14 +52,13 @@ class Reprise:
         return bool(self.reglages or self.services)
 
 
-def precedente(project_dir: Path) -> StackConfig | None:
-    """Configuration de l'installation deja presente, si elle est lisible.
+def _lire(chemin: Path) -> StackConfig | None:
+    """Lit un `stack.yml`, ou rend None s'il n'est pas exploitable.
 
     Un `stack.yml` illisible n'arrete pas une installation neuve : on repart de
     zero, ce qui est exactement ce que l'utilisateur a demande. Une version
     FUTURE, en revanche, remonte — la refuser est tout l'interet du garde-fou.
     """
-    chemin = Path(project_dir) / "stack.yml"
     if not chemin.is_file():
         return None
     try:
@@ -69,6 +68,112 @@ def precedente(project_dir: Path) -> StackConfig | None:
     except (ValueError, OSError):
         return None
     return cfg
+
+
+@dataclass
+class Trouvee:
+    """Une installation precedente, et OU elle a ete trouvee.
+
+    Le chemin compte autant que la configuration : quand il ne designe pas le
+    repertoire courant, l'assistant doit le dire. Reprendre en silence les
+    identifiants d'une installation posee ailleurs, puis ecrire les artefacts
+    ici, donnerait deux piles divergentes portant les memes mots de passe.
+    """
+
+    cfg: StackConfig
+    chemin: Path
+
+    @property
+    def project_dir(self) -> Path:
+        return self.chemin.parent
+
+
+def trouver(project_dir: Path, config_root: str | None = None) -> Trouvee | None:
+    """Cherche l'installation precedente, y compris hors du repertoire courant.
+
+    Deux endroits, dans cet ordre :
+
+    1. `project_dir/stack.yml` — le cas courant, celui de qui relance
+       l'executable la ou il l'a lance la premiere fois ;
+    2. le registre des installations — le cas de qui l'a deplace sur son
+       bureau, ou qui l'a lance depuis `Telechargements` puis depuis ailleurs.
+
+    Le second manquait, et son absence coutait cher : sans `stack.yml` sous la
+    main, PlugArr generait des mots de passe neufs pour des services qui, eux,
+    avaient garde les anciens. L'installation se terminait sur une serie de
+    401 incomprehensibles.
+    """
+    ici = Path(project_dir) / "stack.yml"
+    cfg = _lire(ici)
+    if cfg is not None:
+        return Trouvee(cfg, ici)
+
+    connue = registre.retrouver(config_root)
+    if connue is None:
+        return None
+    ailleurs = _lire(connue.stack)
+    if ailleurs is None:
+        return None
+    return Trouvee(ailleurs, connue.stack)
+
+
+def precedente(project_dir: Path, config_root: str | None = None) -> StackConfig | None:
+    """Configuration de l'installation deja presente, si elle est lisible."""
+    trouvee = trouver(project_dir, config_root)
+    return trouvee.cfg if trouvee else None
+
+
+#: Combien de mots de passe passes on accepte d'essayer contre un service.
+#:
+#: Ce n'est pas une optimisation. qBittorrent bannit une adresse apres CINQ
+#: echecs d'authentification, une heure durant ; rien ne dit que les autres
+#: n'ont pas de garde-fou comparable. Essayer les vingt installations d'un
+#: registre bien rempli transformerait un rattrapage en blocage.
+MAX_ESSAIS = 4
+
+
+def mots_de_passe_connus(
+    project_dir: Path | None, service_id: str, limite: int = MAX_ESSAIS
+) -> list[str]:
+    """Les mots de passe qu'un service a pu recevoir, du plus recent au plus ancien.
+
+    Jellyfin, autobrr et qui ne gardent leur mot de passe que HACHE. Quand
+    celui qu'on s'apprete a annoncer est refuse, le vrai n'est pas perdu pour
+    autant : il est dans un `stack.yml` precedent, garde par la rotation de
+    `compose._historiser`. Les essayer coute quelques requetes et evite d'avoir
+    a effacer la configuration du service.
+
+    L'ordre compte : le plus recent d'abord, parce que c'est le plus probable,
+    et le repertoire courant avant les autres installations de la machine.
+    """
+    from . import compose
+
+    if project_dir is None:
+        return []
+    dossiers: list[Path] = [Path(project_dir)]
+    for connue in registre.lire():
+        if connue.vivante and connue.project_dir not in dossiers:
+            dossiers.append(connue.project_dir)
+
+    trouves: list[str] = []
+    for dossier in dossiers:
+        for chemin in (dossier / "stack.yml", *compose.historique(dossier)):
+            try:
+                cfg = _lire(chemin)
+            except migrations.VersionFuture:
+                # Ici on ne REECRIT rien : on relit un vieux mot de passe. Un
+                # fichier venu d'une version future se saute, il n'arrete pas un
+                # cablage en cours.
+                continue
+            if cfg is None:
+                continue
+            instance = cfg.services.get(service_id)
+            mot = getattr(instance, "password", "") or ""
+            if mot and mot not in trouves:
+                trouves.append(mot)
+                if len(trouves) >= limite:
+                    return trouves
+    return trouves
 
 
 #: Reglages repris tels quels, avec le libelle montre a l'utilisateur. L'ordre

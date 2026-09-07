@@ -430,10 +430,24 @@ def install(
     # elle serait sans effet et personne ne comprendrait pourquoi.
     if reprendre:
         try:
-            ancienne = reprise_mod.precedente(project_dir)
+            trouvee = reprise_mod.trouver(project_dir, cfg.config_root)
         except migrations.VersionFuture as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
+        ancienne = trouvee.cfg if trouvee else None
+        # Une installation retrouvee AILLEURS impose son repertoire : deux
+        # repertoires de projet portant le meme nom de pile Docker se
+        # partagent les memes conteneurs, et le second recree ceux du premier.
+        if trouvee is not None and trouvee.project_dir != Path(project_dir):
+            console.print(
+                t(
+                    "[cyan]Installation precedente retrouvee dans {dossier}.[/cyan]\n"
+                    "[dim]Les fichiers du projet y seront ecrits : une pile Docker "
+                    "ne peut pas vivre dans deux repertoires a la fois.[/dim]",
+                    dossier=trouvee.project_dir,
+                )
+            )
+            project_dir = trouvee.project_dir
         if ancienne is not None:
             imposes = {
                 nom

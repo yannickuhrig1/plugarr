@@ -5,7 +5,7 @@
 Where PlugArr stands, what comes next, and why. Kept up to date after every
 working session.
 
-**Last updated: 7 September 2026** — published version: **0.7.2**
+**Last updated: 7 September 2026** — published version: **0.7.3**
 
 ---
 
@@ -57,7 +57,9 @@ database is not under `CONFIG_ROOT`, and a backup that only archives folders
 would miss it silently. Containers are stopped during the copy: a SQLite database
 copied hot gives a file that looks valid and is unusable in practice. `DATA_ROOT`
 is never touched. `plugarr restore` puts everything back, including somewhere
-else, rewriting the paths.
+else, rewriting the paths. **Both directions also live in the wizard**, on its
+first screen: that is the only place someone who double-clicks the executable
+ever sees, and the installation to archive is found there on its own.
 
 qBittorrent's **RSS reader** is enabled, automatic downloading included. PlugArr
 adds neither feed nor rule: they depend on your trackers, exactly like the
@@ -229,6 +231,9 @@ than deleting them.
 
 | Version | |
 |---|---|
+| **0.7.3** | **PlugArr was destroying the only plaintext copy of its own passwords.** Seen on a real machine: Jellyfin account created on 4 September, `stack.yml` rewritten over the following days, and no way left to get into Jellyfin. Jellyfin, autobrr and qui store their password HASHED only — neither readable back nor resettable without it. It therefore existed in exactly one place, and `write_artifacts` overwrote it **three times per install**, one of them before `docker compose up` even ran: a failed install took away the password that did work. `stack.yml` now rotates over five versions, and wiring TRIES the passwords of past installations before reporting a refusal. |
+| **0.7.3** | **`stack.yml` was only ever looked for in the current directory.** Anyone launching `plugarr.exe` from their desktop after first running it from `Downloads` started from scratch, silently, with fresh passwords their services then refused. The error message pointed at `--project-dir` — a command-line option, useless to someone who never opens a terminal. A per-user registry, holding ONLY paths, finds the original install wherever it is; the wizard says where it found it and writes its files there, because a Docker stack cannot live in two directories at once. |
+| **0.7.3** | **The wizard could restore but not back up.** `plugarr backup` and the admin console had been archiving for a long time; the wizard had not. Yet it is the only thing someone who double-clicks an executable ever sees: they had a backup only if they already had one. The button sits on the first screen, next to "Restore", and the installation to archive is found on its own. Containers are stopped by default: an SQLite database copied live is corrupt without saying so. |
 | **0.7.2** | **macOS had no profile at all, and inherited `/srv/data` — which macOS REFUSES to create.** Reported by a user on r/FrancePirate, screenshot included: `[Errno 30] Read-only file system: '/srv'`. Since Catalina the macOS root is a signed system volume, mounted read-only. `default_profile()` only knew `win32` and "everything else": **every** Mac user hit the wall on first run. The `macos` profile puts its paths under the home directory — the only place that is both writable AND shared by default by Docker Desktop. `/opt` would have been worse than `/srv`: writable, so `mkdir` succeeds, but not shared — the failure would only have surfaced at `compose up`. |
 | **0.7.2** | **The preflight checked NOWHERE that it could write.** It only tested hardlinks, non-blocking: a fatal condition came out as a yellow warning, on a line about something else, the install went ahead anyway and died on its very first write with a bare errno. Nothing in `OSError : [Errno 30]` says what to change. `check_writable` is **blocking**, covers both roots, actually tries to write rather than trusting `os.access`, and names the remedy. Reproduced before the fix on a read-only tmpfs mount. |
 | **0.7.2** | `--dry-run` announced "nothing written yet" and **wrote anyway**. Found while verifying the previous fix. The hardlink check does not guess, it tries — but trying needs two real directories, and it left them behind, along with their whole chain of parents. Yet `--dry-run` is PRECISELY the command you run to look without committing: comparing three locations left three trees behind, and a typo created a directory where the typo was. The cleanup removes only what the test created, and only if it stayed empty. |

@@ -62,3 +62,15 @@ def attendre():
         return False
 
     return _attendre
+
+
+@pytest.fixture(autouse=True)
+def _registre_isole(tmp_path_factory, monkeypatch):
+    """Le registre des installations vit hors du depot : il ne doit pas fuir ici.
+
+    `compose.write_artifacts` note chaque installation dans le dossier PlugArr
+    de l'utilisateur, et `reprise.trouver` l'y relit. Sans isolation, une suite
+    de tests ecrirait dans le registre REEL de la machine, puis y retrouverait
+    l'installation d'un autre test — voire celle de l'utilisateur.
+    """
+    monkeypatch.setenv("PLUGARR_HOME", str(tmp_path_factory.mktemp("plugarr-home")))

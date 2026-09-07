@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, discovery
+from . import catalog, discovery, registre
 from .discovery import Found
 from .i18n import t
 from .models import PlatformProfile, ServiceInstance, StackConfig
@@ -124,6 +124,9 @@ def write_stack(cfg: StackConfig, project_dir: Path) -> Path:
 
     project_dir.mkdir(parents=True, exist_ok=True)
     path = project_dir / "stack.yml"
+    # Une stack adoptee se retrouve comme les autres : c'est ce qui permet de la
+    # reprendre quand l'executable est relance depuis un autre dossier.
+    registre.enregistrer(project_dir, cfg.config_root, cfg.project_name)
     path.write_text(
         t(
             "# Stack ADOPTEE : plugarr cable ces services mais ne les gere pas.\n"

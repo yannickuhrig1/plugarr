@@ -89,13 +89,20 @@ async def test_checking_flood_pulls_in_a_download_client(app):
 
 
 @pytest.mark.asyncio
-async def test_empty_selection_blocks_the_next_button(app):
+async def test_empty_selection_blocks_the_next_button(app, attendre):
+    """Decocher tout desactive le bouton. On attend le RESULTAT, pas une passe.
+
+    Une seule `pilot.pause()` suffisait d'ordinaire, et echouait une fois sur
+    plusieurs dizaines : `value = False` envoie un message, et compter les
+    passes d'evenements revient a parier sur la charge de la machine. C'est
+    exactement ce pour quoi la fixture `attendre` existe.
+    """
     async with app.run_test() as pilot:
         screen = await _goto_services(pilot)
         for box in screen.query(Checkbox):
             box.value = False
-        await pilot.pause()
-        assert screen.query_one("#next", Button).disabled is True
+
+        assert await attendre(pilot, lambda: screen.query_one("#next", Button).disabled)
 
 
 @pytest.mark.asyncio

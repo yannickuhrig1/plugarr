@@ -368,9 +368,9 @@ def check_existing_config(cfg: StackConfig) -> Check:
         False,
         t(
             "{services} ont deja un etat {ou}. Leurs mots de passe ne se "
-            "relisent pas, et ceux que plugarr vient de generer seront "
-            "refuses. Reprenez l'installation d'origine avec --project-dir, "
-            "ou remettez ces services a zero.",
+            "relisent pas chez eux : PlugArr essaiera ceux de ses installations "
+            "precedentes, et ne generera un mot de passe neuf que si aucun ne "
+            "convient.",
             services=", ".join(hachants),
             ou=ou,
         ),

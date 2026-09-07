@@ -5,7 +5,7 @@
 Où en est PlugArr, ce qui vient ensuite, et pourquoi. Tenue à jour à chaque
 séance de travail.
 
-**Dernière mise à jour : 7 septembre 2026** — version publiée : **0.7.2**
+**Dernière mise à jour : 7 septembre 2026** — version publiée : **0.7.3**
 
 ---
 
@@ -59,7 +59,7 @@ base de Silo n'est pas sous `CONFIG_ROOT` et une sauvegarde qui n'archive que
 des dossiers la manquerait en silence. Les conteneurs sont arrêtés pendant la
 copie : une base SQLite copiée à chaud donne un fichier valide en apparence et
 inutilisable en pratique. `DATA_ROOT` n'est jamais touché. `plugarr restore`
-repose le tout, y compris ailleurs, en réécrivant les chemins.
+repose le tout, y compris ailleurs, en réécrivant les chemins. **Les deux sens vivent aussi dans l'assistant**, sur son premier écran : c'est le seul endroit que voit quelqu'un qui double-clique l'exécutable, et l'installation à archiver y est trouvée toute seule.
 
 Le **lecteur RSS de qBittorrent** est activé, téléchargement automatique
 compris. PlugArr n'ajoute ni flux ni règle : ils dépendent de vos traqueurs,
@@ -229,6 +229,9 @@ autres plutôt qu'en les effaçant.
 
 | Version | |
 |---|---|
+| **0.7.3** | **PlugArr detruisait le seul exemplaire en clair de ses propres mots de passe.** Constate sur une machine reelle : compte Jellyfin cree le 4 septembre, `stack.yml` reecrit les jours suivants, et plus aucun moyen d'entrer dans Jellyfin. Jellyfin, autobrr et qui ne gardent leur mot de passe que HACHE — ni relisible, ni reinitialisable sans lui. Il n'existait donc qu'a un endroit, et `write_artifacts` l'ecrasait **trois fois par installation**, dont une avant meme le `docker compose up` : une installation qui echouait emportait le mot de passe qui, lui, fonctionnait. `stack.yml` tourne desormais sur cinq versions, et le cablage ESSAIE les mots de passe des installations passees avant de declarer un refus. |
+| **0.7.3** | **`stack.yml` n'etait cherche que dans le repertoire courant.** Quelqu'un qui lance `plugarr.exe` depuis son bureau apres l'avoir lance depuis `Telechargements` repartait de zero, sans un mot, avec des mots de passe neufs que ses services refusaient ensuite. Le message d'erreur renvoyait vers `--project-dir` — une option en ligne de commande, inutilisable pour qui n'ouvre jamais de terminal. Un registre par utilisateur, qui ne porte QUE des chemins, retrouve l'installation d'origine ou qu'elle soit ; l'assistant dit ou il l'a trouvee et y ecrit ses fichiers, parce qu'une pile Docker ne peut pas vivre dans deux repertoires a la fois. |
+| **0.7.3** | **L'assistant savait restaurer, pas sauvegarder.** `plugarr backup` et la console d'administration archivaient depuis longtemps ; l'assistant, non. Or c'est lui, et lui seul, que voit quelqu'un qui double-clique un executable : il n'avait donc de sauvegarde que s'il en avait deja une. Le bouton est sur le premier ecran, a cote de « Restaurer », et l'installation a archiver est trouvee seule. Les conteneurs sont arretes par defaut : une base SQLite copiee a chaud est corrompue sans le dire. |
 | **0.7.2** | **macOS n'avait aucun profil, et heritait de `/srv/data` — que macOS REFUSE de creer.** Signale par un utilisateur sur r/FrancePirate, capture a l'appui : `[Errno 30] Read-only file system: '/srv'`. Depuis Catalina la racine de macOS est un volume systeme signe, monte en lecture seule. `default_profile()` ne connaissait que `win32` et « tout le reste » : **tout** utilisateur Mac se prenait le mur au premier lancement. Le profil `macos` pose ses chemins sous le dossier personnel — seul endroit a la fois inscriptible ET partage par defaut par Docker Desktop. `/opt` aurait ete pire que `/srv` : inscriptible, donc `mkdir` passe, mais pas partage — l'echec ne serait apparu qu'au `compose up`. |
 | **0.7.2** | **Le preflight ne verifiait NULLE PART qu'on peut ecrire.** Il ne testait que les hardlinks, en non bloquant : une condition fatale sortait en avertissement jaune, sur une ligne qui parle d'autre chose, l'installation partait quand meme et mourait sur sa premiere ecriture avec un errno nu. Rien dans `OSError : [Errno 30]` ne dit quoi changer. `check_writable` est **bloquant**, porte sur les deux racines, essaie reellement d'ecrire plutot que de croire `os.access`, et nomme le remede. Reproduit avant correction sur un tmpfs monte en lecture seule. |
 | **0.7.2** | `--dry-run` annoncait « rien n'a encore ete ecrit » et **ecrivait quand meme**. Trouve en verifiant le correctif precedent. Le controle des hardlinks ne devine pas, il essaie — mais essayer demande deux vrais dossiers, et il les laissait derriere lui avec toute leur chaine de parents. Or `--dry-run` est PRECISEMENT la commande qu'on lance pour regarder sans s'engager : comparer trois emplacements en laissait trois, et une faute de frappe creait une arborescence a l'endroit de la faute. Le menage ne retire que ce que le test a cree, et seulement si c'est reste vide. |

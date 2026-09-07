@@ -15,7 +15,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from . import catalog, journal, langues
+from . import catalog, journal, langues, reprise
 from .clients import recyclarr as recyclarr_cfg
 from .clients.arr import ArrClient
 from .clients.autobrr import AutobrrClient
@@ -85,6 +85,60 @@ class Wirer:
         #: difference entre "le POST est passe" et "la connexion fonctionne".
         self.run_tests = run_tests
         self._arr_cache: dict[str, ArrClient] = {}
+        #: Services dont le mot de passe annonce a ete remplace par celui d'une
+        #: installation precedente. Sert a le DIRE : un mot de passe change en
+        #: silence est un mot de passe qu'on ne retrouvera pas.
+        self.recuperations: list[str] = []
+
+    def _connexion_rattrapee(
+        self, service_id: str, instance: object, connexion: Callable[[str], object]
+    ) -> bool:
+        """Se connecte, en essayant les mots de passe des installations passees.
+
+        **Le cas qu'elle repare.** Jellyfin, autobrr et qui ne gardent leur mot
+        de passe que HACHE. Quand leur configuration vient d'une installation
+        precedente, celui que PlugArr vient de generer est refuse — un HTTP 401
+        que rien n'expliquait, et dont la seule sortie documentee etait
+        d'effacer la configuration du service.
+
+        Or ce mot de passe n'est pas introuvable : c'est PlugArr qui l'a ecrit,
+        il est dans un `stack.yml` precedent. Les essayer coute quelques
+        requetes ; les ignorer coute a l'utilisateur ses bibliotheques.
+
+        Renvoie True si un mot de passe herite a pris la place de celui qui
+        etait annonce. Leve la derniere erreur si aucun ne passe.
+        """
+        annonce = getattr(instance, "password", "") or ""
+        candidats = [annonce]
+        for ancien in reprise.mots_de_passe_connus(self.cfg.project_dir, service_id):
+            if ancien not in candidats:
+                candidats.append(ancien)
+
+        derniere: Exception | None = None
+        for rang, mot in enumerate(candidats):
+            try:
+                connexion(mot)
+            except WiringError as exc:
+                derniere = exc
+                continue
+            if rang == 0:
+                return False
+            # Le mot de passe herite devient celui de la configuration : il sera
+            # repersiste dans stack.yml et .env apres le cablage, et c'est lui
+            # que la page d'acces affichera. Annoncer l'autre serait mentir.
+            instance.password = mot
+            self.recuperations.append(service_id)
+            journal.LOGGER.info(
+                "%s : mot de passe repris d'une installation precedente", service_id
+            )
+            return True
+        if derniere is not None:
+            raise derniere
+        raise WiringError(
+            t("{service} : aucun mot de passe accepte", service=service_id),
+            t("ni celui qui vient d'etre genere, ni ceux des installations precedentes"),
+            t("supprimez la configuration de ce service pour repartir a zero"),
+        )
 
     def _verify(
         self,
@@ -227,12 +281,24 @@ class Wirer:
         dossier = Path(self.cfg.config_path(sid))
         if not (dossier.is_dir() and any(dossier.iterdir())):
             return ""
+        connus = len(reprise.mots_de_passe_connus(self.cfg.project_dir, sid))
+        if connus:
+            return t(
+                "{service} a une configuration prealable dans {dossier}, et son mot "
+                "de passe n'y est stocke que hache. PlugArr a essaye les {nombre} "
+                "mots de passe qu'il connait pour ce service : aucun n'est accepte. "
+                "Supprimez ce dossier pour repartir a zero — vous perdrez ce que ce "
+                "service seul contenait, pas vos medias.",
+                service=sid,
+                dossier=dossier,
+                nombre=connus,
+            )
         return t(
             "{service} a une configuration prealable dans {dossier}. Son mot de "
-            "passe n'y est stocke que hache : plugarr ne peut pas le retrouver, "
-            "et celui qu'il annonce est refuse. Supprimez ce dossier pour "
-            "repartir a zero, ou reprenez l'installation d'origine avec "
-            "--project-dir.",
+            "passe n'y est stocke que hache : PlugArr ne peut pas le retrouver, et "
+            "celui qu'il annonce est refuse. Aucune installation precedente de "
+            "PlugArr n'est connue sur cette machine — ce service a donc ete "
+            "configure autrement. Supprimez ce dossier pour repartir a zero.",
             service=sid,
             dossier=dossier,
         )
@@ -627,7 +693,11 @@ class Wirer:
                 country=choisie.pays,
                 metadata_language=choisie.code,
             )
-            jf.authenticate(inst.username or "plugarr", inst.password or "")
+            repris = self._connexion_rattrapee(
+                "jellyfin",
+                inst,
+                lambda mot: jf.authenticate(inst.username or "plugarr", mot),
+            )
             # La cle API alimente les notifications Sonarr/Radarr -> Jellyfin,
             # qui refusent un apiKey vide. Elle est reinjectee dans la config
             # pour etre persistee dans .env et stack.yml.
@@ -653,6 +723,8 @@ class Wirer:
             analyse = jf.refresh_libraries()
         ok = {name for _a, name, _c, _p in wanted} <= names
         detail = t("assistant execute") if ran else t("assistant deja termine")
+        if repris:
+            detail += t(", mot de passe repris de l'installation precedente")
         detail += f", bibliotheques creees: {', '.join(made) or 'aucune (deja presentes)'}"
         detail += ", analyse lancee" if analyse else ""
         return StepResult(
@@ -1058,7 +1130,11 @@ class Wirer:
         with AutobrrClient(url) as brr:
             brr.wait_ready()
             first = brr.onboard(inst.username or "plugarr", inst.password or "")
-            brr.login(inst.username or "plugarr", inst.password or "")
+            repris = self._connexion_rattrapee(
+                "autobrr",
+                inst,
+                lambda mot: brr.login(inst.username or "plugarr", mot),
+            )
             inst.api_key = brr.ensure_api_key("plugarr")
 
             targets = [
@@ -1084,6 +1160,8 @@ class Wirer:
                         warnings.append(f"{spec.display_name} : {message.splitlines()[0]}")
 
         detail = t("accueil execute") if first else t("utilisateur existant")
+        if repris:
+            detail += t(", mot de passe repris de l'installation precedente")
         detail += t(
             ", declares : {noms}",
             noms=", ".join(created) or t("aucun (deja presents)"),
@@ -1347,7 +1425,12 @@ class Wirer:
         with QuiClient(inst.url(self.cfg.host)) as client:
             client.wait_ready()
             client.setup(inst.username or "plugarr", inst.password or "")
-            client.login(inst.username or "plugarr", inst.password or "")
+            repris = self._connexion_rattrapee(
+                "qui",
+                inst,
+                lambda mot: client.login(inst.username or "plugarr", mot),
+            )
+            rattrapage = t(", mot de passe repris de l'installation precedente") if repris else ""
             created = client.ensure_instance(
                 name=catalog.get("qbittorrent").display_name,
                 host=host,
@@ -1359,7 +1442,7 @@ class Wirer:
                 return StepResult(
                     "qui: instance qBittorrent",
                     ok=True,
-                    detail=t("declaree") if created else t("deja declaree"),
+                    detail=(t("declaree") if created else t("deja declaree")) + rattrapage,
                     created=created,
                 )
 
@@ -1370,6 +1453,7 @@ class Wirer:
                 "qui: instance qBittorrent",
                 ok=linked,
                 detail=(t("declaree") if created else t("deja declaree"))
+                + rattrapage
                 + f", {detail}",
                 created=created,
                 warnings=[]

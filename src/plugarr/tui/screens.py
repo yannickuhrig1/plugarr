@@ -142,6 +142,7 @@ class WelcomeScreen(WizardScreen):
             yield Static(id="docker-status")
             yield Horizontal(
                 Button("Commencer", variant="primary", id="start", disabled=True),
+                Button("Sauvegarder", id="sauvegarder", disabled=True),
                 Button("Restaurer une sauvegarde", id="restaurer", disabled=True),
                 Button("Quitter", id="quit"),
                 classes="actions",
@@ -190,6 +191,7 @@ class WelcomeScreen(WizardScreen):
         self.query_one("#docker-status", Static).update(text)
         self.query_one("#start", Button).disabled = not ok
         self.query_one("#restaurer", Button).disabled = not ok
+        self.query_one("#sauvegarder", Button).disabled = not ok
 
     @on(Button.Pressed, "#start")
     def go(self) -> None:
@@ -198,6 +200,10 @@ class WelcomeScreen(WizardScreen):
     @on(Button.Pressed, "#restaurer")
     def restaurer(self) -> None:
         self.app.push_screen(RestaurationScreen())
+
+    @on(Button.Pressed, "#sauvegarder")
+    def sauvegarder(self) -> None:
+        self.app.push_screen(SauvegardeScreen())
 
     @on(Button.Pressed, "#quit")
     def leave(self) -> None:
@@ -323,6 +329,176 @@ class RestaurationScreen(WizardScreen):
     def retour(self) -> None:
         self.app.pop_screen()
 
+
+class SauvegardeScreen(WizardScreen):
+    """Archive une installation existante, depuis l'assistant.
+
+    L'assistant savait RESTAURER et pas sauvegarder. La dissymetrie est
+    couteuse : la sauvegarde ne vivait que dans `plugarr backup` et dans la
+    console d'administration, c'est-a-dire dans deux endroits qu'un utilisateur
+    qui double-clique un executable n'ouvre jamais. Il n'avait donc de
+    sauvegarde que s'il en avait deja une — exactement au moment ou il n'en a
+    pas.
+
+    Le moment compte aussi. C'est ICI, avant de relancer une installation par
+    dessus une autre, qu'une archive a le plus de valeur : elle porte les
+    indexeurs, les profils et les mots de passe que l'installation qui va
+    suivre pourrait perdre.
+
+    L'installation a archiver est cherchee comme partout ailleurs : le
+    repertoire courant d'abord, le registre des installations ensuite. Sur une
+    machine ou PlugArr a deja tourne, il n'y a donc rien a saisir.
+    """
+
+    SUB_TITLE = "Sauvegarder une installation existante"
+
+    #: L'installation retenue. Poses par `_charger`, declares ici pour qu'un
+    #: clic sur « Sauvegarder » avant le montage ne leve pas d'AttributeError.
+    _cfg = None
+    _project_dir = None
+
+    def content(self) -> ComposeResult:
+        # `VerticalScroll` et non `Vertical` : cet ecran porte deux champs, une
+        # case a cocher et son avertissement. Sur un terminal de 24 lignes, une
+        # colonne fixe couperait le bouton — c'est-a-dire tout l'ecran.
+        with VerticalScroll(id="sauvegarde"):
+            yield Static(
+                "Une archive contient votre [b]stack.yml[/b], la configuration de "
+                "chaque service et les volumes Docker : indexeurs, profils, "
+                "bibliotheques, mots de passe.\n\n"
+                "[b]Vos medias n'y sont pas[/b] : ils pesent des teraoctets et ne "
+                "sont pas une configuration.",
+                id="pitch",
+            )
+            yield Rule()
+            yield Label("Installation a sauvegarder", classes="group-title")
+            yield Input(placeholder="C:/plugarr", id="source")
+            yield Static(id="sauvegarde-source")
+            yield Label("Fichier d'archive a ecrire (.zip)", classes="group-title")
+            yield Input(placeholder="C:/sauvegardes/plugarr-....zip", id="destination")
+            yield Checkbox(
+                "Sauvegarder a chaud, sans arreter les conteneurs",
+                value=False,
+                id="a-chaud",
+            )
+            yield Static(
+                "[dim]Une base SQLite copiee pendant qu'on ecrit dedans donne un "
+                "fichier valide en apparence et inutilisable en pratique. Sans "
+                "cette case, PlugArr arrete les conteneurs le temps de la copie "
+                "puis les redemarre.[/dim]",
+                id="sauvegarde-avertissement",
+            )
+            yield Rule()
+            yield Static(id="sauvegarde-etat")
+            yield Horizontal(
+                Button("Sauvegarder", variant="primary", id="lancer"),
+                Button("Retour", id="retour"),
+                classes="actions",
+            )
+
+    def on_mount(self) -> None:
+        self._charger(Path(self.app.project_dir or "."))
+
+    def _charger(self, depart: Path) -> None:
+        """Trouve l'installation, remplit les champs, ou dit ce qui manque."""
+        from .. import reprise, sauvegarde
+
+        etat = self.query_one("#sauvegarde-source", Static)
+        self._cfg = None
+        self._project_dir = None
+        try:
+            trouvee = reprise.trouver(depart)
+        except Exception as exc:  # noqa: BLE001 - version future, fichier illisible
+            etat.update(f"[red]{exc}[/red]")
+            self.query_one("#lancer", Button).disabled = True
+            return
+        if trouvee is None:
+            etat.update(
+                t(
+                    "[yellow]Aucune installation trouvee.[/yellow]\n[dim]Indiquez "
+                    "ci-dessus le dossier qui contient stack.yml, puis validez avec "
+                    "Entree.[/dim]"
+                )
+            )
+            self.query_one("#lancer", Button).disabled = True
+            return
+
+        self._cfg = trouvee.cfg
+        self._project_dir = trouvee.project_dir
+        self.query_one("#source", Input).value = str(trouvee.project_dir)
+        self.query_one("#destination", Input).value = str(
+            trouvee.project_dir / sauvegarde.nom_par_defaut(trouvee.cfg)
+        )
+        etat.update(
+            t(
+                "[dim]stack.yml : {stack}\nConfigurations : {config}\n"
+                "Services : {services}[/dim]",
+                stack=trouvee.chemin,
+                config=trouvee.cfg.config_root,
+                services=", ".join(sorted(trouvee.cfg.services)),
+            )
+        )
+        self.query_one("#lancer", Button).disabled = False
+
+    @on(Input.Submitted, "#source")
+    def _changer_source(self, event: Input.Submitted) -> None:
+        """Un dossier saisi a la main prime sur celui qui a ete devine."""
+        self._charger(Path(event.value.strip().strip('"') or "."))
+
+    @on(Button.Pressed, "#lancer")
+    def lancer(self) -> None:
+        self._sauvegarder()
+
+    @work(thread=True)
+    def _sauvegarder(self) -> None:
+        from .. import sauvegarde
+
+        etat = self.query_one("#sauvegarde-etat", Static)
+        bouton = self.query_one("#lancer", Button)
+        if self._cfg is None or self._project_dir is None:
+            return
+        destination = Path(self.query_one("#destination", Input).value.strip().strip('"'))
+        a_chaud = self.query_one("#a-chaud", Checkbox).value
+
+        self.app.call_from_thread(setattr, bouton, "disabled", True)
+        self.app.call_from_thread(
+            etat.update,
+            t("Sauvegarde en cours. Ne fermez pas cette fenetre."),
+        )
+        try:
+            rapport = sauvegarde.sauvegarder(
+                self._cfg,
+                self._project_dir,
+                destination,
+                live=a_chaud,
+                on_progress=lambda message: self.app.call_from_thread(
+                    etat.update, f"[dim]{message}[/dim]"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            journal.LOGGER.exception("sauvegarde")
+            self.app.call_from_thread(
+                etat.update, f"[red]{type(exc).__name__} : {exc}[/red]"
+            )
+            self.app.call_from_thread(setattr, bouton, "disabled", False)
+            return
+
+        self.app.call_from_thread(setattr, bouton, "disabled", False)
+        self.app.call_from_thread(
+            etat.update,
+            t(
+                "[green]Sauvegarde terminee.[/green]\n\n{archive}\n"
+                "{taille} Mo, {fichiers} fichiers, volumes : {volumes}",
+                archive=rapport.archive,
+                taille=rapport.mega,
+                fichiers=rapport.fichiers,
+                volumes=", ".join(rapport.volumes) or t("aucun"),
+            ),
+        )
+
+    @on(Button.Pressed, "#retour")
+    def retour(self) -> None:
+        self.app.pop_screen()
 
 # ------------------------------------------------------------------- selection
 
@@ -1074,8 +1250,17 @@ class SummaryScreen(WizardScreen):
         reprise = getattr(self.app, "reprise", None)
         if not reprise:
             return
+        ailleurs = getattr(self.app, "reprise_depuis", None)
         lignes = [
             t("[cyan]Une installation existe deja ici : ses reglages sont repris.[/cyan]")
+            if ailleurs is None
+            else t(
+                "[cyan]Une installation precedente a ete retrouvee dans "
+                "{dossier}[/cyan]\n[dim]Ses reglages sont repris, et c'est la que "
+                "PlugArr ecrira ses fichiers : une pile Docker ne peut pas vivre "
+                "dans deux repertoires a la fois.[/dim]",
+                dossier=ailleurs,
+            )
         ]
         if reprise.reglages:
             lignes.append(f"[dim]{t('Reglages')} : {', '.join(reprise.reglages)}[/dim]")
@@ -1117,9 +1302,9 @@ class SummaryScreen(WizardScreen):
         bandeau.update(
             t(
                 "[yellow]Une configuration existe deja pour {services}.[/yellow]\n"
-                "[dim]Leurs mots de passe n'y sont stockes que haches : plugarr "
-                "ne peut pas les reprendre, et ceux qu'il va vous annoncer seront "
-                "refuses.[/dim]\n",
+                "[dim]Leurs mots de passe n'y sont stockes que haches. PlugArr "
+                "essaiera ceux de ses installations precedentes avant d'en annoncer "
+                "un neuf ; si aucun ne convient, il faudra repartir de zero.[/dim]\n",
                 services=", ".join(concernes),
             )
             + f"[dim]{chemins}[/dim]\n"

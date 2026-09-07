@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from . import catalog
+from . import catalog, registre
 from .i18n import t
 from .models import Category, StackConfig
 
@@ -465,10 +465,80 @@ _GITIGNORE_ENTETE = (
 
 _GITIGNORE = """.env
 stack.yml
+stack.yml.*
 docker-compose.yml
 acces-plugarr.html
 plugarr.log
 """
+
+#: Combien de `stack.yml` precedents sont gardes a cote du courant.
+#:
+#: Cinq n'est pas un chiffre rond choisi au hasard : c'est ce qu'il faut pour
+#: couvrir une serie de relances rapprochees — le comportement reel de
+#: quelqu'un qui essaie de reparer une installation et relance l'executable
+#: quatre fois de suite.
+HISTORIQUE = 5
+
+
+def historique(project_dir: Path) -> list[Path]:
+    """Les `stack.yml` precedents, du plus recent au plus ancien."""
+    return [
+        chemin
+        for chemin in (Path(project_dir) / f"stack.yml.{n}" for n in range(1, HISTORIQUE + 1))
+        if chemin.is_file()
+    ]
+
+
+def _historiser(stack_path: Path) -> None:
+    """Decale stack.yml vers stack.yml.1, .1 vers .2, et ainsi de suite.
+
+    **Pourquoi cela existe.** `write_artifacts` est appele AVANT que le cablage
+    n'ait prouve quoi que ce soit — trois fois par installation, dont une avant
+    meme le `docker compose up`. Le `stack.yml` ecrase portait le seul
+    exemplaire en clair des mots de passe de Jellyfin, autobrr et qui, qui n'en
+    gardent qu'un hachage. Une installation qui echouait detruisait donc le mot
+    de passe qui, lui, fonctionnait — sans retour possible.
+
+    Constate sur une installation reelle : un compte Jellyfin cree le 4
+    septembre, un `stack.yml` reecrit les jours suivants, et plus aucun moyen
+    d'entrer dans Jellyfin autrement qu'en effacant sa configuration.
+
+    Un fichier identique au dernier garde n'est pas historise : sans cela,
+    `plugarr generate` lance trois fois de suite chasserait les cinq versions
+    utiles avec cinq copies de la meme.
+    """
+    if not stack_path.is_file():
+        return
+    try:
+        actuel = stack_path.read_bytes()
+    except OSError:
+        return
+
+    premier = stack_path.with_suffix(stack_path.suffix + ".1")
+    if premier.is_file():
+        try:
+            if premier.read_bytes() == actuel:
+                return
+        except OSError:
+            pass
+
+    for rang in range(HISTORIQUE - 1, 0, -1):
+        source = stack_path.parent / f"{stack_path.name}.{rang}"
+        cible = stack_path.parent / f"{stack_path.name}.{rang + 1}"
+        if not source.is_file():
+            continue
+        try:
+            cible.unlink(missing_ok=True)
+            source.rename(cible)
+        except OSError:
+            # Un fichier verrouille ne doit pas empecher l'installation : on
+            # perd une entree d'historique, pas la configuration courante.
+            continue
+    try:
+        premier.write_bytes(actuel)
+        _restrict(premier)
+    except OSError:
+        return
 
 
 def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
@@ -486,12 +556,22 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     written.append(env_path)
 
     stack_path = target_dir / "stack.yml"
+    # L'historique AVANT l'ecriture : c'est le fichier sur le point d'etre
+    # ecrase qu'il faut garder, pas celui qu'on s'apprete a poser.
+    _historiser(stack_path)
     stack_path.write_text(
         _entete().replace("docker-compose.yml", "stack.yml")
         + yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False),
         encoding="utf-8",
     )
+    _restrict(stack_path)
     written.append(stack_path)
+
+    # Le registre note OU vit cette installation. Sans lui, `stack.yml` n'est
+    # cherche que dans le repertoire courant : lancer l'executable depuis un
+    # autre dossier repartait de zero en silence, avec des mots de passe neufs
+    # que les services refusaient ensuite.
+    registre.enregistrer(target_dir, cfg.config_root, cfg.project_name)
 
     # plugarr annonce a l'utilisateur, en fin d'installation et sur la page
     # d'acces, que ses identifiants sont « deja dans .gitignore ». C'etait faux :

@@ -38,6 +38,11 @@ class PlugArrApp(App):
     def __init__(self, project_dir: Path | None = None) -> None:
         super().__init__()
         self.project_dir = project_dir or Path.cwd()
+        #: Ou l'executable a ete lance. `project_dir` peut basculer vers une
+        #: installation retrouvee ailleurs ; refuser la reprise doit alors
+        #: ramener ici, sinon l'assistant ecrirait dans le repertoire d'une
+        #: installation qu'on vient justement de decider d'ignorer.
+        self._project_dir_lance = self.project_dir
         # Etat collecte au fil des ecrans.
         self.selection: list[str] = []
         self.config_root: str | None = None
@@ -67,6 +72,11 @@ class PlugArrApp(App):
         self.stack_config: StackConfig | None = None
         #: Ce qui a ete repris, pour que le recapitulatif le montre.
         self.reprise: object | None = None
+        #: D'ou vient ce qui a ete repris. Quand ce n'est pas le repertoire
+        #: courant, il FAUT le montrer : l'assistant va ecrire ses artefacts
+        #: la-bas, pas ici, et l'utilisateur doit savoir ou chercher son
+        #: stack.yml.
+        self.reprise_depuis: Path | None = None
         self.results: list[StepResult] = []
         #: Reprendre les reglages d'une installation deja presente. Vrai par
         #: defaut : perdre un VPN en silence est pire que reprendre sans
@@ -126,16 +136,32 @@ class PlugArrApp(App):
         # Ce que l'assistant a REELLEMENT demande prime : la langue, le VPN et
         # les profils viennent de ses ecrans, pas de l'heritage.
         self.reprise = None
+        self.reprise_depuis = None
+        # `build_config` est rejoue quand on bascule le choix de reprise : on
+        # repart du repertoire de lancement, sinon un « repartir de zero »
+        # ecrirait quand meme dans l'installation qu'on vient d'ecarter.
+        self.project_dir = self._project_dir_lance
         if self.reprendre:
-            ancienne = reprise.precedente(self.project_dir)
-            if ancienne is not None:
+            # Le `CONFIG_ROOT` que l'utilisateur vient de saisir sert de cle :
+            # il designe les services en place, et c'est lui qui permet de
+            # retrouver le stack.yml de l'installation d'origine meme si
+            # l'executable a ete lance depuis un autre dossier.
+            trouvee = reprise.trouver(self.project_dir, self.config_root)
+            if trouvee is not None:
                 self.reprise = reprise.appliquer(
                     cfg,
-                    ancienne,
+                    trouvee.cfg,
                     imposes={"vpn", "language", "ui_language", "recyclarr_templates"}
                     if self.vpn.enabled
                     else {"language", "ui_language", "recyclarr_templates"},
                 )
+                # Ecrire ici les artefacts d'une pile installee ailleurs
+                # donnerait DEUX repertoires de projet portant le meme nom de
+                # pile Docker, et le second recreerait les conteneurs du
+                # premier. On suit l'installation d'origine.
+                if trouvee.project_dir != Path(self.project_dir):
+                    self.reprise_depuis = trouvee.project_dir
+                    self.project_dir = trouvee.project_dir
         return cfg
 
 

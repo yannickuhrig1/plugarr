@@ -145,7 +145,11 @@ def test_une_configuration_a_mot_de_passe_hache_est_signalee(tmp_path):
 
     assert not controle.ok
     assert "jellyfin" in controle.detail
-    assert "--project-dir" in controle.detail
+    # Le conseil ne renvoie plus vers `--project-dir` : cette option n'existe
+    # qu'en ligne de commande, et l'assistant retrouve desormais seul le
+    # stack.yml de l'installation d'origine, ou qu'il soit.
+    assert "--project-dir" not in controle.detail
+    assert "installations precedentes" in controle.detail
     # Non bloquant : c'est un avertissement, pas un refus d'installer.
     assert not controle.blocking
 

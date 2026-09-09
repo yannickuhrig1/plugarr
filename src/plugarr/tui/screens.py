@@ -23,8 +23,9 @@ from textual.widgets import (
     SelectionList,
 )
 
-from .. import catalog, i18n, journal, langues, orchestrator, vpnservers
+from .. import catalog, i18n, journal, langues, orchestrator, vpnessai, vpnservers
 from ..clients import recyclarr as recyclarr_cfg
+from ..compose import GLUETUN_TAG
 from ..i18n import t
 from ..layout import (
     PROFILE_DEFAULTS,
@@ -35,6 +36,7 @@ from ..layout import (
 )
 from ..models import VPN_PROVIDERS, Category, PlatformProfile, VpnConfig
 from ..orchestrator import InstallAborted, Progress
+from ..runner import Check
 from ..wiring import StepResult
 
 # Memes widgets que ceux de Textual, mais ils font passer leur libelle par le
@@ -942,6 +944,43 @@ class TemplatesScreen(WizardScreen):
 # ------------------------------------------------------------------------ vpn
 
 
+#: Fournisseur pre-selectionne. ProtonVPN plutot que Mullvad depuis qu'un port
+#: entrant est pose automatiquement : il fait partie des quatre qui le
+#: permettent, il est suisse, et sa reputation ne traine rien.
+#:
+#: Deliberement PAS Private Internet Access, l'autre gros du lot : americain,
+#: donc Five Eyes, et propriete de Kape Technologies, dont le passe publicitaire
+#: est un reproche recurrent. Techniquement irreprochable avec Gluetun, mauvais
+#: comme recommandation implicite.
+DEFAUT_VPN = "protonvpn"
+
+#: Alias que Gluetun accepte mais qui ferait doublon a l'ecran. `pia` reste
+#: valide en ligne de commande et dans un `stack.yml` ecrit a la main.
+ALIAS_VPN = {"pia"}
+
+
+def _fournisseurs_vpn() -> list[tuple[str, str]]:
+    """Les fournisseurs, ceux a port entrant d'abord.
+
+    L'ordre EST une recommandation : le premier de la liste est celui qu'on
+    choisit sans lire. Les quatre qui acceptent les connexions entrantes passent
+    donc devant, avec un libelle qui dit ce qu'ils apportent EN PLUS.
+
+    Surtout pas « recommandes » : les vingt et un autres protegent exactement
+    autant, ils rendent seulement moins joignable. Les classer laisserait croire
+    qu'ils sont un mauvais choix, ce qui serait faux.
+    """
+    tete, reste = [], []
+    for nom in VPN_PROVIDERS:
+        if nom in ALIAS_VPN:
+            continue
+        if vpnservers.port_forward(nom):
+            tete.append((f"{nom}  (connexions entrantes)", nom))
+        else:
+            reste.append((nom, nom))
+    return tete + reste
+
+
 class VpnScreen(WizardScreen):
     """Choix du VPN pour le client de telechargement.
 
@@ -973,8 +1012,8 @@ class VpnScreen(WizardScreen):
             with Vertical(id="vpn-details", classes="hidden"):
                 yield Label("Fournisseur", classes="group-title")
                 yield Select(
-                    [(nom, nom) for nom in VPN_PROVIDERS],
-                    value="mullvad",
+                    _fournisseurs_vpn(),
+                    value=DEFAUT_VPN,
                     allow_blank=False,
                     id="vpn-provider",
                 )
@@ -1008,9 +1047,53 @@ class VpnScreen(WizardScreen):
         yield Static(id="vpn-status")
         yield Horizontal(
             Button("Continuer", variant="primary", id="next"),
+            # L'essai est a cote de « Continuer » et non avant : il est propose,
+            # jamais impose. Une panne passagere chez le fournisseur ne doit pas
+            # empecher d'installer avec une configuration valide.
+            Button("Essayer la configuration", id="vpn-essai"),
             Button("Retour", id="back"),
             classes="actions",
         )
+
+    @on(Button.Pressed, "#vpn-essai")
+    def _on_essai(self) -> None:
+        manques = self.config().missing()
+        status = self.query_one("#vpn-status", Static)
+        if manques:
+            status.update(
+                t("[yellow]Completez d'abord : {manques}[/yellow]", manques=", ".join(manques))
+            )
+            return
+        self.query_one("#vpn-essai", Button).disabled = True
+        status.update(
+            t(
+                "[dim]Tunnel d'essai en cours, jusqu'a {attente} secondes…[/dim]",
+                attente=vpnessai.ATTENTE,
+            )
+        )
+        self._essayer()
+
+    @work(thread=True)
+    def _essayer(self) -> None:
+        """Monte un Gluetun jetable avec ce qui vient d'etre saisi.
+
+        En tache de fond : l'essai peut durer trois quarts de minute, et une
+        interface figee pendant ce temps se lit comme un plantage.
+        """
+        try:
+            controle = vpnessai.essayer(self.config(), f"qmcgaw/gluetun:{GLUETUN_TAG}")
+        except Exception as exc:  # noqa: BLE001 - un essai ne tue pas l'assistant
+            journal.LOGGER.exception("essai VPN")
+            controle = Check("Essai VPN", False, str(exc), blocking=False)
+        self.app.call_from_thread(self._essai_termine, controle)
+
+    def _essai_termine(self, controle: Check) -> None:
+        couleur = "green" if controle.ok else "yellow"
+        self.query_one("#vpn-status", Static).update(f"[{couleur}]{controle.detail}[/{couleur}]")
+        self.query_one("#vpn-essai", Button).disabled = False
+        # Le bouton « Continuer » n'est JAMAIS touche : l'essai informe, il ne
+        # decide pas. Un fournisseur momentanement injoignable rendrait sinon
+        # l'installation impossible.
 
     def on_mount(self) -> None:
         self._peupler_lieux()
@@ -1036,7 +1119,15 @@ class VpnScreen(WizardScreen):
         fournisseur = fournisseur if isinstance(fournisseur, str) else ""
         liste = self.query_one("#vpn-lieux", SelectionList)
         liste.clear_options()
-        choix = vpnservers.choices(fournisseur)
+        # Chez un fournisseur a port entrant, on ne propose QUE les lieux qui en
+        # offrent un. Ce n'est pas du confort : `VPN_PORT_FORWARDING=on` restreint
+        # la selection de Gluetun, qui refuse alors de demarrer s'il ne trouve
+        # aucun serveur — « no server found ... port forwarding only ». Chez PIA,
+        # les 55 regions ecartees sont les 55 regions des Etats-Unis : un
+        # utilisateur americain qui choisit son propre pays obtiendrait une pile
+        # qui ne demarre pas.
+        port_entrant = vpnservers.port_forward(fournisseur)
+        choix = vpnservers.pf_choices(fournisseur) if port_entrant else vpnservers.choices(fournisseur)
         titre = self.query_one("#vpn-lieux-titre", Label)
         note = self.query_one("#vpn-lieux-note", Static)
         if choix:
@@ -1045,14 +1136,26 @@ class VpnScreen(WizardScreen):
             titre.update(
                 f"{vpnservers.label(fournisseur)} " + t("[dim](facultatif)[/dim]")
             )
-            note.update(
-                t(
-                    "[dim]{nombre} choix proposes par Gluetun {version}. "
-                    "Sans selection, le VPN choisit pour vous.[/dim]",
-                    nombre=len(choix),
-                    version=vpnservers.gluetun_version(),
+            if port_entrant:
+                note.update(
+                    t(
+                        "[dim]{nombre} choix qui acceptent les connexions entrantes, "
+                        "sur les {total} de Gluetun {version}. Les autres sont masques : "
+                        "le tunnel ne demarrerait pas.[/dim]",
+                        nombre=len(choix),
+                        total=len(vpnservers.choices(fournisseur)),
+                        version=vpnservers.gluetun_version(),
+                    )
                 )
-            )
+            else:
+                note.update(
+                    t(
+                        "[dim]{nombre} choix proposes par Gluetun {version}. "
+                        "Sans selection, le VPN choisit pour vous.[/dim]",
+                        nombre=len(choix),
+                        version=vpnservers.gluetun_version(),
+                    )
+                )
         else:
             # `custom` n'a par construction aucune liste : l'utilisateur fournit
             # sa propre configuration, Gluetun ne connait aucun serveur pour lui.

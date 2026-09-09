@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, compose, dashboard, seed
+from . import catalog, compose, dashboard, seed, vpncheck
 from .clients.arr import ArrClient
 from .i18n import t
 from .layout import CONTAINER_PATHS, PROFILE_DEFAULTS, create_tree, resolve_ids
@@ -730,6 +730,10 @@ def install(
     if not ok:
         raise InstallAborted(f"docker compose up a echoue : {message}")
 
+    # AVANT d'attendre les clients : un client accroche a une pile reseau morte
+    # ne repondra jamais, et l'attente expirerait sur un diagnostic trompeur.
+    _reparer_piles_orphelines(cfg, runner, on_progress)
+
     wait_for_arrs(cfg, on_progress)
     wait_for_download_clients(cfg, on_progress)
 
@@ -752,8 +756,95 @@ def install(
     lanceur = dashboard.write_admin_launcher(project_dir)
     on_progress(Progress("page d'acces", f"{page} (+ {lanceur.name})"))
 
+    _verdict_vpn(cfg, on_progress)
+
     on_progress(Progress("cablage", "termine", ok=all(r.ok for r in results), done=True))
     return results
+
+
+def _reparer_piles_orphelines(
+    cfg: StackConfig, runner: Compose, on_progress: ProgressFn
+) -> None:
+    """Racroche les clients torrent restes sur la pile reseau d'un Gluetun detruit.
+
+    `vpncheck` savait deja DETECTER une pile orpheline, personne ne la REPARAIT.
+    Une installation qui trouve un client dans cet etat le remet dans le tunnel
+    au lieu de se contenter de le signaler.
+
+    Le cas ne vient PAS d'`install` lui-meme : verifie le 2026-09-08, un
+    `docker compose up -d` complet redemarre bien les dependants du service
+    recree. Il vient d'a cote — une commande docker lancee a la main, une pile
+    heritee d'une configuration precedente — et c'est justement pour ces
+    situations-la qu'`install` doit rendre la main sur une stack saine.
+
+    N'emet un evenement que s'il y avait quelque chose a reparer : annoncer « rien
+    a faire » a chaque installation noierait le cas ou il y a vraiment eu quelque
+    chose a faire.
+    """
+    orphelins = vpncheck.piles_orphelines(cfg)
+    if not orphelins:
+        return
+    rates = []
+    for sid in orphelins:
+        ok, message = runner.recreate(sid)
+        if not ok:
+            rates.append(f"{sid} ({message[:60]})")
+    if rates:
+        on_progress(
+            Progress(
+                "pile reseau",
+                t(
+                    "impossible de rattacher {services} au tunnel : "
+                    "lancez `plugarr doctor`",
+                    services=", ".join(rates),
+                ),
+                ok=False,
+            )
+        )
+        return
+    on_progress(
+        Progress(
+            "pile reseau",
+            t(
+                "{services} etaient accroches a un Gluetun detruit, rattaches au tunnel",
+                services=", ".join(orphelins),
+            ),
+        )
+    )
+
+
+def _verdict_vpn(cfg: StackConfig, on_progress: ProgressFn) -> None:
+    """La protection du trafic torrent, verifiee AVANT que l'utilisateur reparte.
+
+    `vpncheck.verifier()` existait depuis longtemps, mais seuls `doctor` et la
+    console d'administration l'appelaient : on pouvait donc installer une stack
+    avec VPN, lire un rapport final tout vert, et repartir sans que la protection
+    n'ait jamais ete verifiee une seule fois. Il fallait y penser soi-meme.
+    """
+    controles = vpncheck.verifier(cfg)
+    if not controles:
+        return
+
+    # Deux verdicts distincts, et les confondre serait trompeur : un port entrant
+    # desynchronise coute du partage, pas de l'exposition. L'annoncer sous
+    # « protection VPN » ferait craindre une fuite la ou il n'y en a aucune.
+    for phase, retenus in (
+        ("protection VPN", [c for c in controles if not c.name.startswith(vpncheck.PREFIXE_PORT)]),
+        ("port entrant", [c for c in controles if c.name.startswith(vpncheck.PREFIXE_PORT)]),
+    ):
+        if not retenus:
+            continue
+        # Chaque controle porte son nom, y compris quand tout va bien : deux
+        # clients dans le meme tunnel rendent le meme verdict au mot pres, et la
+        # phrase repetee deux fois sans sujet se lit comme un begaiement.
+        echecs = [c for c in retenus if not c.ok]
+        on_progress(
+            Progress(
+                phase,
+                " ; ".join(f"{c.name} : {c.detail}" for c in (echecs or retenus)),
+                ok=not echecs,
+            )
+        )
 
 
 # ------------------------------------------------------------------ inspection
@@ -820,6 +911,12 @@ def expected_events(cfg: StackConfig) -> int:
     ]
     return (
         _FIXED_EVENTS
+        # Le verdict de protection, emis des qu'un client de telechargement
+        # existe, et celui du port entrant quand il y en a un a suivre. La
+        # reparation d'une pile orpheline, elle, n'est PAS comptee : elle
+        # n'arrive presque jamais, et cette valeur reste une estimation.
+        + (1 if vpncheck.clients_torrent(cfg) else 0)
+        + (1 if compose.port_sync_clients(cfg) else 0)
         + len(seeded_services(cfg))
         + len(arrs)
         + len(clients)

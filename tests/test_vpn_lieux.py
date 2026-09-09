@@ -77,8 +77,15 @@ def test_un_fournisseur_inconnu_reste_utilisable():
 def test_le_fichier_est_lisible_et_complet():
     contenu = json.loads(vpnservers.DATA.read_text(encoding="utf-8"))
     for provider, entree in contenu["providers"].items():
-        assert set(entree) == {"env", "values"}, provider
+        # `port_forward` et `pf_values` ne concernent que les fournisseurs a port
+        # entrant, et `pf_values` n'est ecrit que s'il RESTREINT quelque chose :
+        # le recopier a l'identique doublerait le fichier sans rien apprendre.
+        assert set(entree) <= {"env", "values", "port_forward", "pf_values"}, provider
+        assert {"env", "values"} <= set(entree), provider
         assert entree["env"].startswith("SERVER_"), provider
+        if "pf_values" in entree:
+            assert entree.get("port_forward"), provider
+            assert set(entree["pf_values"]) < set(entree["values"]), provider
 
 
 # ------------------------------------------------------------ configuration

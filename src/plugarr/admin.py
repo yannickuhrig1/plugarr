@@ -159,7 +159,7 @@ def doctor_payload(cfg: StackConfig, project_dir: Path) -> dict:
     verifications du meme systeme finiraient par ne plus dire la meme chose.
     """
     controles = [
-        {"name": c.name, "ok": c.ok, "detail": c.detail, "blocking": c.blocking}
+        {"name": c.name, "ok": c.ok, "detail": c.detail, "blocking": c.blocking, "partage": False}
         for c in orchestrator.preflight(cfg, project_dir)
         if c.name not in _AVANT_INSTALLATION
     ]
@@ -180,6 +180,7 @@ def doctor_payload(cfg: StackConfig, project_dir: Path) -> dict:
                         "ok": True,
                         "detail": f"repond, version {client.version}",
                         "blocking": False,
+                        "partage": False,
                     }
                 )
         except Exception as exc:  # noqa: BLE001
@@ -189,16 +190,31 @@ def doctor_payload(cfg: StackConfig, project_dir: Path) -> dict:
                     "ok": False,
                     "detail": str(exc).splitlines()[0],
                     "blocking": False,
+                    "partage": False,
                 }
             )
     # La fuite VPN en DERNIER, pour qu'elle se lise en bas du rapport, la ou
     # l'oeil s'arrete. C'est le controle dont la reponse compte le plus.
+    #
+    # `partage` separe les controles de PORT ENTRANT des autres, exactement
+    # comme l'installation separe ses deux verdicts. Les confondre serait
+    # trompeur : un port desynchronise coute du partage, pas de l'exposition, et
+    # l'annoncer comme « controle en echec » a cote d'un tunnel tombe ferait
+    # craindre une fuite la ou il n'y en a aucune. L'installation faisait deja
+    # cette distinction, la console non — meme systeme, deux verdicts differents.
     controles += [
-        {"name": c.name, "ok": c.ok, "detail": c.detail, "blocking": c.blocking}
+        {
+            "name": c.name,
+            "ok": c.ok,
+            "detail": c.detail,
+            "blocking": c.blocking,
+            "partage": c.name.startswith(vpncheck.PREFIXE_PORT),
+        }
         for c in vpncheck.verifier(cfg)
     ]
-    echecs = sum(1 for c in controles if not c["ok"])
-    return {"checks": controles, "failed": echecs}
+    echecs = sum(1 for c in controles if not c["ok"] and not c["partage"])
+    partage = sum(1 for c in controles if not c["ok"] and c["partage"])
+    return {"checks": controles, "failed": echecs, "partage": partage}
 
 
 def apply_update(

@@ -524,6 +524,71 @@ serveurs par **région**, Perfect Privacy par **ville**. PlugArr pose donc
 `SERVER_COUNTRIES`, `SERVER_REGIONS` ou `SERVER_CITIES` selon le cas. Les listes
 sont extraites de l'image **épinglée** par `python scripts/vpn_countries.py`.
 
+### Le port entrant
+
+Sans port entrant, le client télécharge très bien mais ne partage qu'à moitié :
+seuls les pairs qui acceptent vos connexions sortantes sont joignables. Ce n'est
+**pas** une question de protection — les vingt et un autres fournisseurs
+chiffrent exactement pareil — mais de ratio, et rien ne le signalait.
+
+Quatre fournisseurs sur vingt-cinq le permettent. PlugArr l'active alors sans
+rien demander : c'est un gain sans contrepartie, et le contrôle dira si le port
+est réellement arrivé plutôt que de le supposer.
+
+| Fournisseur | Lieux qui l'offrent | Filtre posé |
+|---|---|---|
+| ProtonVPN | 125 pays sur 127 | `SERVER_COUNTRIES` |
+| Private Internet Access | 110 régions sur 165 | `SERVER_REGIONS` |
+| PrivateVPN | 56 pays sur 56 | `SERVER_COUNTRIES` |
+| Perfect Privacy | 38 villes sur 38 | `SERVER_CITIES` |
+
+Trois conséquences, chacune capable de tout casser en silence.
+
+**L'assistant ne propose que les lieux qui en offrent un.** Ce n'est pas du
+confort d'affichage : `VPN_PORT_FORWARDING=on` restreint la sélection de Gluetun,
+qui refuse alors de **démarrer** s'il ne trouve aucun serveur. Chez Private
+Internet Access, les 55 régions écartées sont les 55 régions des États-Unis : un
+utilisateur américain qui choisit son propre pays obtiendrait une pile morte,
+sans qu'aucun message ne l'explique.
+
+**Le port change tout seul, et le client ne le suit pas.** Constaté sur une
+stack réelle : Proton a changé de port entre deux journées, Gluetun annonçait
+48406, qBittorrent écoutait toujours 45270. Plus aucune connexion entrante, et
+rien nulle part ne le disait. PlugArr dépose donc un script dans
+`${CONFIG_ROOT}/gluetun`, que Gluetun lance à chaque attribution ; il pose le
+nouveau port chez qBittorrent ou Transmission depuis l'intérieur du tunnel.
+
+**Le contrôle relit le port chez le client.** Même exigence que pour le câblage :
+on ne dit pas « j'ai posé le port », on relit la valeur et on la compare. Le
+verdict est **séparé** de celui de la protection, parce qu'un port désynchronisé
+coûte du partage et non de l'exposition — et il n'est jamais bloquant.
+
+Chez ProtonVPN en OpenVPN, le port dépend du suffixe de l'identifiant. Sur le
+compte d'essai il est arrivé **avec et sans** `+pmp`, donc PlugArr ne touche pas
+à ce que vous tapez ; si le contrôle signale qu'aucun port n'est obtenu, il vous
+propose d'ajouter `+pmp` à la fin du vôtre.
+
+### Essayer avant d'installer
+
+L'assistant ne vérifiait que la *présence* des champs : une clé fausse passait
+l'écran sans un mot, et vous découvriez trois écrans plus tard un client
+injoignable, sans lien évident avec ce que vous aviez tapé. Le bouton
+**« Essayer la configuration »** monte un Gluetun jetable avec exactement ce qui
+a été saisi, attend qu'il sorte, et lui demande **par où**. Une adresse publique
+vide vaut échec : avec une clé bien formée mais invalide, WireGuard « s'établit »
+sans qu'aucun paquet ne passe. Le conteneur est supprimé dans tous les cas.
+
+C'est un avertissement, **jamais un blocage** : un essai peut échouer parce qu'un
+serveur du fournisseur est en carafe, et refuser d'installer là-dessus serait
+disproportionné. Trois refus sont pourtant certains, et nommés comme tels : aucun
+serveur ne correspond au lieu demandé, une clé WireGuard illisible, des
+identifiants OpenVPN rejetés.
+
+En **OpenVPN**, comptez plus long. Le protocole patiente soixante secondes fermes
+sur un serveur muet avant d'en changer, là où WireGuard le constate en quelques
+secondes — l'essai lui accorde donc deux minutes au lieu de quarante-cinq
+secondes. Une configuration valide répond toujours en une quinzaine de secondes.
+
 Ce qui compte n'est pas que le tunnel existe, c'est qu'**aucun paquet ne puisse sortir
 sans lui**. Le client de téléchargement ne démarre pas tant que Gluetun n'est pas
 *healthy* — vérifié avec des identifiants volontairement faux : Gluetun reste

@@ -5,7 +5,7 @@
 Where PlugArr stands, what comes next, and why. Kept up to date after every
 working session.
 
-**Last updated: 7 September 2026** — published version: **0.7.3**
+**Last updated: 9 September 2026** — published version: **0.8.0**
 
 ---
 
@@ -40,7 +40,7 @@ English and your media library in French.
 
 A phrase added in French and forgotten in the catalogue breaks nothing: it
 would simply show up in French to someone who asked for English, with no error
-and no warning. `scripts/audit_traductions.py` therefore collects all 540
+and no warning. `scripts/audit_traductions.py` therefore collects all 637
 displayable phrases and **fails if one is missing**, or if the catalogue holds a
 dead entry. It runs in CI.
 
@@ -146,6 +146,9 @@ startup shipped in 0.1.9. What protects you today: `chmod 600`, a generated
 | **Silo** | ✅ shipped in 0.1.11 | Media server with a Jellyfin-compatible API, **marked experimental**. Three containers — `pgvector/pgvector:pg18`, `redis:alpine` and `silo-server`, pinned by digest; Meilisearch is optional and is not installed. Account, **profile** and three libraries created and read back. Two traps measured, not assumed: its database must live in a **Docker volume** (host mount: migrations in **2935 s** against **5 s**), and its database password must be alphanumeric — one `?` in a `postgres://` and the container restarts in a loop. |
 | **UI language** | ✅ shipped in 0.1.11 | Asked once in the wizard, applied everywhere. Every application expresses the same idea differently: Sonarr and Radarr want an integer, **Prowlarr wants the code** (`fr`), Jellyfin a culture and a country, Silo a code **per library**. The table of the *arr's 29 languages is published nowhere: recorded value by value against a Sonarr 4.0.19. An inconsistency was fixed along the way — PlugArr forced French on Jellyfin, hardcoded, and left everything else in English. |
 | **VPN country list** | ✅ shipped in 0.1.8 | Clickable list, extracted from the **pinned** image. Trap found along the way: five providers expose no country — four classify by region, one by city. `SERVER_COUNTRIES` filtered nothing for them. |
+| **VPN incoming port** | ✅ shipped in 0.8.0 | Four providers out of twenty-five allow it, and PlugArr then turns it on without asking: without it the client downloads perfectly well but only shares halfway. Three traps handled, none assumed — the wizard only offers locations that provide one (Gluetun refuses to **start** otherwise: at PIA it is the 55 US regions that are left out), a script follows the port when the provider changes it (Proton went from 45270 to 48406 between two days, with nothing saying so), and the check **reads the value back** from the client. Verdict kept separate from the protection one: a desynchronised port costs sharing, not exposure. |
+| **Try the VPN configuration** | ✅ shipped in 0.8.0 | A throwaway Gluetun brought up with exactly what was entered, before building the stack. It accepts only **proof of exit**: a well-formed but wrong key "establishes" itself without a single packet going through, and Gluetun then returns an empty public address. Never blocking, but three refusals are certain and named — location with no server, unreadable key, rejected OpenVPN credentials. |
+| **OpenVPN mode proven** | ✅ shipped in 0.8.0 | Until then only WireGuard had been tried for real. Verified on 2026-09-09 against a real ProtonVPN account: tunnel in 14 s, incoming port obtained. Three defects found on that occasion — `AUTH_FAILED` was not recognised, the 45 s wait had been measured on WireGuard while OpenVPN waits a firm 60 s on a silent server, and the timeout message spoke of a "key" in a mode where you enter a username. |
 
 ---
 
@@ -195,6 +198,22 @@ a command you have to launch.
 | Rotate an API key, with re-wiring | ✅ |
 | Add a service missing from the installation | ✅ |
 | Automatic startup, without launching a command | ✅ 0.1.9 |
+| Console translated into English | ⬜ to do |
+
+**The live console speaks French, hardcoded.** `_LIVE_SCRIPT`, in
+`dashboard.py`, writes its labels straight into the JavaScript: "en marche",
+"arrêté", "tout est en ordre", "N contrôle(s) en échec". The HTML around it does
+go through the catalogue. Someone who picked English therefore gets an English
+page whose service states and diagnostic summary stay in French.
+
+The safeguard cannot see it: `scripts/audit_traductions.py` collects calls to
+`t()`, and those phrases are not calls. That is exactly why they could pile up
+with nothing reporting it — the mechanism that protects everything else does not
+reach here.
+
+This is not a phrase to wrap but a script to route through the catalogue: the
+labels must be set on the Python side, at render time, then read by the
+JavaScript, or every line added to the script will raise the question again.
 
 **Why not a container.** The question was settled by measuring it. The console
 has to create, start and recreate containers, which means `POST
@@ -231,6 +250,8 @@ than deleting them.
 
 | Version | |
 |---|---|
+| **0.8.0** | **An adopted download client was declared protected without anything having been checked.** The check looked for `{project}-{service}`; an adopted container keeps its own name. It therefore found nothing, `network_mode` returned `None`, and `None` means "container stopped" — that is, a **green** check on a client running outside the tunnel. No path produces that combination today: `adopt` never writes a VPN and `reprise` carries over neither `adopted` nor `container`. But `stack.yml` is read and edited, and a protection verdict must not depend on no path reaching it. The remedy shown now differs too: "regenerate the stack" gets you nowhere for a container `adopt` deliberately generates no compose for. |
+| **0.8.0** | **The console counted a desynchronised port as lost protection.** The installation has always kept its two verdicts apart — a desynchronised port costs sharing, not exposure — but `/api/doctor` added everything into a single "N check(s) failed". Reading that next to a dropped tunnel makes you fear a leak where there is none. The two totals are now separate, and the report writes `PORT` rather than `ECHEC` on those lines. |
 | **0.7.3** | **The `stack.yml` history was four times too short.** Five versions looked like they covered "a run of quick retries"; one real install of five services consumed FOUR on its own. `write_artifacts` is called three times by `install` — before seeding, after adopting the API keys, after wiring — then once more by `wire`. At five entries, two failed installs in a row pushed out the password that did work, which is exactly what this history exists to prevent. Raised to twelve, three full installs. The test locks the ratio between the two. |
 | **0.7.3** | **The hashed-password warning contradicted itself two lines later.** PlugArr announced "Credentials kept: jellyfin, qbittorrent", then "their passwords cannot be read back: the ones it is about to announce will be refused". Both cannot be true, and the second offered to DELETE the configuration of services that were working — a dead loss to fix a problem that did not exist. The check now only looks at services whose credentials were NOT reused. Found by running a real reinstall on a five-service stack, in a Proxmox LXC. |
 | **0.7.3** | A language test returned a different verdict depending on the machine. `test_la_langue_par_defaut_vient_du_systeme` replaced the environment variables but let `locale.getlocale()` answer whatever it liked: the `de_DE` case passed on a French box and failed on an English one. CI never saw it, its locale being empty. The machine locale is now simulated like everything else, and two more cases state what is expected of an English system and of a French one. |

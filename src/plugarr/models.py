@@ -180,6 +180,30 @@ class VpnConfig(BaseModel):
         else:
             env["OPENVPN_USER"] = "${VPN_OPENVPN_USER}"
             env["OPENVPN_PASSWORD"] = "${VPN_OPENVPN_PASS}"
+        # Un port ENTRANT, quand le fournisseur le permet. Sans lui, le client
+        # telecharge tres bien mais ne partage qu'a moitie : seuls les pairs qui
+        # acceptent nos connexions sortantes sont joignables. Ce n'est pas une
+        # question de protection — les vingt et un autres fournisseurs chiffrent
+        # pareil — mais de ratio, et rien ne le signalait.
+        #
+        # Aucune case a cocher : c'est un gain sans contrepartie, et le controle
+        # de `vpncheck` dira si le port est reellement arrive plutot que de le
+        # supposer.
+        #
+        # `PORT_FORWARD_ONLY` n'est deliberement PAS pose : verifie contre l'image
+        # v3.41.3, `VPN_PORT_FORWARDING=on` restreint DEJA la selection aux
+        # serveurs qui l'offrent. Une sonde ProtonVPN sur Macedonia, pays sans
+        # port forwarding, echoue de la meme facon avec ou sans le drapeau :
+        #
+        #   ERROR [vpn] finding a VPN server: filtering servers: no server found:
+        #   ... country macedonia; port forwarding only
+        #
+        # C'est aussi pourquoi l'assistant ne propose que les lieux qui en ont :
+        # Gluetun ne demarre PAS du tout si le lieu choisi n'en offre aucun.
+        from .vpnservers import port_forward
+
+        if port_forward(self.provider):
+            env["VPN_PORT_FORWARDING"] = "on"
         if self.countries:
             # PAS toujours SERVER_COUNTRIES. Cinq fournisseurs n'exposent aucun
             # pays dans les donnees de Gluetun : Windscribe, VyprVPN, Giganews

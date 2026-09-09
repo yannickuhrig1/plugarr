@@ -518,6 +518,108 @@ n'est pas une intention, c'est le comportement observé : `depends_on` sur le he
 de Gluetun ferme la porte avant qu'un seul paquet puisse sortir hors du VPN.
 
 
+## Port entrant et mode OpenVPN — vérifiés le 2026-09-09
+
+Tout ce qui suit a été provoqué contre `qmcgaw/gluetun:v3.41.3`, l'image épinglée,
+avec un compte ProtonVPN réel et des serveurs suisses.
+
+### `VPN_PORT_FORWARDING=on` restreint déjà la sélection
+
+`PORT_FORWARD_ONLY` n'a pas besoin d'être posé. Avec le seul
+`VPN_PORT_FORWARDING=on`, Gluetun affiche dans son résumé de démarrage :
+
+```
+|   |   |   ├── Port forwarding only servers: yes
+```
+
+Une sonde sur un pays sans port entrant échoue donc de la même façon avec ou sans
+le drapeau, et c'est un refus **définitif** :
+
+```
+ERROR [vpn] finding a VPN server: filtering servers: no server found:
+for VPN wireguard; protocol udp; country macedonia; port forwarding only
+```
+
+C'est pourquoi l'assistant n'offre que les lieux qui en proposent un : le tunnel
+ne démarrerait pas du tout.
+
+### Le mode OpenVPN fonctionne, port entrant compris
+
+| | |
+|---|---|
+| Tunnel | établi en **14 s** par `vpnessai`, sortie `Switzerland`, `AS209103 Proton AG` |
+| Port entrant | `[port forwarding] port forwarded is 47878` |
+| Identifiant | tel que saisi, **sans** suffixe |
+
+### Le suffixe `+pmp` n'est pas requis, contrairement à ce que Gluetun laisse croire
+
+Le binaire porte cette chaîne, rendue par
+`internal/provider/protonvpn/portforward.go` :
+
+```
+%w - make sure you have +pmp at the end of your OpenVPN username
+```
+
+Le code **ne vérifie pas** le suffixe : il le suggère après un `connection
+refused` sur NAT-PMP. Les deux variantes ont été essayées sur le même compte, à
+quelques minutes d'intervalle :
+
+| Identifiant | Tunnel | Port obtenu |
+|---|---|---|
+| `<user>` | oui | 47878 |
+| `<user>+pmp` | oui | 44793 |
+
+PlugArr ne modifie donc **pas** l'identifiant saisi : ce serait un pari, et un
+compte où Proton refuserait ce suffixe se retrouverait sans tunnel du tout. Le
+suffixe n'est mentionné que là où il répond à quelque chose — quand le contrôle
+constate qu'aucun port n'a été obtenu.
+
+### OpenVPN est structurellement plus lent à rendre son verdict
+
+Le délai de négociation TLS est de **soixante secondes fermes** par serveur muet,
+décidé par OpenVPN 2.6 et non configurable ici :
+
+```
+WARN [openvpn] TLS Error: TLS key negotiation failed to occur within 60 seconds
+```
+
+Tomber sur un serveur muet n'a rien d'exceptionnel : la liste embarquée dans
+l'image portait l'horodatage **2025-11-18** alors que l'image a été bâtie le
+2026-07-30, et un des neuf serveurs suisses à port entrant (`node-ch-03`,
+`62.169.136.3`) ne répondait plus.
+
+Chronologie mesurée avec un mot de passe volontairement faux :
+
+```
+00 s  premier serveur, muet
+60 s  TLS Error: TLS key negotiation failed
+75 s  second serveur
+93 s  ERROR [openvpn] AUTH: Received control message: AUTH_FAILED
+```
+
+À quarante-cinq secondes, l'essai expirait **avant** que Gluetun ait dit quoi que
+ce soit et rendait « peut-être » sur une réponse certaine. D'où deux minutes en
+OpenVPN, quarante-cinq secondes en WireGuard.
+
+### Une authentification refusée se reconnaît
+
+`AUTH_FAILED` est l'équivalent OpenVPN de la clé WireGuard illisible : le serveur
+a lu les identifiants et les a rejetés, aucune attente ne les rendra bons. Le
+marqueur porte le souligné (`auth_failed`) et non le mot seul, parce que le
+journal contient `AUTH: Received control message` et `Authentication file path`
+dans des lignes parfaitement normales.
+
+### Les artefacts et leurs droits
+
+Relevé sur le banc, et confirmé en cherchant chaque secret dans le texte généré :
+
+| Fichier | Droits | Secrets en clair |
+|---|---|---|
+| `.env` | 600 | tous |
+| `stack.yml` (et son historique) | 600 | tous |
+| `docker-compose.yml` | 644 | **aucun** — il ne porte que des `${REFERENCES}` |
+| `${CONFIG_ROOT}/gluetun/port-sync.sh` | 755 | aucun — il lit `$QBT_PASS` depuis l'environnement |
+
 ## Détection des mises à jour — vérifié le 2026-08-31
 
 ### Deux choses différentes s'appellent « mise à jour »

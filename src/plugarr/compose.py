@@ -119,6 +119,23 @@ def _gluetun_block(cfg: StackConfig) -> dict:
         spec = catalog.get(sid)
         if spec.category is Category.DOWNLOAD:
             ports.append(f"{cfg.services[sid].host_port}:{spec.internal_port}")
+    environnement = cfg.vpn.environment(cfg.timezone)
+
+    # Le port entrant change tout seul, et le client ne le suit pas : il faut
+    # aller le lui poser. Les identifiants passent par le .env, comme ceux de
+    # Flood, plutot qu'en clair dans le compose.
+    clients = port_sync_clients(cfg)
+    if clients:
+        environnement["VPN_PORT_FORWARDING_UP_COMMAND"] = (
+            f"/bin/sh /gluetun/{PORT_SYNC} {{{{PORT}}}}"
+        )
+        if "qbittorrent" in clients:
+            environnement["QBT_USER"] = cfg.services["qbittorrent"].username or ""
+            environnement["QBT_PASS"] = "${QBITTORRENT_PASS}"
+        if "transmission" in clients:
+            environnement["TR_USER"] = cfg.services["transmission"].username or ""
+            environnement["TR_PASS"] = "${TRANSMISSION_PASS}"
+
     return {
         "image": f"qmcgaw/gluetun:{GLUETUN_TAG}",
         "container_name": f"{cfg.project_name}-gluetun",
@@ -126,11 +143,111 @@ def _gluetun_block(cfg: StackConfig) -> dict:
         "labels": {"plugarr.managed": "true", "plugarr.service": "gluetun"},
         "cap_add": ["NET_ADMIN"],
         "devices": ["/dev/net/tun:/dev/net/tun"],
-        "environment": cfg.vpn.environment(cfg.timezone),
+        "environment": environnement,
         "volumes": ["${CONFIG_ROOT}/gluetun:/gluetun"],
         "ports": ports,
         "networks": [NETWORK_NAME],
     }
+
+
+#: Nom du script de synchronisation, depose dans `${CONFIG_ROOT}/gluetun` — le
+#: seul dossier que Gluetun monte deja. Un script plutot qu'une commande en
+#: ligne : le YAML devrait sinon imbriquer trois niveaux de guillemets (shell,
+#: JSON et interpolation Compose, ou `$` doit s'ecrire `$$`), et le resultat
+#: serait illisible et impossible a deboguer.
+PORT_SYNC = "port-sync.sh"
+
+
+def port_sync_clients(cfg: StackConfig) -> list[str]:
+    """Clients dont le port d'ecoute doit suivre celui que le VPN attribue.
+
+    Vide si le fournisseur n'offre pas de port entrant : il n'y a alors aucun
+    port a suivre. Les services adoptes sont exclus, leurs identifiants ne nous
+    appartiennent pas.
+    """
+    from .vpnservers import port_forward
+
+    if not cfg.vpn.enabled or not port_forward(cfg.vpn.provider):
+        return []
+    return [
+        sid
+        for sid in ("qbittorrent", "transmission")
+        if cfg.enabled(sid) and not cfg.services[sid].adopted
+    ]
+
+
+def render_port_sync(cfg: StackConfig) -> str:
+    """Le script que Gluetun lance a chaque obtention de port.
+
+    Le probleme, mesure sur une stack reelle : Proton a change de port tout seul
+    entre deux journees, Gluetun annoncait 48406, qBittorrent ecoutait toujours
+    45270. Plus aucune connexion entrante, et rien nulle part ne le disait.
+
+    Il tourne DANS Gluetun, qui partage sa pile reseau avec les clients : leurs
+    interfaces sont donc joignables en `127.0.0.1`, sans conteneur tiers ni
+    volume partage. C'est ce qui permet de se passer d'un mod externe telecharge
+    a chaque demarrage.
+
+    La boucle d'attente n'est pas une precaution de principe : au demarrage, le
+    port peut arriver AVANT que l'interface du client n'ecoute. Sans elle, la
+    pose echouerait et le port resterait faux jusqu'au renouvellement du bail.
+    """
+    lignes = [
+        "#!/bin/sh",
+        _entete().replace("docker-compose.yml", "stack.yml").rstrip("\n"),
+        "",
+        'PORT="$1"',
+        '[ -n "$PORT" ] || exit 0',
+        "",
+        "# Le client peut ne pas encore ecouter quand le port arrive.",
+        "essayer() {",
+        "  i=0",
+        "  while [ $i -lt 30 ]; do",
+        '    if "$@" 2>/dev/null; then return 0; fi',
+        "    i=$((i + 1))",
+        "    sleep 2",
+        "  done",
+        "  return 1",
+        "}",
+        "",
+    ]
+
+    clients = port_sync_clients(cfg)
+    if "qbittorrent" in clients:
+        port = catalog.get("qbittorrent").internal_port
+        lignes += [
+            "poser_qbittorrent() {",
+            '  wget -q --save-cookies "$CK" --keep-session-cookies \\',
+            '    --post-data "username=$QBT_USER&password=$QBT_PASS" \\',
+            f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/auth/login" || return 1',
+            '  wget -q --load-cookies "$CK" \\',
+            '    --post-data "json={\\"listen_port\\":$PORT}" \\',
+            f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/app/setPreferences"',
+            "}",
+            'CK=/tmp/plugarr-qbittorrent.cookies',
+            'essayer poser_qbittorrent && echo "qbittorrent ecoute sur $PORT"',
+            "",
+        ]
+
+    if "transmission" in clients:
+        port = catalog.get("transmission").internal_port
+        lignes += [
+            f'RPC="http://127.0.0.1:{port}/transmission/rpc"',
+            "poser_transmission() {",
+            "  # Transmission repond 409 au premier appel en donnant la session",
+            "  # a reutiliser. Sans cet aller-retour, tout POST est refuse.",
+            '  SID=$(wget -S -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" \\',
+            '        "$RPC" 2>&1 | sed -n "s/.*X-Transmission-Session-Id: *//p" | tr -d "\\r")',
+            '  [ -n "$SID" ] || return 1',
+            '  wget -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" \\',
+            '    --header="X-Transmission-Session-Id: $SID" \\',
+            '    --post-data "{\\"method\\":\\"session-set\\",\\"arguments\\":{\\"peer-port\\":$PORT}}" \\',
+            '    "$RPC"',
+            "}",
+            'essayer poser_transmission && echo "transmission ecoute sur $PORT"',
+            "",
+        ]
+    return "\n".join(lignes)
 
 
 def _service_block(cfg: StackConfig, service_id: str) -> dict:
@@ -588,6 +705,22 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     if not gitignore.exists():
         gitignore.write_text(t(_GITIGNORE_ENTETE) + _GITIGNORE, encoding="utf-8")
         written.append(gitignore)
+
+    # Le script de synchronisation du port entrant. Il va dans CONFIG_ROOT et non
+    # a cote du compose : c'est le seul dossier que Gluetun monte deja, et lui en
+    # monter un second pour un fichier serait un mecanisme de plus a expliquer.
+    if port_sync_clients(cfg):
+        gluetun_dir = Path(cfg.config_root) / "gluetun"
+        gluetun_dir.mkdir(parents=True, exist_ok=True)
+        script = gluetun_dir / PORT_SYNC
+        script.write_text(render_port_sync(cfg), encoding="utf-8", newline="\n")
+        # Le conteneur le lance par `sh script`, donc le bit d'execution n'est pas
+        # requis. On le pose quand meme, pour qui l'essaierait a la main.
+        try:
+            script.chmod(0o755)
+        except (OSError, NotImplementedError):
+            pass
+        written.append(script)
     return written
 
 

@@ -512,6 +512,108 @@ is the observed behaviour: `depends_on` on Gluetun's healthcheck closes the door
 single packet can leave outside the VPN.
 
 
+## Incoming port and OpenVPN mode — verified on 2026-09-09
+
+Everything below was provoked against `qmcgaw/gluetun:v3.41.3`, the pinned image,
+with a real ProtonVPN account and Swiss servers.
+
+### `VPN_PORT_FORWARDING=on` already restricts the selection
+
+`PORT_FORWARD_ONLY` does not need to be set. With `VPN_PORT_FORWARDING=on` alone,
+Gluetun prints in its startup summary:
+
+```
+|   |   |   ├── Port forwarding only servers: yes
+```
+
+A probe on a country without an incoming port therefore fails the same way with
+or without the flag, and it is a **definitive** refusal:
+
+```
+ERROR [vpn] finding a VPN server: filtering servers: no server found:
+for VPN wireguard; protocol udp; country macedonia; port forwarding only
+```
+
+That is why the wizard only offers locations that provide one: the tunnel would
+not start at all.
+
+### OpenVPN mode works, incoming port included
+
+| | |
+|---|---|
+| Tunnel | established in **14 s** by `vpnessai`, exit `Switzerland`, `AS209103 Proton AG` |
+| Incoming port | `[port forwarding] port forwarded is 47878` |
+| Username | as entered, **without** any suffix |
+
+### The `+pmp` suffix is not required, contrary to what Gluetun suggests
+
+The binary carries this string, emitted by
+`internal/provider/protonvpn/portforward.go`:
+
+```
+%w - make sure you have +pmp at the end of your OpenVPN username
+```
+
+The code does **not** check the suffix: it suggests it after a `connection
+refused` on NAT-PMP. Both variants were tried on the same account, minutes apart:
+
+| Username | Tunnel | Port obtained |
+|---|---|---|
+| `<user>` | yes | 47878 |
+| `<user>+pmp` | yes | 44793 |
+
+PlugArr therefore does **not** alter the username you entered: that would be a
+bet, and an account where Proton rejected the suffix would end up with no tunnel
+at all. The suffix is only mentioned where it answers something — when the check
+finds that no port was obtained.
+
+### OpenVPN is structurally slower to reach a verdict
+
+The TLS negotiation timeout is a firm **sixty seconds** per silent server,
+decided by OpenVPN 2.6 and not configurable here:
+
+```
+WARN [openvpn] TLS Error: TLS key negotiation failed to occur within 60 seconds
+```
+
+Hitting a silent server is not exceptional: the server list bundled in the image
+was stamped **2025-11-18** while the image was built on 2026-07-30, and one of
+the nine Swiss port-forwarding servers (`node-ch-03`, `62.169.136.3`) no longer
+answered.
+
+Timeline measured with a deliberately wrong password:
+
+```
+00 s  first server, silent
+60 s  TLS Error: TLS key negotiation failed
+75 s  second server
+93 s  ERROR [openvpn] AUTH: Received control message: AUTH_FAILED
+```
+
+At forty-five seconds the trial expired **before** Gluetun had said anything, and
+returned "maybe" on a certain answer. Hence two minutes over OpenVPN, forty-five
+seconds over WireGuard.
+
+### A rejected authentication is recognisable
+
+`AUTH_FAILED` is the OpenVPN equivalent of an unreadable WireGuard key: the
+server read the credentials and rejected them, and no amount of waiting will make
+them good. The marker carries the underscore (`auth_failed`) rather than the word
+alone, because the log contains `AUTH: Received control message` and
+`Authentication file path` in perfectly normal lines.
+
+### The artefacts and their permissions
+
+Read off the test bench, and confirmed by searching for every secret in the
+generated text:
+
+| File | Mode | Secrets in clear |
+|---|---|---|
+| `.env` | 600 | all of them |
+| `stack.yml` (and its history) | 600 | all of them |
+| `docker-compose.yml` | 644 | **none** — it only carries `${REFERENCES}` |
+| `${CONFIG_ROOT}/gluetun/port-sync.sh` | 755 | none — it reads `$QBT_PASS` from the environment |
+
 ## Update detection — verified on 2026-08-31
 
 ### Two different things are called "an update"

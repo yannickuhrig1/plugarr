@@ -63,3 +63,33 @@ def label(provider: str) -> str:
         "SERVER_REGIONS": "Regions souhaitees",
         "SERVER_CITIES": "Villes souhaitees",
     }.get(filter_env(provider), "Pays souhaites")
+
+
+def port_forward(provider: str) -> bool:
+    """Gluetun sait-il obtenir un port entrant chez ce fournisseur ?
+
+    Quatre le permettent sur vingt-cinq. Ce n'est PAS une question de protection :
+    les vingt et un autres chiffrent exactement pareil. Un port entrant rend
+    seulement joignable, ce qui change le partage et le ratio, pas l'exposition.
+    """
+    return bool(_tables()[1].get(provider.strip().lower(), {}).get("port_forward"))
+
+
+def pf_choices(provider: str) -> list[str]:
+    """Lieux qui permettent reellement un port entrant chez ce fournisseur.
+
+    Tous les serveurs ne l'offrent pas, et le lieu choisi decide donc si un port
+    arrivera un jour. Releve contre l'image epinglee, l'ecart n'a rien d'anecdotique :
+
+        private internet access   110 regions sur 165
+        protonvpn                 125 pays sur 127
+
+    Chez PIA, les 55 regions ecartees sont les 55 regions des Etats-Unis. Un
+    utilisateur qui choisit son propre pays n'obtiendrait jamais de port, sans
+    qu'aucun message ne l'explique.
+
+    Renvoie la liste complete quand le fournisseur ne distingue pas ses serveurs :
+    chez Perfect Privacy et PrivateVPN, le port ne depend pas du lieu.
+    """
+    table = _tables()[1].get(provider.strip().lower(), {})
+    return list(table.get("pf_values") or table.get("values", []))

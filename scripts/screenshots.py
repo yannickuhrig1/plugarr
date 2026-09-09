@@ -172,6 +172,24 @@ def freeze_environment() -> None:
     # vierge — c'est celui que decrit le depot.
     screens.orchestrator.unusable_configs = lambda cfg: []  # type: ignore[assignment]
 
+    # L'assistant CHERCHE une installation precedente, dans le repertoire de
+    # lancement ET dans le registre de l'utilisateur. La capture dependait donc
+    # des piles reellement installees sur la machine qui la produit, et la
+    # difference n'etait pas cosmetique :
+    #
+    # - le recapitulatif affichait « Une installation precedente a ete retrouvee
+    #   dans C:\\Users\\...\\Downloads », chemin local parti dans un SVG publie ;
+    # - la reprise reprend le FUSEAU HORAIRE de cette installation, ce qui
+    #   changeait une deuxieme ligne de la capture pour la meme cause.
+    #
+    # La CI, elle, tourne sur une machine vierge : les captures ne pouvaient donc
+    # PAS coincider, et le controle « les captures sont a jour » echouait sans
+    # qu'aucun pixel d'interface ait bouge. On montre le cas nominal, comme pour
+    # `unusable_configs` juste au-dessus.
+    from plugarr.tui import app as tui_app
+
+    tui_app.reprise.trouver = lambda project_dir, config_root: None  # type: ignore[assignment]
+
 
 def fake_steps() -> list[StepResult]:
     """Resultats fictifs pour illustrer le rapport sans rien demarrer.

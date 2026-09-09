@@ -68,6 +68,234 @@ def clients_torrent(cfg: StackConfig) -> list[str]:
     ]
 
 
+def nom_conteneur(cfg: StackConfig, sid: str) -> str:
+    """Le nom REEL du conteneur de ce service.
+
+    Un service ADOPTE garde le sien : plugarr ne l'a ni cree ni renomme. Chercher
+    `{projet}-{service}` pour lui ne trouvait rien, `network_mode` rendait `None`,
+    et `None` veut dire « conteneur arrete » — donc un controle **vert** sur un
+    client qui tourne, hors du tunnel, et telecharge sur l'adresse de la maison.
+    Le faux OK exact que ce module existe pour empecher.
+
+    Aucun chemin ne produit aujourd'hui cette combinaison : `adopt` n'ecrit
+    jamais de VPN, et `reprise` ne reporte ni `adopted` ni `container`. Mais
+    `stack.yml` se lit et s'edite, et un verdict de protection ne doit pas
+    dependre de ce qu'aucun chemin ne l'atteigne.
+    """
+    inst = cfg.services.get(sid)
+    if inst is not None and inst.adopted and inst.container:
+        return inst.container
+    return f"{cfg.project_name}-{sid}"
+
+
+def piles_orphelines(cfg: StackConfig) -> list[str]:
+    """Clients torrent rattaches a une pile reseau qui n'est plus celle de Gluetun.
+
+    Recreer Gluetun SEUL laisse les clients accroches au conteneur DETRUIT :
+
+        docker compose up -d --no-deps gluetun
+
+    Reproduit le 2026-09-07 sur la stack d'essai, et le resultat est trompeur au
+    possible :
+
+        docker ps           -> plugarr-qbittorrent   Up 5 hours
+        ip -o addr show     -> 1: lo    inet 127.0.0.1/8
+        ip route            -> (rien)
+
+    Aucune fuite, le garde-fou tient : sans interface ni route, rien ne sort. Mais
+    le client est mort en silence, affiche « Up », et son interface web ne repond
+    plus sans qu'un seul message ne l'explique.
+
+    Ce que ce controle n'est PAS : un rattrapage d'`install`. Verifie le
+    2026-09-08, un `docker compose up -d` complet propage bien la recreation —
+    Gluetun recree, qBittorrent redemarre onze secondes plus tard dans la
+    nouvelle pile. Seule la recreation d'un service SEUL laisse des orphelins, et
+    plugarr ne recree jamais Gluetun de cette facon.
+
+    Il garde donc la porte d'a cote, qui reste grande ouverte : un utilisateur
+    qui lance lui-meme une commande docker, ou l'incident du 2026-09-03 ou des
+    clients avaient ete recrees sur le reseau nu. Toute pile differente de celle
+    de Gluetun est signalee, qu'elle soit morte ou qu'elle soit une vraie fuite.
+
+    Les services ADOPTES sont exclus : ils n'ont pas de bloc compose, et les
+    recreer echouerait — ils ne nous appartiennent pas.
+    """
+    if not cfg.vpn.enabled:
+        return []
+    gluetun = container_id(f"{cfg.project_name}-gluetun")
+    if not gluetun:
+        return []
+    attendu = f"container:{gluetun}"
+    orphelins = []
+    for sid in clients_torrent(cfg):
+        if cfg.services[sid].adopted:
+            continue
+        mode = network_mode(f"{cfg.project_name}-{sid}")
+        # None = conteneur absent ou arrete : ce n'est pas une pile orpheline,
+        # et le demarrage s'en chargera.
+        if mode is not None and mode != attendu:
+            orphelins.append(sid)
+    return orphelins
+
+
+#: Relit, DEPUIS Gluetun, le port entrant annonce et celui que chaque client
+#: ecoute vraiment. Depuis Gluetun parce qu'il est le seul a voir le serveur de
+#: controle en `127.0.0.1`, et parce qu'il porte deja les identifiants des
+#: clients : le controle n'a aucun secret a transporter.
+#:
+#: `sed` plutot qu'un analyseur JSON : l'image de Gluetun n'embarque ni python ni
+#: jq, et les trois valeurs cherchees sont des entiers.
+_LECTURE_PORTS = r"""
+A=$(wget -qO- http://127.0.0.1:8000/v1/portforward 2>/dev/null \
+    | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
+echo "annonce=${A:-0}"
+if [ -n "$QBT_USER" ]; then
+  CK=/tmp/plugarr-controle.cookies
+  if wget -q --save-cookies "$CK" --keep-session-cookies \
+       --post-data "username=$QBT_USER&password=$QBT_PASS" \
+       -O /dev/null "http://127.0.0.1:%(qbittorrent)s/api/v2/auth/login" 2>/dev/null; then
+    Q=$(wget -q --load-cookies "$CK" -O - \
+        "http://127.0.0.1:%(qbittorrent)s/api/v2/app/preferences" 2>/dev/null \
+        | sed -n 's/.*"listen_port":\([0-9]*\).*/\1/p')
+    echo "qbittorrent=${Q:-0}"
+  fi
+fi
+if [ -n "$TR_USER" ]; then
+  RPC="http://127.0.0.1:%(transmission)s/transmission/rpc"
+  S=$(wget -S -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" "$RPC" 2>&1 \
+      | sed -n 's/.*X-Transmission-Session-Id: *//p' | tr -d '\r')
+  if [ -n "$S" ]; then
+    T=$(wget -q -O - --user="$TR_USER" --password="$TR_PASS" \
+        --header="X-Transmission-Session-Id: $S" \
+        --post-data '{"method":"session-get","fields":["peer-port"]}' "$RPC" 2>/dev/null \
+        | sed -n 's/.*"peer-port":\([0-9]*\).*/\1/p')
+    echo "transmission=${T:-0}"
+  fi
+fi
+"""
+
+
+def ports_entrants(cfg: StackConfig) -> dict[str, int]:
+    """Port annonce par Gluetun et port reellement ecoute par chaque client.
+
+    Vide si rien n'est a synchroniser. `annonce` vaut 0 quand aucun port n'a ete
+    obtenu : c'est le sentinel de Gluetun lui-meme, verifie contre la v3.41.3, et
+    il distingue « pas de port » de « port different ».
+    """
+    from .compose import port_sync_clients
+
+    clients = port_sync_clients(cfg)
+    if not clients:
+        return {}
+    script = _LECTURE_PORTS % {
+        sid: catalog.get(sid).internal_port for sid in ("qbittorrent", "transmission")
+    }
+    ok, sortie = exec_in(f"{cfg.project_name}-gluetun", ["sh", "-c", script])
+    if not ok:
+        return {}
+    releve = {}
+    for ligne in sortie.splitlines():
+        cle, _, valeur = ligne.partition("=")
+        if valeur.strip().isdigit():
+            releve[cle.strip()] = int(valeur)
+    return releve
+
+
+#: Prefixe des controles de port entrant. Il les rend reconnaissables dans la
+#: liste plate que rend `verifier`, pour que le rapport d'installation ne range
+#: PAS un port desynchronise sous « protection VPN » : ce serait alarmer sur
+#: l'exposition alors qu'il ne s'agit que de partage.
+PREFIXE_PORT = "Port entrant"
+
+
+def _piste_pmp(cfg: StackConfig) -> str:
+    """La piste `+pmp`, et SEULEMENT quand le port a reellement manque.
+
+    Chez ProtonVPN, le suffixe de l'identifiant OpenVPN active des options de
+    session. Le fichier `.ovpn` telecharge chez eux documente `+f1`, `+f2` et
+    `+nr` en commentaire, jamais le quatrieme. Gluetun, lui, le nomme, mais dans
+    son propre journal et seulement apres un refus — v3.41.3,
+    `internal/provider/protonvpn/portforward.go` :
+
+        %w - make sure you have +pmp at the end of your OpenVPN username
+
+    **On ne l'ajoute PAS d'office.** Essai du 2026-09-09 sur un compte reel, en
+    OpenVPN vers la Suisse : le port entrant est arrive dans les DEUX cas, avec
+    et sans le suffixe. Modifier l'identifiant que quelqu'un a tape pour corriger
+    un probleme qu'il n'a pas serait un pari, pas une correction — et un compte
+    ou Proton refuserait ce suffixe se retrouverait sans tunnel du tout.
+
+    On le mentionne donc la ou il repond a quelque chose : le port a manque,
+    voici la seule piste connue, a l'utilisateur de juger.
+    """
+    if cfg.vpn.provider != "protonvpn" or cfg.vpn.vpn_type != "openvpn":
+        return ""
+    if "+pmp" in cfg.vpn.openvpn_user:
+        return ""
+    return " " + t(
+        "Chez ProtonVPN en OpenVPN, le port entrant depend du suffixe de "
+        "l'identifiant : essayez d'ajouter +pmp a la fin du votre."
+    )
+
+
+def _controle_port(cfg: StackConfig) -> list[Check]:
+    """Le port entrant est-il REELLEMENT arrive jusqu'au client ?
+
+    Meme exigence que le cablage : on ne dit pas « j'ai pose le port », on relit
+    la valeur chez le client et on la compare.
+
+    Le cas vise a ete observe le 2026-09-08 sur la stack d'essai : Proton avait
+    change de port entre deux journees, Gluetun annoncait 48406, qBittorrent
+    ecoutait toujours 45270. Plus aucune connexion entrante, et rien nulle part
+    ne le disait.
+
+    Deliberement NON bloquant : sans port entrant on telecharge tres bien, on
+    partage seulement moins. Faire echouer une installation pour un ratio serait
+    disproportionne.
+    """
+    releve = ports_entrants(cfg)
+    if not releve:
+        return []
+    annonce = releve.get("annonce", 0)
+    if not annonce:
+        return [
+            Check(
+                PREFIXE_PORT,
+                False,
+                t(
+                    "aucun port obtenu aupres de {fournisseur} : le client ne "
+                    "recevra pas de connexions entrantes",
+                    fournisseur=cfg.vpn.provider,
+                )
+                + _piste_pmp(cfg),
+                blocking=False,
+            )
+        ]
+    controles = []
+    for sid, port in sorted(releve.items()):
+        if sid == "annonce":
+            continue
+        if port == annonce:
+            controles.append(
+                Check(f"{PREFIXE_PORT} {sid}", True, t("ecoute sur {port}", port=annonce))
+            )
+        else:
+            controles.append(
+                Check(
+                    f"{PREFIXE_PORT} {sid}",
+                    False,
+                    t(
+                        "desynchronise : le VPN a ouvert {annonce}, le client "
+                        "ecoute {port}. Aucune connexion entrante n'arrive.",
+                        annonce=annonce,
+                        port=port,
+                    ),
+                    blocking=False,
+                )
+            )
+    return controles
+
+
 def ip_de_l_hote() -> str | None:
     """Adresse publique de la MACHINE, hors tunnel. None si indeterminable.
 
@@ -155,7 +383,7 @@ def verifier(cfg: StackConfig) -> list[Check]:
     gluetun = container_id(f"{cfg.project_name}-gluetun")
     controles: list[Check] = []
     for sid in clients:
-        conteneur = f"{cfg.project_name}-{sid}"
+        conteneur = nom_conteneur(cfg, sid)
         mode = network_mode(conteneur)
         if mode is None:
             controles.append(
@@ -166,18 +394,29 @@ def verifier(cfg: StackConfig) -> list[Check]:
         # Le test structurel d'abord : il ne coute rien et sa reponse est nette.
         attendu = f"container:{gluetun}" if gluetun else None
         if not mode.startswith("container:"):
-            controles.append(
-                Check(
-                    f"VPN {sid}",
-                    False,
-                    t(
-                        "NON PROTEGE : le conteneur est sur le reseau {reseau}, pas "
-                        "dans le tunnel. Tout torrent lance sort par votre "
-                        "connexion. Regenerez la pile puis redemarrez-la.",
-                        reseau=mode,
-                    ),
+            # Le remede n'est pas le meme selon a qui appartient le conteneur.
+            # « Regenerez la pile » n'avance a rien pour un service adopte :
+            # `adopt` ne genere aucun compose, deliberement — en generer un
+            # donnerait a `uninstall` le pouvoir de detruire la stack de
+            # l'utilisateur. Lui donner ce conseil l'enverrait tourner en rond.
+            if cfg.services[sid].adopted:
+                detail = t(
+                    "NON PROTEGE : {conteneur} est sur le reseau {reseau}, pas dans "
+                    "le tunnel. plugarr ne gere pas ce conteneur et ne peut pas l'y "
+                    "placer : il faut le recreer vous-meme avec "
+                    "network_mode: container:{gluetun}.",
+                    conteneur=conteneur,
+                    reseau=mode,
+                    gluetun=f"{cfg.project_name}-gluetun",
                 )
-            )
+            else:
+                detail = t(
+                    "NON PROTEGE : le conteneur est sur le reseau {reseau}, pas "
+                    "dans le tunnel. Tout torrent lance sort par votre "
+                    "connexion. Regenerez la pile puis redemarrez-la.",
+                    reseau=mode,
+                )
+            controles.append(Check(f"VPN {sid}", False, detail))
             continue
         if attendu and mode != attendu:
             controles.append(
@@ -196,4 +435,9 @@ def verifier(cfg: StackConfig) -> list[Check]:
 
         protege, description = _sortie(conteneur)
         controles.append(Check(f"VPN {sid}", protege, description, blocking=not protege))
+
+    # Le port entrant EN DERNIER : il ne se lit que si le tunnel tient, et un
+    # verdict de protection doit passer avant une question de ratio.
+    if any(c.ok for c in controles):
+        controles += _controle_port(cfg)
     return controles

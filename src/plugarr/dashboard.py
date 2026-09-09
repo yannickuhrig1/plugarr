@@ -950,14 +950,25 @@ _LIVE_SCRIPT = """<script>
         .then(function (r) { return r.json(); })
         .then(function (d) {
           var lignes = (d.checks || []).map(function (c) {
-            return (c.ok ? '  OK    ' : '  ECHEC ') + c.name + ' : ' + c.detail;
+            // Trois marques et non deux : un port entrant desynchronise coute
+            // du partage, pas de l'exposition. Le ranger sous ECHEC a cote d'un
+            // tunnel tombe ferait craindre une fuite la ou il n'y en a aucune.
+            var marque = c.ok ? '  OK    ' : (c.partage ? '  PORT  ' : '  ECHEC ');
+            return marque + c.name + ' : ' + c.detail;
           });
           rapport.textContent = lignes.join('\\n') || 'aucun controle';
           rapport.hidden = false;
           rapport.dataset.rempli = '1';
-          etat.textContent = (d.failed
-            ? d.failed + ' controle(s) en echec'
-            : 'tout est en ordre') + ' — ' + heure();
+          var resume;
+          if (d.failed) {
+            resume = d.failed + ' controle(s) en echec';
+            if (d.partage) resume += ', ' + d.partage + ' port(s) entrant(s) a revoir';
+          } else if (d.partage) {
+            resume = 'protection en ordre, ' + d.partage + ' port(s) entrant(s) a revoir';
+          } else {
+            resume = 'tout est en ordre';
+          }
+          etat.textContent = resume + ' — ' + heure();
         })
         .catch(function () { etat.textContent = 'serveur injoignable'; })
         .then(function () { btnDoc.disabled = false; });

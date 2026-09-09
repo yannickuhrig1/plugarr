@@ -509,6 +509,70 @@ their servers by **region**, Perfect Privacy by **city**. PlugArr therefore sets
 `SERVER_COUNTRIES`, `SERVER_REGIONS` or `SERVER_CITIES` depending on the case. The lists are
 extracted from the **pinned** image by `python scripts/vpn_countries.py`.
 
+### The incoming port
+
+Without an incoming port, the client downloads perfectly well but only shares
+halfway: only the peers that accept your outgoing connections are reachable.
+This is **not** a matter of protection — the other twenty-one providers encrypt
+exactly the same — but of ratio, and nothing used to point it out.
+
+Four providers out of twenty-five allow it. PlugArr then turns it on without
+asking: it is a gain with no downside, and the check will say whether the port
+actually arrived rather than assuming it did.
+
+| Provider | Locations that offer it | Filter set |
+|---|---|---|
+| ProtonVPN | 125 countries out of 127 | `SERVER_COUNTRIES` |
+| Private Internet Access | 110 regions out of 165 | `SERVER_REGIONS` |
+| PrivateVPN | 56 countries out of 56 | `SERVER_COUNTRIES` |
+| Perfect Privacy | 38 cities out of 38 | `SERVER_CITIES` |
+
+Three consequences, each able to break everything silently.
+
+**The wizard only offers the locations that provide one.** This is not display
+comfort: `VPN_PORT_FORWARDING=on` restricts Gluetun's selection, and it then
+refuses to **start** if it finds no server. At Private Internet Access, the 55
+regions left out are the 55 US regions: an American user who picks their own
+country would get a dead stack, with no message explaining why.
+
+**The port changes on its own, and the client does not follow.** Observed on a
+real stack: Proton changed port between two days, Gluetun announced 48406,
+qBittorrent was still listening on 45270. No incoming connection at all, and
+nothing anywhere said so. PlugArr therefore drops a script into
+`${CONFIG_ROOT}/gluetun` that Gluetun runs on every assignment; it sets the new
+port on qBittorrent or Transmission from inside the tunnel.
+
+**The check reads the port back from the client.** Same requirement as for
+wiring: we do not say "the port has been set", we read the value back and
+compare. The verdict is **separate** from the protection one, because a
+desynchronised port costs sharing and not exposure — and it never blocks.
+
+With ProtonVPN over OpenVPN, the port depends on the username suffix. On the
+test account it arrived **both with and without** `+pmp`, so PlugArr does not
+touch what you type; if the check reports that no port was obtained, it suggests
+adding `+pmp` at the end of yours.
+
+### Try before you install
+
+The wizard only checked that the fields were *filled in*: a wrong key went
+through without a word, and three screens later you found an unreachable client
+with no obvious link to what you had typed. The **"Try this configuration"**
+button brings up a throwaway Gluetun with exactly what was entered, waits for it
+to get out, and asks it **which way**. An empty public address counts as a
+failure: with a well-formed but invalid key, WireGuard "establishes" itself
+without a single packet going through. The container is removed in every case.
+
+It is a warning, **never a block**: a trial can fail because one of the
+provider's servers is down, and refusing to install over that would be
+disproportionate. Three refusals are certain, though, and named as such: no
+server matches the requested location, an unreadable WireGuard key, rejected
+OpenVPN credentials.
+
+Over **OpenVPN**, expect it to take longer. The protocol waits a firm sixty
+seconds on a silent server before moving on, where WireGuard notices in a few
+seconds — so the trial gives it two minutes instead of forty-five seconds. A
+valid configuration always answers in about fifteen seconds.
+
 What matters is not that the tunnel exists, it is that **no packet can leave without it**.
 The download client does not start until Gluetun is *healthy*, verified with deliberately
 wrong credentials: Gluetun stays `unhealthy`, and qBittorrent never leaves the `created`

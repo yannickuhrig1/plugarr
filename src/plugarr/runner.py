@@ -31,9 +31,23 @@ PROBE_TIMEOUT = 20
 
 
 def _run(args: list[str], cwd: Path | None = None, timeout: int = 600) -> subprocess.CompletedProcess:
+    # `text=True` seul decode avec l'encodage local, soit cp1252 sous Windows.
+    # Docker, lui, ecrit de l'UTF-8 : le journal de Gluetun contient un emoji, et
+    # `docker logs` faisait alors tomber le thread de lecture de subprocess.
+    # L'exception mourait dans ce thread, `stdout` valait None, et l'appelant
+    # recevait une sortie vide sans le moindre indice. `replace` plutot que
+    # `strict` : un diagnostic doit survivre a un caractere qu'il ne sait pas
+    # rendre.
     try:
         return subprocess.run(
-            args, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+            args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(

@@ -49,6 +49,27 @@ SORTIE = ROOT / "src" / "plugarr" / "data" / "vpn_countries.json"
 #:   connecter, la valeur est donc bien reconnue.
 SANS_LISTE = {"custom"}
 
+#: Fournisseurs pour lesquels Gluetun sait obtenir un port entrant. La liste
+#: vient de sa documentation (`setup/advanced/vpn-port-forwarding.md`) et non des
+#: donnees de serveurs : seuls DEUX d'entre eux marquent leurs serveurs un par un.
+#:
+#: Releve contre l'image v3.41.3, et l'ecart compte :
+#:
+#:   protonvpn                782 serveurs sur 1600 portent `port_forward`
+#:   private internet access  301 serveurs sur  447 portent `port_forward`
+#:   perfect privacy, privatevpn   aucun marqueur : le port ne depend pas du serveur
+#:
+#: Pour les deux premiers, le lieu choisi DECIDE donc si un port arrivera un
+#: jour. Chez PIA, les 55 regions sans port forwarding sont les 55 regions des
+#: Etats-Unis : un utilisateur qui choisit son propre pays n'obtient jamais rien,
+#: sans le moindre message. C'est ce que `pf_values` sert a eviter.
+PORT_FORWARD = {
+    "private internet access",
+    "protonvpn",
+    "perfect privacy",
+    "privatevpn",
+}
+
 #: Variable d'environnement Gluetun correspondant a chaque champ, et son libelle.
 #: Les trois noms sont releves dans `serverselection.go` de la version epinglee.
 VARIABLE = {"country": "SERVER_COUNTRIES", "region": "SERVER_REGIONS", "city": "SERVER_CITIES"}
@@ -89,8 +110,26 @@ def main() -> None:
             valeurs = sorted({s[champ] for s in serveurs if s.get(champ)})
             if valeurs:
                 break
-        par_fournisseur[provider] = {"env": VARIABLE[champ], "values": valeurs}
-        print(f"  {provider:26} {len(valeurs):3} {LIBELLE[champ]:10} ({len(serveurs):5} serveurs)")
+        entree = {"env": VARIABLE[champ], "values": valeurs}
+
+        # Le lieu qui permet REELLEMENT un port entrant, quand l'image le dit
+        # serveur par serveur. On n'ecrit `pf_values` que s'il RESTREINT quelque
+        # chose : une copie de `values` doublerait le fichier sans rien apprendre.
+        if provider in PORT_FORWARD:
+            entree["port_forward"] = True
+            avec_pf = sorted({s[champ] for s in serveurs if s.get("port_forward") and s.get(champ)})
+            if avec_pf and avec_pf != valeurs:
+                entree["pf_values"] = avec_pf
+        par_fournisseur[provider] = entree
+
+        marque = ""
+        if provider in PORT_FORWARD:
+            restreint = entree.get("pf_values")
+            marque = f"  port entrant : {len(restreint)}/{len(valeurs)}" if restreint else "  port entrant"
+        print(
+            f"  {provider:26} {len(valeurs):3} {LIBELLE[champ]:10} "
+            f"({len(serveurs):5} serveurs){marque}"
+        )
 
     for alias, cible in ALIAS.items():
         if cible in par_fournisseur:

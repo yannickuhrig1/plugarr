@@ -5,7 +5,7 @@
 Où en est PlugArr, ce qui vient ensuite, et pourquoi. Tenue à jour à chaque
 séance de travail.
 
-**Dernière mise à jour : 7 septembre 2026** — version publiée : **0.7.3**
+**Dernière mise à jour : 9 septembre 2026** — version publiée : **0.8.0**
 
 ---
 
@@ -42,7 +42,7 @@ On peut vouloir l'outil en anglais et sa médiathèque en français.
 Une phrase ajoutée en français et oubliée dans le catalogue ne casse rien :
 elle s'afficherait simplement en français à quelqu'un qui a demandé l'anglais,
 sans erreur ni avertissement. `scripts/audit_traductions.py` relève donc les
-540 phrases affichables et **échoue s'il en manque une**, ou si le catalogue
+637 phrases affichables et **échoue s'il en manque une**, ou si le catalogue
 porte une entrée morte. Il tourne en CI.
 
 **Huit bibliothèques** sont créées et rangées : films, séries, **anime**,
@@ -148,6 +148,9 @@ supprime le démarrage automatique livré en 0.1.9. Ce qui protège aujourd'hui 
 | **Silo** | ✅ livré en 0.1.11 | Serveur média compatible API Jellyfin, **marqué expérimental**. Trois conteneurs — `pgvector/pgvector:pg18`, `redis:alpine` et `silo-server`, épinglés au digest ; Meilisearch est optionnel et n'est pas installé. Compte, **profil** et trois bibliothèques posés et relus. Deux pièges mesurés, pas supposés : sa base doit vivre dans un **volume Docker** (montage vers l'hôte : migrations en **2935 s** contre **5 s**), et son mot de passe de base doit être alphanumérique — un `?` dans une `postgres://` et le conteneur redémarre en boucle. |
 | **Langue des interfaces** | ✅ livré en 0.1.11 | Demandée une fois dans l'assistant, appliquée partout. Chaque application exprime la même idée autrement : Sonarr et Radarr veulent un entier, **Prowlarr veut le code** (`fr`), Jellyfin une culture et un pays, Silo un code **par bibliothèque**. La table des 29 langues des *arr n'est publiée nulle part : relevée valeur par valeur contre un Sonarr 4.0.19. Au passage, une incohérence corrigée — PlugArr imposait le français à Jellyfin, en dur, et laissait tout le reste en anglais. |
 | **Liste des pays du VPN** | ✅ livré en 0.1.8 | Liste cliquable, extraite de l'image **épinglée**. Piège trouvé au passage : cinq fournisseurs n'exposent aucun pays — quatre classent par région, un par ville. `SERVER_COUNTRIES` ne filtrait rien chez eux. |
+| **Port entrant du VPN** | ✅ livré en 0.8.0 | Quatre fournisseurs sur vingt-cinq le permettent, et PlugArr l'active alors sans rien demander : sans lui, le client télécharge très bien mais ne partage qu'à moitié. Trois pièges traités, aucun supposé — l'assistant n'offre que les lieux qui en offrent un (Gluetun refuse de **démarrer** sinon : chez PIA, ce sont les 55 régions des États-Unis qui sont écartées), un script suit le port quand le fournisseur en change (Proton est passé de 45270 à 48406 entre deux journées, sans que rien ne le dise), et le contrôle **relit** la valeur chez le client. Verdict séparé de celui de la protection : un port désynchronisé coûte du partage, pas de l'exposition. |
+| **Essayer la configuration VPN** | ✅ livré en 0.8.0 | Un Gluetun jetable monté avec exactement ce qui a été saisi, avant de bâtir la stack. Il n'accepte qu'**une preuve de sortie** : une clé bien formée mais fausse « s'établit » sans qu'un paquet ne passe, et Gluetun rend alors une adresse publique vide. Jamais bloquant, mais trois refus sont certains et nommés — lieu sans serveur, clé illisible, identifiants OpenVPN rejetés. |
+| **Mode OpenVPN éprouvé** | ✅ livré en 0.8.0 | Jusque-là, seul WireGuard avait été essayé en vrai. Vérifié le 2026-09-09 contre un compte ProtonVPN réel : tunnel en 14 s, port entrant obtenu. Trois défauts trouvés à cette occasion — `AUTH_FAILED` n'était pas reconnu, l'attente de 45 s était mesurée sur WireGuard alors qu'OpenVPN patiente 60 s fermes sur un serveur muet, et le message d'expiration parlait d'une « clé » dans un mode où l'on saisit un identifiant. |
 
 ---
 
@@ -193,6 +196,23 @@ reste une commande à lancer.
 | Renouveler une clé API, avec recâblage | ✅ |
 | Ajouter un service absent de l'installation | ✅ |
 | Démarrage automatique, sans lancer de commande | ✅ 0.1.9 |
+| Console traduite en anglais | ⬜ à faire |
+
+**La console vivante parle français, en dur.** `_LIVE_SCRIPT`, dans
+`dashboard.py`, écrit ses libellés directement dans le JavaScript : « en
+marche », « arrêté », « tout est en ordre », « N contrôle(s) en échec ». Le
+HTML autour, lui, passe bien par le catalogue. Quelqu'un qui a choisi l'anglais
+obtient donc une page anglaise dont les états de service et le résumé du
+diagnostic restent français.
+
+Le garde-fou ne peut pas le voir : `scripts/audit_traductions.py` relève les
+appels à `t()`, et ces phrases-là n'en sont pas. C'est précisément pour ça
+qu'elles ont pu s'accumuler sans que rien ne le signale — le mécanisme qui
+protège tout le reste ne s'applique pas ici.
+
+Ce n'est pas une phrase à envelopper mais un script à faire traverser le
+catalogue : les libellés doivent être posés côté Python, au rendu, puis lus par
+le JavaScript, sinon chaque ligne ajoutée au script reposera la question.
 
 **Pourquoi pas un conteneur.** La question a été tranchée en la mesurant. La
 console doit créer, démarrer et recréer des conteneurs — soit
@@ -229,6 +249,8 @@ autres plutôt qu'en les effaçant.
 
 | Version | |
 |---|---|
+| **0.8.0** | **Un client de téléchargement adopté était déclaré protégé sans qu'on ait rien vérifié.** Le contrôle cherchait `{projet}-{service}` ; un conteneur adopté garde le sien. Il ne trouvait donc rien, `network_mode` rendait `None`, et `None` veut dire « conteneur arrêté » — c'est-à-dire un contrôle **vert** sur un client qui tourne hors du tunnel. Aucun chemin ne produit cette combinaison aujourd'hui : `adopt` n'écrit jamais de VPN et `reprise` ne reporte ni `adopted` ni `container`. Mais `stack.yml` se lit et s'édite, et un verdict de protection ne doit pas dépendre de ce qu'aucun chemin ne l'atteigne. Le remède affiché diffère aussi désormais : « régénérez la pile » n'avance à rien pour un conteneur dont `adopt` ne génère volontairement aucun compose. |
+| **0.8.0** | **La console comptait un port désynchronisé comme une protection perdue.** L'installation sépare depuis toujours ses deux verdicts — un port désynchronisé coûte du partage, pas de l'exposition — mais `/api/doctor` additionnait tout dans un seul « N contrôle(s) en échec ». Lire ça à côté d'un tunnel tombé fait craindre une fuite là où il n'y en a aucune. Les deux totaux sont maintenant distincts, et le rapport écrit `PORT` plutôt que `ECHEC` sur ces lignes-là. |
 | **0.7.3** | **L'historique de `stack.yml` etait trop court d'un facteur quatre.** Cinq versions semblaient couvrir « une serie de relances rapprochees » ; une installation reelle de cinq services en a consomme QUATRE a elle seule. `write_artifacts` est appele trois fois par `install` — avant le pre-semis, apres l'adoption des cles API, apres le cablage — puis une fois de plus par `wire`. A cinq entrees, deux installations ratees de suite chassaient le mot de passe qui fonctionnait, c'est-a-dire exactement ce que cet historique existe pour empecher. Porte a douze, soit trois installations completes. Le test verrouille le rapport entre les deux. |
 | **0.7.3** | **L'avertissement sur les mots de passe haches se contredisait deux lignes plus bas.** PlugArr annoncait « Identifiants conserves : jellyfin, qbittorrent », puis « leurs mots de passe ne se relisent pas : ceux qu'il va annoncer seront refuses ». Les deux ne peuvent pas etre vrais, et le second proposait d'EFFACER la configuration de services qui marchaient — une perte seche pour reparer un probleme inexistant. Le controle ne regarde plus que les services dont les identifiants n'ont PAS ete repris. Trouve en lancant une reinstallation reelle sur une pile de cinq services, dans un LXC Proxmox. |
 | **0.7.3** | Un test de langue rendait un verdict different selon la machine. `test_la_langue_par_defaut_vient_du_systeme` remplacait les variables d'environnement mais laissait `locale.getlocale()` repondre ce qu'il voulait : le cas `de_DE` passait sur un poste francais et echouait sur un poste anglais. La CI ne le voyait pas, sa locale etant vide. La locale de la machine est desormais simulee comme le reste, et deux cas de plus disent ce qu'on attend d'un systeme anglais et d'un systeme francais. |

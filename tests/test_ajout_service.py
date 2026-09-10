@@ -141,14 +141,14 @@ def test_un_service_installe_n_a_pas_de_bouton_installer(cfg):
 
 
 def test_les_prerequis_sont_annonces():
-    """Cocher Flood tire Transmission : l'ecrire evite la surprise."""
+    """Cocher Flood tire son client par défaut : l'écrire évite la surprise."""
     seul = orchestrator.build_config(services=["sonarr"], config_root="/c", data_root="/d")
     page = dashboard.render(seul, live=True)
 
     debut = page.index('data-add="flood"')
-    carte = page[debut : debut + 900]
+    carte = page[debut : page.index("</article>", debut)]
     assert "tirera aussi" in carte
-    assert "Transmission" in carte
+    assert "qBittorrent" in carte
 
 
 def test_une_stack_complete_n_affiche_pas_la_section():

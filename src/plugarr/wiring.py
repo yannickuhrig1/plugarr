@@ -67,6 +67,7 @@ class StepResult:
     detail: str
     created: bool = False
     warnings: list[str] = field(default_factory=list)
+    step_id: str = ""
 
 
 @dataclass
@@ -1581,9 +1582,14 @@ class Wirer:
             steps.append(WiringStep("seerr/setup", self.step_seerr_setup))
         return steps
 
-    def execute(self, *, on_step: Callable[[StepResult], None] | None = None) -> list[StepResult]:
+    def execute(
+        self, *, on_step: Callable[[StepResult], None] | None = None,
+        on_start: Callable[[str], None] | None = None,
+    ) -> list[StepResult]:
         results: list[StepResult] = []
         for step in self.build_plan():
+            if on_start:
+                on_start(step.name)
             try:
                 result = step.run()
             except WiringError as exc:
@@ -1618,6 +1624,9 @@ class Wirer:
                         t("ceci est un defaut de plugarr, pas de votre installation")
                     ],
                 )
+            # Le libelle du resultat est traduit ; seul cet identifiant relie
+            # sans ambiguite le resultat a l'etape annoncee dans le graphe.
+            result.step_id = step.name
             results.append(result)
             if on_step:
                 on_step(result)

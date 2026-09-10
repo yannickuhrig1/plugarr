@@ -19,6 +19,8 @@
 # Verifie sur l'executable produit : 137 regles de style chargees, les 11
 # services affiches, et une installation complete de bout en bout.
 
+import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -27,27 +29,46 @@ ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 
 textual_datas, textual_binaries, textual_hidden = collect_all("textual")
+# Windows n'embarque pas la base IANA necessaire a zoneinfo.
+tz_datas, tz_binaries, tz_hidden = collect_all("tzdata") if sys.platform == "win32" else ([], [], [])
 
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(SRC)],
-    binaries=textual_binaries,
+    binaries=[*textual_binaries, *tz_binaries],
     datas=[
         (str(SRC / "plugarr" / "tui" / "app.tcss"), "plugarr/tui"),
         # Les pays, regions et villes acceptes par chaque fournisseur VPN. Sans
         # eux, l'ecran VPN de l'assistant leve `FileNotFoundError` — donc des
         # qu'un client de telechargement est coche, c'est-a-dire toujours.
         (str(SRC / "plugarr" / "data" / "vpn_countries.json"), "plugarr/data"),
+        (str(SRC / "plugarr" / "data" / "connection_icons.json"), "plugarr/data"),
+        (str(SRC / "plugarr" / "data" / "recyclarr_templates.json"), "plugarr/data"),
+        (str(SRC / "plugarr" / "data" / "recyclarr_templates.source.json"), "plugarr/data"),
+        (str(SRC / "plugarr" / "web" / "wizard.html"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "wizard.css"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "wizard-profile.css"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "wizard.js"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "graph.js"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "admin-graph.js"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "graph.css"), "plugarr/web"),
         *textual_datas,
+        *tz_datas,
     ],
     hiddenimports=[
         *textual_hidden,
+        *tz_hidden,
         # Importes tardivement dans le code : PyInstaller ne peut pas les voir.
+        "plugarr.webwizard",
+        "plugarr.wizard_graph",
+        "plugarr.demo_admin",
+        "plugarr.interface",
         "plugarr.tui.app",
         "plugarr.tui.indexers",
     ],
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=([] if os.environ.get("PLUGARR_RELEASE_BUILD") == "1"
+                   else [str(ROOT / "packaging" / "local_preview.py")]),
     excludes=[
         # Uniquement utiles au developpement : ils pesent sans rien apporter.
         "pytest",

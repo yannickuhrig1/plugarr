@@ -30,6 +30,10 @@ def test_la_console_porte_les_deux_boutons():
 
     assert 'id="btn-doctor"' in page
     assert 'id="btn-maj"' in page
+    assert 'class="console-nav"' in page
+    assert 'Console locale' in page
+    assert 'id="theme"' not in page
+    assert page.index('<header>') < page.index('id="overview"') < page.index('id="services"')
 
 
 def test_la_page_d_acces_statique_n_en_porte_aucun():
@@ -89,39 +93,27 @@ def test_une_api_muette_est_un_echec_lisible(monkeypatch):
     assert "connexion refusee" in charge["checks"][0]["detail"]
 
 
-def test_aucune_chaine_javascript_ne_court_sur_deux_lignes():
-    """Le script de la console vit dans une chaine Python NON brute : un `\n`
-    ecrit simplement y devient un VRAI retour a la ligne, qui casse la chaine
-    JavaScript et emporte tout le script.
+def test_aucune_chaine_javascript_ne_court_sur_deux_lignes(tmp_path):
+    """Parse actual scripts, including block comments and URLs in the shared SVG.
 
-    Constate en vrai : `lignes.join('\n')` a donne une page entierement
-    blanche, avec pour seule trace « Uncaught SyntaxError: Invalid or
-    unexpected token » dans la console du navigateur. Aucun test Python ne
-    pouvait le voir — le HTML etait bien forme et le rendu cote Python
-    parfaitement reussi.
-
-    On compte les apostrophes de chaque ligne : une chaine qui se ferme sur la
-    ligne suivante en laisse un nombre IMPAIR derriere elle. Les commentaires
-    sont retires d'abord, sans quoi le moindre « s'arrete » francais fausserait
-    le compte — premiere version de ce test, qui ne detectait plus rien.
+    The former quote counter mistook apostrophes in comments and // in URLs
+    for invalid JavaScript. Node also catches the original raw-newline bug.
     """
     import re
+    import shutil
+    import subprocess
 
+    import pytest
+
+    if not shutil.which('node'):
+        pytest.skip('Node required for JavaScript parsing')
     page = dashboard.render(_cfg(), live=True)
-    # La page porte PLUSIEURS blocs <script>. N'examiner que le premier laissait
-    # passer tout le script vivant, celui qui portait justement le defaut.
     blocs = re.findall(r"<script>(.*?)</script>", page, re.DOTALL)
-    assert len(blocs) >= 2, "le script de la console vivante n'est pas dans la page"
-
-    fautives = []
-    for bloc in blocs:
-        for numero, ligne in enumerate(bloc.splitlines(), start=1):
-            nette = re.sub(r"//.*$", "", ligne)
-            nette = nette.replace(chr(92) + "'", "").replace(chr(92) + chr(34), "")
-            if nette.count("'") % 2 or nette.count(chr(34)) % 2:
-                fautives.append(f"ligne {numero} : {ligne.strip()[:70]}")
-
-    assert not fautives, "chaine JavaScript non fermee : " + " | ".join(fautives[:3])
+    assert len(blocs) >= 2
+    for index, bloc in enumerate(blocs):
+        path = tmp_path / f'console-{index}.js'
+        path.write_text(bloc, encoding='utf-8')
+        subprocess.run(['node', '--check', str(path)], check=True, capture_output=True)
 
 
 def test_le_diagnostic_tait_les_controles_d_avant_installation(monkeypatch):

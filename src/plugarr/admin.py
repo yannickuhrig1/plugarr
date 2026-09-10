@@ -34,6 +34,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import (
+    admin_extensions,
     adminauth,
     autoupdate,
     catalog,
@@ -42,12 +43,12 @@ from . import (
     imageref,
     journal,
     orchestrator,
-    sauvegarde,
     updates,
     vpncheck,
 )
 from .clients.arr import ArrClient
 from .i18n import t
+from .maintenance import Maintenance
 from .models import StackConfig
 from .runner import Compose
 
@@ -90,23 +91,28 @@ def read_states(compose: Compose) -> dict[str, ServiceState]:
 def status_payload(cfg: StackConfig, compose: Compose) -> dict:
     """Etat de chaque service SELECTIONNE, meme absent de docker : un service
     installe mais jamais demarre doit apparaitre, pas disparaitre."""
-    states = read_states(compose)
+    try:
+        states = read_states(compose)
+        engine_error = False
+    except OSError:
+        states = {}
+        engine_error = True
     services = []
-    for sid in catalog.STARTUP_ORDER:
-        if not cfg.enabled(sid):
+    for sid in (*catalog.STARTUP_ORDER, *(("gluetun",) if cfg.vpn_enabled else ())):
+        if sid != "gluetun" and not cfg.enabled(sid):
             continue
         found = states.get(sid)
         services.append(
             {
                 "id": sid,
-                "name": catalog.get(sid).display_name,
-                "state": found.state if found else "absent",
-                "status": found.status if found else "conteneur absent",
+                "name": "Gluetun" if sid == "gluetun" else catalog.get(sid).display_name,
+                "state": found.state if found else ("unknown" if engine_error else "absent"),
+                "status": found.status if found else ("Docker inaccessible" if engine_error else "conteneur absent"),
                 "health": found.health if found else "",
                 "up": bool(found and found.up),
             }
         )
-    return {"services": services}
+    return {"services": services, "engine_available": not engine_error}
 
 
 def updates_payload(cfg: StackConfig) -> dict:
@@ -286,6 +292,7 @@ class _Handler(BaseHTTPRequestHandler):
     token: str
     project_dir: Path
     sessions: adminauth.Sessions
+    maintenance: Maintenance
 
     server_version = "plugarr"
     sys_version = ""
@@ -392,7 +399,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Une console qui affiche des mots de passe n'a rien a faire dans un
         # cadre : `frame-ancestors none` interdit le detournement de clic.
         self.send_header(
-            "Content-Security-Policy", "default-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+            "Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
         )
         self.send_header("Referrer-Policy", "no-referrer")
         if cookie:
@@ -412,16 +419,35 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._deny()
             return
+        with self.maintenance.lock:
+            self._get_authorised()
+
+    def _get_authorised(self):
         route = urlparse(self.path).path
         if route == "/":
             page = dashboard.render(self.cfg, live=True).encode("utf-8")
             self._send(HTTPStatus.OK, page, "text/html; charset=utf-8", cookie=True)
+        elif route in admin_extensions.GET_ROUTES:
+            admin_extensions.get(self, route)
         elif route == "/api/status":
-            self._json(status_payload(self.cfg, self.compose))
+            result = status_payload(self.cfg, self.compose)
+            for entry in result['services']:
+                entry['intentional_stop'] = entry['id'] in self.maintenance.snapshot()['intentional_stops']
+                self.maintenance.alert('services:' + entry['id'],
+                    not entry['up'] and entry['id'] not in self.maintenance.snapshot()['intentional_stops'],
+                    entry['name'] + ' indisponible')
+            self._json(result)
         elif route == "/api/updates":
             self._json(updates_payload(self.cfg))
         elif route == "/api/doctor":
-            self._json(doctor_payload(self.cfg, self.project_dir))
+            result = doctor_payload(self.cfg, self.project_dir)
+            self.maintenance.event('diagnostic', result['failed'] == 0)
+            for check in result['checks']:
+                check['consequence'] = 'Controle reussi.' if check['ok'] else 'Ce controle peut empecher le bon fonctionnement de l’installation.'
+                check['next_step'] = 'Aucune action necessaire.' if check['ok'] else 'Verifier le detail ci-dessous, puis relancer le diagnostic. La cause exacte reste a confirmer.'
+                if 'vpn' in check['name'].lower():
+                    self.maintenance.alert('vpn:' + check['name'], not check['ok'], check['name'])
+            self._json(result)
         else:
             self._json({"error": "route inconnue"}, HTTPStatus.NOT_FOUND)
 
@@ -438,18 +464,29 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._deny()
             return
+        with self.maintenance.lock:
+            self._post_authorised()
+
+    def _post_authorised(self):
         route = urlparse(self.path).path
-        if route not in ("/api/action", "/api/update", "/api/rotate", "/api/add"):
+        if route not in ({"/api/action", "/api/update", "/api/rotate", "/api/add", "/api/backup"} | admin_extensions.POST_ROUTES):
             self._json({"error": "route inconnue"}, HTTPStatus.NOT_FOUND)
             return
 
-        length = int(self.headers.get("Content-Length") or 0)
         try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= 16384:
+                raise ValueError('body too large')
             payload = json.loads(self.rfile.read(length) or b"{}")
-        except json.JSONDecodeError:
+            if not isinstance(payload, dict):
+                raise TypeError('object expected')
+        except (ValueError, TypeError, UnicodeDecodeError):
             self._json({"error": "corps JSON invalide"}, HTTPStatus.BAD_REQUEST)
             return
 
+        if route in admin_extensions.POST_ROUTES:
+            admin_extensions.post(self, route, payload)
+            return
         service = str(payload.get("service", ""))
         if route == "/api/add":
             # Liste fermee : seuls les services ABSENTS sont installables, et le
@@ -466,6 +503,7 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 return
             ok, message, ajoutes = orchestrator.add_service(self.cfg, self.project_dir, service)
+            self.maintenance.event('ajout service', ok, service)
             self._json(
                 {"ok": ok, "service": service, "message": message, "added": ajoutes},
                 HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -473,9 +511,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if route == "/api/backup":
-            chemin = self.project_dir / sauvegarde.nom_par_defaut(self.cfg)
             try:
-                rapport = sauvegarde.sauvegarder(self.cfg, self.project_dir, chemin)
+                rapport = self.maintenance.backup()
             except Exception as exc:  # noqa: BLE001
                 journal.LOGGER.exception("sauvegarde")
                 self._json({"ok": False, "error": str(exc)[:200]})
@@ -504,6 +541,7 @@ class _Handler(BaseHTTPRequestHandler):
                 orchestrator.rotate_password if quoi == "password" else orchestrator.rotate_api_key
             )
             ok, message, secret = rotation(self.cfg, self.project_dir, service)
+            self.maintenance.event('rotation identifiants', ok, service)
             # Le secret part vers la page qui vient de le demander, et nulle part
             # ailleurs : ni journal, ni sortie terminal.
             self._json(
@@ -524,10 +562,20 @@ class _Handler(BaseHTTPRequestHandler):
                     {"error": f"tag refuse: {target}"}, HTTPStatus.BAD_REQUEST
                 )
                 return
+            if self.cfg.services[service].adopted:
+                self._json({'error': 'Service adopte : mise a jour externe requise.'}, HTTPStatus.BAD_REQUEST)
+                return
+            if payload.get('backup_first'):
+                try:
+                    self.maintenance.backup()
+                except Exception:  # noqa: BLE001 - keep API/worker failures contained and secrets out of responses
+                    self._json({'error': 'Sauvegarde echouee. Mise a jour annulee.'}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
             ok, message = apply_update(
                 self.cfg, self.compose, self.project_dir, service,
                 str(target) if target else None,
             )
+            self.maintenance.event('mise a jour service', ok, service)
             self._json(
                 {"ok": ok, "service": service, "message": message},
                 HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -545,6 +593,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         ok, message = self.compose.control(action, service)
+        if ok:
+            stopped = self.maintenance.state['intentional_stops']
+            if action == 'stop' and service not in stopped:
+                stopped.append(service)
+            elif action != 'stop' and service in stopped:
+                stopped.remove(service)
+        self.maintenance.event(action, ok, service)
         self._json(
             {"ok": ok, "service": service, "action": action, "message": message[:400]},
             HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -581,10 +636,12 @@ def build_server(
             # UNE instance partagee par toutes les requetes : les sessions et le
             # compteur de tentatives n'ont aucun sens s'ils sont par connexion.
             "sessions": adminauth.Sessions(),
+            "maintenance": Maintenance(cfg, project_dir),
         },
     )
     server = _Server((host, port), handler)
-    server.daemon_threads = True
+    # Closing the console must wait for a backup/update request to finish.
+    server.daemon_threads = False
     return server
 
 
@@ -609,10 +666,14 @@ def serve(
         on_ready(url, token)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    worker = threading.Thread(target=server.RequestHandlerClass.maintenance.run, daemon=False)
+    worker.start()
     try:
         thread.join()
     except KeyboardInterrupt:
         pass
     finally:
+        server.RequestHandlerClass.maintenance.stop.set()
         server.shutdown()
         server.server_close()
+        worker.join()

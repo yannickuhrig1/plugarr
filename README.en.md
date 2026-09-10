@@ -670,28 +670,18 @@ wizard) to install a second one alongside. The preflight warns you if the case a
 The detail lives in [ROADMAP.en.md](ROADMAP.en.md), kept up to date: what works, what is in
 progress, what will not be done and why. Summary below.
 
-**The PlugArr console** is the next big piece, and the only one that is not simply another
-service in the catalogue. Today the wizard installs and then steps aside: the access page is
-a dead HTML file, and everything that comes afterwards is done by hand, service by service.
-A web console, in its own container, would hold the stack together over time:
+**The PlugArr console is available.** Run `plugarr serve` on the host to manage
+services, updates, diagnostics, backups and credentials with authenticated access.
 
-| | |
+The local branch adds connection tests and repair, scheduled backups, history,
+in-console alerts and Windows executable updates. These changes are not a
+published release. See [LOCAL_TESTING.md](LOCAL_TESTING.md).
+
+Services still under consideration:
+
+| Service | Remaining work |
 |---|---|
-| Service status | Running, stopped, broken, and since when. `docker ps` already knows; it is the display that is missing. |
-| Start, stop, restart | Without going through Docker Desktop or the command line. |
-| Updates | See that a newer image exists, and apply it. The catalogue pins exact versions: that is precisely what makes the comparison reliable. |
-| Passwords and API keys | Change them in one click, and **re-wire immediately after**. That is where it all happens: a key changed by hand silently breaks six links today. |
-| Add a service | Install and wire a service missing from the initial installation, without redoing everything. `plugarr wire` already knows how; it lacks an interface. |
 
-Two questions to settle before writing anything: the container has to drive Docker, so it
-needs access to the Docker socket, which amounts to giving full powers over the machine, and
-must be said plainly. And a console that changes passwords must authenticate itself,
-seriously.
-
-On the services side, in the order they will be studied:
-
-| | What is left to do |
-|---|---|
 | **Plex** | A second media server, next to Jellyfin. Its token comes from `plex.tv`, not from the local API: that is the point to verify before adding it. |
 | **Notifiarr** | Centralised notifications for the whole stack. Every *arr registers with an API key. |
 | **Bazarr** | Subtitles. Studied, but its configuration goes through a YAML file rather than an API, so nothing is verified yet. |

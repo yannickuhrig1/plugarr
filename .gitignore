@@ -32,3 +32,16 @@ plugarr.log
 # SVG source entrent au depot : le reste se refabrique.
 assets/plugarr-*.png
 assets/plugarr.png
+
+.plugarr-maintenance.json
+.plugarr-maintenance.tmp
+backups/
+.plugarr-update-*/
+*.previous
+.venv-local-demo/
+
+# Environnements locaux des assistants et des controles.
+.venv-web-local/
+.venv-check/
+# Etat genere contenant les identifiants de la pile.
+stack.yml

@@ -19,9 +19,11 @@ Trois pieges traites ici :
 from __future__ import annotations
 
 import html
+import json
 import socket
 import sys
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 from . import __version__, catalog, i18n
@@ -38,6 +40,30 @@ _ACCENTS = {
     Category.MEDIA: "#a855f7",
     Category.UI: "#f59e0b",
 }
+
+
+# Palette orange, rose et violet du site PlugArr, pour la console pilotee.
+_BRAND_ACCENTS = {Category.ARR: "#ec5794", Category.DOWNLOAD: "#ff9e45",
+                  Category.MEDIA: "#ad64e5", Category.UI: "#ff9e45"}
+
+
+@lru_cache(maxsize=1)
+def _application_icons() -> dict[str, str]:
+    """Logos autonomes déjà utilisés par le graphe, sans requête externe."""
+    path = Path(__file__).parent / "data" / "connection_icons.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _badge(spec) -> str:
+    """Logo d'application, avec l'initiale comme repli vérifiable."""
+    icon = _application_icons().get(spec.id)
+    if icon:
+        return (
+            '<span class="badge app-icon">'
+            f'<img src="{html.escape(icon, quote=True)}" alt="" width="30" height="30">'
+            "</span>"
+        )
+    return f'<span class="badge">{html.escape(spec.display_name[0])}</span>'
 
 
 def primary_lan_ip() -> str | None:
@@ -169,7 +195,7 @@ def _cards(cfg: StackConfig, host: str, live: bool = False) -> str:
             continue
         spec, inst = catalog.get(sid), cfg.services[sid]
         url = f"http://{host}:{inst.host_port}"
-        accent = _ACCENTS.get(spec.category, "#64748b")
+        accent = (_BRAND_ACCENTS if live else _ACCENTS).get(spec.category, "#64748b")
         rows = ""
         if inst.username:
             # L'identifiant se copie comme le reste. Il n'est pas secret, donc
@@ -201,14 +227,14 @@ def _cards(cfg: StackConfig, host: str, live: bool = False) -> str:
         if inst.has_web_ui:
             title = (
                 f'<a class="title" href="{url}" target="_blank" rel="noopener">'
-                f'<span class="badge">{html.escape(spec.display_name[0])}</span>'
+                f'{_badge(spec)}'
                 f"<span><strong>{html.escape(spec.display_name)}</strong>"
                 f'<span class="url">{html.escape(url)}</span></span></a>'
             )
         else:
             title = (
                 '<div class="title headless">'
-                f'<span class="badge">{html.escape(spec.display_name[0])}</span>'
+                f'{_badge(spec)}'
                 f"<span><strong>{html.escape(spec.display_name)}</strong>"
                 f'<span class="url">{t("tache de fond, sans interface")}</span>'
                 "</span></div>"
@@ -217,7 +243,7 @@ def _cards(cfg: StackConfig, host: str, live: bool = False) -> str:
             f"""      <article class="card" style="--accent:{accent}">
         {title}
         <p class="note">{html.escape(t(spec.notes))}</p>
-{controls}        <div class="creds">{rows}</div>
+{controls}        <details><summary>Identifiants et clés API</summary><div class="creds">{rows}</div></details>
       </article>"""
         )
     return "\n".join(blocks)
@@ -240,7 +266,14 @@ def _ajouts(cfg: StackConfig) -> str:
     lignes = ""
     for sid in absents:
         spec = catalog.get(sid)
-        prerequis = [d for d in spec.requires if not cfg.enabled(d)]
+        # Afficher les dépendances réellement choisies par le même résolveur que
+        # l'installation, y compris les alternatives (Flood choisit qBittorrent
+        # si aucun client compatible n'est déjà présent).
+        prerequis = [
+            dep
+            for dep in catalog.resolve_dependencies([sid, *cfg.services])
+            if dep != sid and not cfg.enabled(dep)
+        ]
         note = html.escape(t(spec.notes))
         if prerequis:
             noms = ", ".join(catalog.get(d).display_name for d in prerequis)
@@ -251,8 +284,7 @@ def _ajouts(cfg: StackConfig) -> str:
             )
         lignes += (
             f'      <article class="card add" data-add="{spec.id}">\n'
-            f'        <div class="title headless"><span class="badge">'
-            f"{html.escape(spec.display_name[0])}</span>"
+            f'        <div class="title headless">{_badge(spec)}'
             f"<span><strong>{html.escape(spec.display_name)}</strong>"
             f'<span class="url">{t("pas encore installe")}</span></span></div>\n'
             f'        <p class="note">{note}</p>\n'
@@ -367,7 +399,7 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False) -> str:
     # Importe ici et non en tete : `orchestrator` importe `dashboard`.
     from .orchestrator import prochaine_etape
 
-    return _TEMPLATE.format(
+    page = _TEMPLATE.format(
         generated=generated,
         count=count,
         cards=_cards(cfg, host, live=live),
@@ -413,6 +445,11 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False) -> str:
             racine=html.escape(cfg.data_root),
         ),
     )
+
+    if live:
+        from .console_ui import enhance
+        return enhance(page)
+    return page
 
 
 def write(cfg: StackConfig, target_dir: Path, *, failed: int = 0) -> Path:
@@ -678,7 +715,7 @@ _LIVE_SCRIPT = """<script>
   // qui expose /api/status et /api/action. Le jeton voyage en cookie HttpOnly,
   // pose lors du chargement de la page.
   var LIBELLES = {running: 'en marche', exited: 'arrete', created: 'cree',
-                  paused: 'en pause', absent: 'conteneur absent'};
+                  paused: 'en pause', absent: 'conteneur absent', unknown: 'etat inconnu'};
 
   function peindre(services) {
     services.forEach(function (s) {
@@ -688,7 +725,8 @@ _LIVE_SCRIPT = """<script>
       dot.className = 'dot ' + (s.up ? 'up' : 'down');
       dot.title = s.status;
       bloc.querySelector('.label').textContent =
-        (LIBELLES[s.state] || s.state) + (s.status ? ' — ' + s.status : '');
+        (s.intentional_stop && !s.up ? 'arret volontaire' : (LIBELLES[s.state] || s.state))
+        + (s.status ? ' — ' + s.status : '');
       bloc.querySelectorAll('button.act').forEach(function (b) {
         b.disabled = (b.dataset.action === 'start') ? s.up : !s.up;
       });

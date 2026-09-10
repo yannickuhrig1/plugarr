@@ -1,0 +1,18 @@
+.size-disclaimer {
+  margin: 14px 0 20px;
+  padding-left: 13px;
+  border-left: 2px solid #665079;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.55;
+}
+
+.profile-size {
+  min-height: 2.5em;
+  color: #cbb6df !important;
+}
+
+.form-grid select {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

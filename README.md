@@ -693,24 +693,15 @@ installer une seconde à côté. Le préflight avertit si le cas se présente.
 Le détail vit dans [ROADMAP.md](ROADMAP.md), tenue à jour : ce qui marche, ce
 qui est en cours, ce qu'on ne fera pas et pourquoi. Résumé ci-dessous.
 
-**La console PlugArr** est le prochain gros morceau, et le seul qui ne soit pas
-un service de plus au catalogue. Aujourd'hui l'assistant installe puis s'efface :
-la page d'accès est un fichier HTML mort, et tout ce qui vient après se fait à la
-main, service par service. Une console web, dans son propre conteneur, tiendrait
-la stack dans la durée :
+**La console PlugArr est disponible.** Lancez `plugarr serve` sur l’hôte pour
+consulter les états, démarrer ou arrêter les services, appliquer leurs mises à
+jour, faire un diagnostic, sauvegarder, ajouter des services et renouveler les
+identifiants. Elle utilise un jeton ou un mot de passe pour l’authentification.
 
-| | |
-|---|---|
-| État des services | En marche, arrêté, en panne, et depuis quand. `docker ps` le sait déjà ; c'est l'affichage qui manque. |
-| Démarrer, arrêter, redémarrer | Sans passer par Docker Desktop ni la ligne de commande. |
-| Mises à jour | Voir qu'une image plus récente existe, et l'appliquer. Le catalogue épingle des versions exactes : c'est justement ce qui rend la comparaison fiable. |
-| Mots de passe et clés API | Changer en un clic, et **re-câbler dans la foulée** — c'est là que tout se joue. Une clé changée à la main casse aujourd'hui six liaisons en silence. |
-| Ajouter un service | Installer et câbler un service absent de l'installation initiale, sans tout reprendre. `plugarr wire` sait déjà le faire ; il lui manque une interface. |
-
-Deux questions à trancher avant d'écrire quoi que ce soit : le conteneur doit
-piloter Docker, donc accéder au socket Docker — ce qui revient à donner les
-pleins pouvoirs sur la machine, et doit être dit clairement. Et une console qui
-change des mots de passe doit s'authentifier elle-même, sérieusement.
+La branche locale ajoute une carte des liaisons *arr, des tests et réparations
+ciblés, une maintenance planifiée, un historique, des alertes dans la console
+et la mise à jour automatique de l’exécutable Windows. Ces changements ne
+constituent pas une release publiée. Voir [LOCAL_TESTING.md](LOCAL_TESTING.md).
 
 Côté services, dans l'ordre où ils seront étudiés :
 

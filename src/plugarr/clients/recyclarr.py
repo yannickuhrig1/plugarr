@@ -102,6 +102,11 @@ def parse_manifest(payload: str | bytes) -> dict[str, list[str]]:
     return names
 
 
+def bundled_manifest() -> dict[str, list[str]]:
+    """Complete official catalog shipped with the offline demo (see source JSON)."""
+    return parse_manifest((Path(__file__).parents[1] / 'data' / 'recyclarr_templates.json').read_bytes())
+
+
 def local_manifest(config_dir: Path) -> dict[str, list[str]]:
     """Manifeste clone par Recyclarr, s'il a deja tourne. Vide sinon."""
     try:

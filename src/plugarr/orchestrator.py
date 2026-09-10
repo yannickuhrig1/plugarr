@@ -681,6 +681,7 @@ def install(
     *,
     on_progress: ProgressFn = _noop,
     on_step: Callable[[StepResult], None] | None = None,
+    on_step_start: Callable[[str], None] | None = None,
 ) -> list[StepResult]:
     """Deroule l'installation complete et renvoie le resultat du cablage.
 
@@ -730,6 +731,8 @@ def install(
     if not ok:
         raise InstallAborted(f"docker compose up a echoue : {message}")
 
+    on_progress(Progress("demarrage-termine", "docker compose up : termine"))
+
     # AVANT d'attendre les clients : un client accroche a une pile reseau morte
     # ne repondra jamais, et l'attente expirerait sur un diagnostic trompeur.
     _reparer_piles_orphelines(cfg, runner, on_progress)
@@ -739,7 +742,10 @@ def install(
 
     wirer = Wirer(cfg)
     try:
-        results = wirer.execute(on_step=on_step)
+        if on_step_start is None:
+            results = wirer.execute(on_step=on_step)
+        else:
+            results = wirer.execute(on_step=on_step, on_start=on_step_start)
     finally:
         wirer.close()
 
@@ -865,10 +871,10 @@ def planned_links(cfg: StackConfig) -> int:
 
 
 #: Evenements emis par install() en dehors du pre-semis, de l'attente et du
-#: cablage : arborescence, artefacts, arret prealable, demarrage, page d'acces,
-#: fin. Un test deroule un vrai install() pour confronter ce compte aux
+#: cablage : arborescence, artefacts, arret prealable, debut et fin de demarrage,
+#: page d'acces et fin. Un test deroule un vrai install() pour confronter ce compte aux
 #: evenements reellement emis : il a rattrape cette valeur des son changement.
-_FIXED_EVENTS = 6
+_FIXED_EVENTS = 7
 
 
 #: Familles d'API dont la configuration se pre-seme sur le disque avant le

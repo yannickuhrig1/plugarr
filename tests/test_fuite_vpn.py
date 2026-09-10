@@ -146,6 +146,11 @@ def test_un_conteneur_arrete_n_est_pas_une_fuite(monkeypatch):
     monkeypatch.setattr(vpncheck, "container_id", lambda n: "abc123")
     monkeypatch.setattr(vpncheck, "network_mode", lambda n: None)
 
+    def port_interdit(*args, **kwargs):
+        raise AssertionError("un conteneur arrete n'a aucun port a verifier")
+
+    monkeypatch.setattr(vpncheck, "exec_in", port_interdit)
+
     controle = vpncheck.verifier(_cfg("qbittorrent", vpn=True))[0]
 
     assert controle.ok and not controle.blocking
@@ -908,4 +913,3 @@ def test_doctor_repose_le_port_au_lieu_de_seulement_le_signaler():
 
     assert appelle, "doctor doit reposer le port, pas seulement le constater"
     assert "PREFIXE_PORT" in source, "et seulement si un controle de port a echoue"
-

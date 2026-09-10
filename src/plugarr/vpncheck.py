@@ -449,6 +449,7 @@ def verifier(cfg: StackConfig) -> list[Check]:
 
     gluetun = container_id(f"{cfg.project_name}-gluetun")
     controles: list[Check] = []
+    tunnel_verifie = False
     for sid in clients:
         conteneur = nom_conteneur(cfg, sid)
         mode = network_mode(conteneur)
@@ -502,9 +503,10 @@ def verifier(cfg: StackConfig) -> list[Check]:
 
         protege, description = _sortie(conteneur)
         controles.append(Check(f"VPN {sid}", protege, description, blocking=not protege))
+        tunnel_verifie = tunnel_verifie or protege
 
     # Le port entrant EN DERNIER : il ne se lit que si le tunnel tient, et un
     # verdict de protection doit passer avant une question de ratio.
-    if any(c.ok for c in controles):
+    if tunnel_verifie:
         controles += _controle_port(cfg)
     return controles

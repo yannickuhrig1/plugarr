@@ -39,6 +39,7 @@ from . import (
 from .clients import recyclarr as recyclarr_cfg
 from .clients.arr import ArrClient
 from .i18n import t
+from .interface import Interface
 from .layout import create_tree, default_profile, path_warning
 from .models import VPN_PROVIDERS, PlatformProfile, StackConfig, VpnConfig
 from .orchestrator import InstallAborted, Progress
@@ -102,6 +103,7 @@ def main(
         "", "--lang",
         help=t("Langue de PlugArr : fr, en. Par defaut, celle du systeme."),
     ),
+    interface: Interface = typer.Option(Interface.AUTO, "--interface"),
 ) -> None:
     """Sans sous-commande, lance l'assistant interactif."""
     # La langue AVANT tout le reste : les messages de la commande en cours
@@ -113,9 +115,9 @@ def main(
     i18n.utiliser(lang or i18n.langue_du_systeme())
     if ctx.invoked_subcommand is not None:
         return
-    from .tui.app import run_wizard
+    from .interface import launch
 
-    raise typer.Exit(run_wizard())
+    raise typer.Exit(launch(interface))
 
 
 def _annoncer_nouvelle_version() -> None:
@@ -280,11 +282,30 @@ def wizard(
     open_page: bool = typer.Option(
         True, "--open/--no-open", help=t("Ouvrir la page d'acces a la fin.")
     ),
+    interface: Interface = typer.Option(Interface.AUTO, "--interface"),
 ) -> None:
     """Lance l'assistant interactif plein ecran."""
-    from .tui.app import run_wizard
+    from .interface import launch
 
-    raise typer.Exit(run_wizard(project_dir, open_page=open_page))
+    raise typer.Exit(launch(interface, project_dir, open_page=open_page))
+
+
+@app.command()
+def web(
+    project_dir: Path = typer.Option(Path(".")),
+    port: int = typer.Option(0, min=0, max=65535),
+    open_page: bool = typer.Option(True, "--open/--no-open"),
+    demo: bool = typer.Option(False, "--demo"),
+) -> None:
+    """Assistant web local. --demo simule sans Docker ni installation."""
+    from .webwizard import run_web
+
+    result = run_web(project_dir, port=port, open_page=open_page, demo=demo)
+    if result == "tui":
+        from .interface import launch
+
+        result = launch(Interface.TUI, project_dir, open_page=open_page)
+    raise typer.Exit(int(result))
 
 
 @app.command(help=t("Deploie et cable la stack de bout en bout, sans interaction."))

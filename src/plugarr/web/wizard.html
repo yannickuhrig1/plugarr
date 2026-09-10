@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark"><title>PlugArr — Assistant et graphe en direct</title>
+<link rel="stylesheet" href="/wizard.css"><link rel="stylesheet" href="/wizard-profile.css"><link rel="stylesheet" href="/graph.css"><script src="/graph.js" defer></script><script src="/wizard.js" defer></script>
+</head>
+<body>
+<div class="shell">
+<aside class="sidebar">
+<a class="brand" href="#" aria-label="PlugArr"><img id="brand-icon" alt="" width="44" height="44" hidden><span>Plug<span class="arr">Arr</span></span></a>
+<p class="rail-label" data-i18n="setup">INSTALLATION</p>
+<nav aria-label="Étapes de l'installation"><ol id="steps"></ol></nav>
+<div class="rail-bottom"><span class="local-label" data-i18n="local">Sur votre ordinateur</span><p data-i18n="localDescription">Vos réglages restent dans PlugArr.</p><button id="tui" class="quiet" hidden data-i18n="tui">Ouvrir le terminal TUI</button></div>
+</aside>
+<main>
+<header class="topbar"><span class="breadcrumb" data-i18n="assistant">Assistant de configuration</span><div class="top-controls"><span id="mode" class="badge">LOCAL</span><label class="sr-only" for="ui-language">Langue / Language</label><select id="ui-language"><option value="fr">FR</option><option value="en">EN</option></select></div></header>
+<div class="workspace">
+<div id="demo-banner" class="notice demo" hidden data-i18n="demoNotice">Mode démonstration — aucune installation réelle, aucun appel à Docker.</div>
+<div id="existing-banner" class="notice" hidden data-i18n="existingNotice">Installation existante : les identifiants, les versions et les chemins seront conservés.</div>
+<div id="error" class="notice error" role="alert" hidden></div>
+<div id="loading" role="status" data-i18n="loading">Chargement de votre assistant…</div>
+<form id="wizard" hidden>
+<section class="step-panel" data-step="0">
+<div class="eyebrow" data-i18n="step1">ÉTAPE 01 / 06</div><h1 tabindex="-1" data-i18n="servicesTitle">Votre stack, à votre façon.</h1><p class="intro" data-i18n="servicesIntro">Choisissez vos applications. PlugArr ajoutera les dépendances nécessaires et les connectera entre elles.</p>
+<div class="selection-bar"><strong id="selection-count"></strong><span data-i18n="selectionHelp">Modifiable avant l’installation</span></div>
+<div id="services"></div>
+</section>
+<section class="step-panel" data-step="1" hidden>
+<div class="eyebrow" data-i18n="step2">ÉTAPE 02 / 06</div><h1 tabindex="-1" data-i18n="foldersTitle">Une place pour chaque fichier.</h1><p class="intro" data-i18n="foldersIntro">Ces chemins désignent l’ordinateur sur lequel PlugArr s’exécute.</p>
+<div class="form-grid">
+<label><span data-i18n="platform">Plateforme</span><select id="platform"><option value="windows">Windows · Docker Desktop</option><option value="generic-linux">Linux</option><option value="unraid">Unraid</option><option value="synology">Synology</option></select></label>
+<label><span data-i18n="projectName">Nom de la pile Docker</span><input id="project_name" required pattern="[a-z0-9][a-z0-9_-]*" maxlength="63"></label>
+<label class="wide"><span data-i18n="dataRoot">Dossier des médias et téléchargements</span><input id="data_root" required spellcheck="false"><small data-i18n="dataHelp">Un dossier commun pour préserver les liens physiques quand le système le permet.</small></label>
+<label class="wide"><span data-i18n="configRoot">Dossier des configurations des applications</span><input id="config_root" required spellcheck="false"></label>
+<label><span data-i18n="username">Identifiant des services</span><input id="username" required minlength="2" maxlength="100" autocomplete="username"><small data-i18n="passwordHelp">Les mots de passe sont générés par PlugArr.</small></label>
+<label><span data-i18n="timezone">Fuseau horaire</span><input id="timezone" required list="timezones"><datalist id="timezones"><option value="Europe/Paris"><option value="Etc/UTC"><option value="Europe/Brussels"><option value="Europe/Zurich"><option value="America/Montreal"></datalist></label>
+<label><span data-i18n="serviceLanguage">Langue des services</span><select id="language"><option value="fr">Français</option><option value="en">English</option><option value="de">Deutsch</option><option value="es">Español</option><option value="it">Italiano</option><option value="pt">Português</option><option value="nl">Nederlands</option></select></label>
+</div><div class="path-summary"><span data-i18n="projectFolder">Dossier du projet</span><code id="project-dir"></code></div>
+</section>
+<section class="step-panel" data-step="2" hidden>
+<div class="eyebrow" data-i18n="step3">ÉTAPE 03 / 06</div><h1 tabindex="-1" data-i18n="vpnTitle">Votre connexion de téléchargement.</h1><p class="intro" data-i18n="vpnIntro">Utilisez Gluetun pour faire passer votre client de téléchargement par votre fournisseur VPN.</p>
+<div id="no-torrent" class="notice" hidden data-i18n="noTorrent">Aucun client de téléchargement sélectionné : cette étape n’est pas nécessaire.</div>
+<div id="vpn-controls"><label class="toggle-card"><span><strong data-i18n="enableVpn">Activer le VPN</strong><small data-i18n="vpnHelp">Vos identifiants VPN restent sur cet ordinateur.</small></span><input id="vpn-enabled" type="checkbox" role="switch"></label>
+<div id="vpn-fields" class="form-grid" hidden>
+<label><span data-i18n="provider">Fournisseur</span><select id="vpn-provider"></select></label>
+<label><span data-i18n="protocol">Protocole</span><select id="vpn-type"><option value="wireguard">WireGuard</option><option value="openvpn">OpenVPN</option></select></label>
+<div id="wireguard-fields" class="wide form-grid"><label class="wide"><span data-i18n="wireguardKey">Clé privée WireGuard</span><input id="vpn-key" type="password" autocomplete="off" spellcheck="false"></label><label class="wide"><span data-i18n="wireguardAddress">Adresses WireGuard (si demandées par le fournisseur)</span><input id="vpn-addresses" spellcheck="false" placeholder="10.x.x.x/32"></label></div>
+<div id="openvpn-fields" class="wide form-grid" hidden><label><span data-i18n="vpnUser">Identifiant OpenVPN</span><input id="vpn-user" autocomplete="off"></label><label><span data-i18n="vpnPassword">Mot de passe OpenVPN</span><input id="vpn-password" type="password" autocomplete="off"></label></div>
+<label class="wide"><span id="places-label" data-i18n="location">Localisation (facultatif)</span><input id="vpn-countries" list="vpn-places" autocomplete="off"><datalist id="vpn-places"></datalist></label>
+<p class="wide muted" id="vpn-preserved" hidden data-i18n="vpnPreserved">Laissez les identifiants vides pour conserver ceux du même fournisseur et protocole.</p>
+</div><p id="vpn-warning" class="notice warning" data-i18n="vpnWarning">Sans VPN, les téléchargements utiliseront l’adresse IP publique de cette machine.</p></div>
+</section>
+<section class="step-panel" data-step="3" hidden>
+<div class="eyebrow" data-i18n="step4">ÉTAPE 04 / 06</div><h1 tabindex="-1" data-i18n="qualityTitle">La qualité qui vous convient.</h1><p class="intro" data-i18n="qualityIntro">Recyclarr applique les profils TRaSH à Sonarr et Radarr.</p>
+<div id="no-quality" class="notice" hidden data-i18n="noQuality">Sélectionnez Recyclarr avec Sonarr ou Radarr pour utiliser les profils de qualité.</div>
+<div id="quality-controls"><div class="notice" data-i18n="qualityDefaults">Choisissez un profil par application parmi tous les modèles disponibles. Vous pouvez aussi conserver le profil par défaut.</div><button type="button" class="secondary" id="load-templates" data-i18n="loadProfiles">Actualiser les profils disponibles</button><p id="template-status" class="muted" role="status"></p><p class="size-disclaimer" data-i18n="sizeDisclaimer">Ordres de grandeur uniquement, pas des limites de téléchargement. La taille réelle dépend de la durée, de la source, du codec, des pistes audio et de la version trouvée.</p><div id="quality-fields" class="form-grid"></div></div>
+</section>
+<section class="step-panel" data-step="4" hidden>
+<div class="eyebrow" data-i18n="step5">ÉTAPE 05 / 06</div><h1 tabindex="-1" data-i18n="reviewTitle">On vérifie avant de lancer.</h1><p class="intro" data-i18n="reviewIntro">Relisez les applications et les chemins. L’installation ne démarre qu’après votre confirmation.</p>
+<div id="review" aria-live="polite"></div>
+<button type="button" id="recheck" class="secondary" data-i18n="recheck">Relancer la vérification</button>
+<label id="confirm-label" class="confirm"><input id="confirm" type="checkbox"><span data-i18n="confirm">Je confirme les réglages et les opérations présentées ci-dessus.</span></label>
+</section>
+<section class="step-panel" data-step="5" hidden>
+<div class="eyebrow" data-i18n="step6">ÉTAPE 06 / 06</div><h1 id="progress-title" tabindex="-1" data-i18n="progressTitle">Votre stack prend forme.</h1><p id="progress-description" class="intro" data-i18n="progressIntro">Gardez PlugArr ouvert pendant l’installation. Les étapes terminées apparaissent ci-dessous.</p>
+<div id="progress-state" class="progress-state" role="status"></div><ol id="event-list" class="event-list" aria-live="polite"></ol>
+<details><summary data-i18n="logs">Journal détaillé</summary><pre id="logs"></pre></details>
+<button type="button" class="primary" id="admin" hidden data-i18n="openAdmin">Ouvrir l’administration dans un nouvel onglet</button><p id="admin-notice" class="muted" role="status"></p><a id="admin-link" target="_blank" rel="noopener noreferrer" hidden data-i18n="adminLink">Ouvrir l’administration dans un nouvel onglet</a><button type="button" class="secondary" id="retry" hidden data-i18n="retry">Revoir les réglages et réessayer</button>
+</section>
+<section id="wiring-graph" aria-label="Carte des connexions">
+<div class="graph-header"><h2 id="graph-title">Carte des connexions</h2></div>
+<p id="graph-status" class="graph-status" role="status">Calcul du plan…</p>
+<div class="scene" tabindex="0" aria-label="Graphe : défilement horizontal si nécessaire"><div id="graph-canvas"></div></div>
+<div class="graph-legend" id="graph-legend"></div>
+<div id="graph-count" class="graph-count"></div><progress id="graph-bar" class="graph-progress" max="1" value="0" aria-label="Étapes de câblage traitées"></progress>
+<details><summary id="graph-details-title">Avancement par application</summary><ul id="graph-state-list" class="graph-state-list"></ul></details>
+</section>
+<footer id="footer"><label class="remember"><input id="remember" type="checkbox"><span data-i18n="remember">Utiliser l’interface web au prochain lancement</span></label><div class="actions"><button type="button" id="back" class="secondary" data-i18n="back">Retour</button><button type="submit" id="next" class="primary" data-i18n="next">Continuer</button></div></footer>
+</form>
+</div></main></div>
+</body></html>

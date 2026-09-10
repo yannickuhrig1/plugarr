@@ -836,3 +836,10 @@ EN: dict[str, str] = {
     '[yellow]Aucune installation trouvee.[/yellow]\n[dim]Indiquez ci-dessus le dossier qui contient stack.yml, puis validez avec Entree.[/dim]': '[yellow]No installation found.[/yellow]\n[dim]Enter above the folder holding stack.yml, then confirm with Enter.[/dim]',
     '[green]Sauvegarde terminee.[/green]\n\n{archive}\n{taille} Mo, {fichiers} fichiers, volumes : {volumes}': '[green]Backup complete.[/green]\n\n{archive}\n{taille} MB, {fichiers} files, volumes: {volumes}',
 }
+
+EN.update({
+    "Aucun terminal interactif. Utilisez plugarr web --no-open.": "No interactive terminal. Use plugarr web --no-open.",
+    "Choisir l'interface : web (graphique) ou tui (terminal).": "Choose an interface: web (graphical) or tui (terminal).",
+    "Mode d'interface": "Interface mode",
+    "Memoriser ce choix sur cet ordinateur ?": "Remember this choice on this computer?",
+})

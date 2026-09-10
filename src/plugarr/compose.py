@@ -586,6 +586,9 @@ stack.yml.*
 docker-compose.yml
 acces-plugarr.html
 plugarr.log
+.plugarr-maintenance.json
+.plugarr-maintenance.tmp
+backups/
 """
 
 #: Combien de `stack.yml` precedents sont gardes a cote du courant.

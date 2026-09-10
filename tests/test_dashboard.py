@@ -29,6 +29,15 @@ def test_every_installed_service_gets_a_link():
         assert f":{inst.host_port}" in page, sid
 
 
+def test_service_cards_use_their_embedded_application_logos():
+    page = dashboard.render(make(services=("transmission", "sonarr", "jellyfin")), live=True)
+
+    assert page.count('class="badge app-icon"') >= 3
+    assert page.count('src="data:image/svg+xml;base64,') >= 3
+    assert '<span class="badge">T</span>' not in page
+    assert '<span class="badge">S</span>' not in page
+
+
 def test_services_that_were_not_installed_are_absent():
     page = dashboard.render(make(services=("sonarr",)))
     assert "Sonarr" in page

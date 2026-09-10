@@ -683,6 +683,8 @@ EN: dict[str, str] = {
     "{fournisseur} refuse ces identifiants OpenVPN : l'identifiant ou le mot de passe n'est pas le bon": '{fournisseur} rejects these OpenVPN credentials: the username or the password is wrong',
     "Chez ProtonVPN en OpenVPN, le port entrant depend du suffixe de l'identifiant : essayez d'ajouter +pmp a la fin du votre.": 'With ProtonVPN over OpenVPN, the incoming port depends on the username suffix: try adding +pmp at the end of yours.',
     "NON PROTEGE : {conteneur} est sur le reseau {reseau}, pas dans le tunnel. plugarr ne gere pas ce conteneur et ne peut pas l'y placer : il faut le recreer vous-meme avec network_mode: container:{gluetun}.": 'NOT PROTECTED: {conteneur} is on network {reseau}, not in the tunnel. plugarr does not manage this container and cannot put it there: you have to recreate it yourself with network_mode: container:{gluetun}.',
+    "{clients} n'ecoute toujours pas {port}": '{clients} is still not listening on {port}',
+    "{clients} ecoute maintenant {port}": '{clients} is now listening on {port}',
     'aucun port obtenu aupres de {fournisseur} : le client ne recevra pas de connexions entrantes': 'no port obtained from {fournisseur}: the client will not receive incoming connections',
     'ecoute sur {port}': 'listening on {port}',
     "desynchronise : le VPN a ouvert {annonce}, le client ecoute {port}. Aucune connexion entrante n\'arrive.":  'out of sync: the VPN opened {annonce}, the client listens on {port}. No incoming connection gets through.',

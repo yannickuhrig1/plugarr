@@ -296,6 +296,73 @@ def _controle_port(cfg: StackConfig) -> list[Check]:
     return controles
 
 
+def reparer_port(cfg: StackConfig) -> Check | None:
+    """Repose le port annonce chez les clients qui ne l'ecoutent pas.
+
+    `_controle_port` savait DETECTER la desynchronisation, personne ne la
+    corrigeait : le diagnostic disait « le VPN a ouvert 48406, le client ecoute
+    45270 », et l'utilisateur restait avec le probleme et sans le remede.
+
+    Le cas existe parce que la pose est un EVENEMENT : Gluetun appelle
+    `VPN_PORT_FORWARDING_UP_COMMAND` au moment ou il obtient un port — verifie le
+    2026-09-10 contre la v3.41.3, appel une seconde apres l'attribution. Si le
+    client est recree ENTRE deux attributions, aucun evenement ne survient et il
+    garde son port par defaut jusqu'au renouvellement du bail. C'est le seul
+    avantage reel qu'a une sonde periodique sur un evenement, et il se rattrape
+    ici.
+
+    **On rejoue le script que Gluetun lance lui-meme**, plutot que d'ecrire une
+    seconde pose : deux implementations de la meme chose finiraient par ne plus
+    faire la meme chose, et c'est la pose de Gluetun qui fait foi.
+
+    Et on RELIT avant de conclure. Meme exigence que partout ailleurs : on ne dit
+    pas « j'ai repose le port », on redemande au client ce qu'il ecoute.
+
+    Renvoie None quand il n'y avait rien a reparer — annoncer « rien a faire »
+    a chaque diagnostic noierait le cas ou il y a vraiment eu quelque chose.
+    """
+    from .compose import PORT_SYNC
+
+    releve = ports_entrants(cfg)
+    annonce = releve.get("annonce", 0)
+    if not annonce:
+        return None
+    decales = [sid for sid, port in releve.items() if sid != "annonce" and port != annonce]
+    if not decales:
+        return None
+
+    # Genereux : le script attend que l'interface du client reponde, trente
+    # essais espaces de deux secondes, et il le fait pour chaque client.
+    exec_in(
+        f"{cfg.project_name}-gluetun",
+        ["sh", f"/gluetun/{PORT_SYNC}", str(annonce)],
+        timeout=180,
+    )
+
+    apres = ports_entrants(cfg)
+    restants = [sid for sid in decales if apres.get(sid) != annonce]
+    if restants:
+        return Check(
+            f"{PREFIXE_PORT} (remise en place)",
+            False,
+            t(
+                "{clients} n'ecoute toujours pas {port}",
+                clients=", ".join(sorted(restants)),
+                port=annonce,
+            ),
+            blocking=False,
+        )
+    return Check(
+        f"{PREFIXE_PORT} (remise en place)",
+        True,
+        t(
+            "{clients} ecoute maintenant {port}",
+            clients=", ".join(sorted(decales)),
+            port=annonce,
+        ),
+    )
+
+
 def ip_de_l_hote() -> str | None:
     """Adresse publique de la MACHINE, hors tunnel. None si indeterminable.
 

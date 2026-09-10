@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 
 from . import (
     __version__,
@@ -408,15 +409,33 @@ def install(
         cfg.recyclarr_templates = chosen
 
     if vpn:
-        cfg.vpn = VpnConfig(
-            enabled=True,
-            provider=vpn_provider,
-            vpn_type=vpn_type,
-            openvpn_user=vpn_user,
-            openvpn_password=vpn_pass,
-            wireguard_private_key=vpn_key,
-            countries=vpn_countries,
-        )
+        try:
+            cfg.vpn = VpnConfig(
+                enabled=True,
+                provider=vpn_provider,
+                vpn_type=vpn_type,
+                openvpn_user=vpn_user,
+                openvpn_password=vpn_pass,
+                wireguard_private_key=vpn_key,
+                countries=vpn_countries,
+            )
+        except ValidationError as exc:
+            # Un fournisseur ou un protocole inconnu remontait en
+            # `ValidationError` NUE : traceback pydantic, lien vers
+            # errors.pydantic.dev, et sous l'executable une derniere ligne
+            # « Failed to execute script 'launcher' » qui dit a l'utilisateur
+            # que le programme a plante alors qu'il a simplement fait une faute
+            # de frappe.
+            #
+            # Trouve en eprouvant l'executable de la 0.8.0, pas en relisant le
+            # code. La phrase utile etait pourtant deja ecrite par les
+            # validateurs — « fournisseur VPN inconnu de Gluetun ... Choix
+            # possibles : ... » — elle etait seulement noyee. On ne la reecrit
+            # donc pas, on la sort.
+            for erreur in exc.errors():
+                message = str(erreur.get("msg", ""))
+                console.print(f"[red]{message.removeprefix('Value error, ')}[/red]")
+            raise typer.Exit(1) from exc
         gaps = cfg.vpn.missing()
         if gaps:
             console.print(
@@ -1186,6 +1205,18 @@ def doctor(project_dir: Path = typer.Option(Path("."), help=t("Repertoire du sta
     if fuites:
         console.print("\nProtection VPN du trafic torrent :")
         report.print_checks(fuites)
+
+        # Un diagnostic qui constate un port desynchronise et s'arrete la laisse
+        # l'utilisateur avec le probleme ET sans le remede — alors que le remede
+        # tient en une commande qu'on sait deja lancer. On la lance, et on le
+        # DIT : un diagnostic qui repare en silence serait pire.
+        #
+        # Seulement quand un controle de port a echoue : sans cette condition,
+        # chaque `doctor` relirait les ports une seconde fois pour rien.
+        if any(c for c in fuites if not c.ok and c.name.startswith(vpncheck.PREFIXE_PORT)):
+            remise = vpncheck.reparer_port(cfg)
+            if remise is not None:
+                report.print_checks([remise])
 
     console.print("\nEtat des conteneurs :")
     console.print(Compose(project_dir, cfg.project_name).ps())

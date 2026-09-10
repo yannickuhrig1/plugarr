@@ -769,3 +769,143 @@ def test_un_client_adopte_dans_le_tunnel_est_accepte(monkeypatch):
 
     assert controle.ok
     assert "Netherlands" in controle.detail
+
+
+# ------------------------- un fournisseur mal tape n'est pas un plantage
+
+
+def _invoquer(*args):
+    from typer.testing import CliRunner
+
+    from plugarr import cli
+
+    return CliRunner().invoke(cli.app, ["install", "--dry-run", *args])
+
+
+def test_un_fournisseur_vpn_inconnu_donne_une_erreur_et_non_un_traceback():
+    """Trouve en eprouvant l'executable de la 0.8.0, pas en relisant le code.
+
+    `VpnConfig` refusait bien le fournisseur, mais la `ValidationError` remontait
+    nue : traceback pydantic, lien vers errors.pydantic.dev, et une derniere
+    ligne « Failed to execute script 'launcher' » qui annonce un plantage a
+    quelqu'un qui a simplement fait une faute de frappe.
+
+    La phrase utile etait pourtant deja ecrite par le validateur. Elle etait
+    seulement noyee."""
+    resultat = _invoquer("--vpn", "--vpn-provider", "zorglub", "--vpn-key", "abc")
+
+    assert resultat.exit_code == 1
+    assert "fournisseur VPN inconnu" in resultat.output
+    assert "protonvpn" in resultat.output, "les choix possibles doivent rester lisibles"
+    assert "Traceback" not in resultat.output
+    assert "pydantic.dev" not in resultat.output
+
+
+def test_un_protocole_vpn_inconnu_aussi():
+    """L'autre validateur de `VpnConfig` passait par le meme chemin."""
+    resultat = _invoquer(
+        "--vpn", "--vpn-provider", "protonvpn", "--vpn-type", "ipsec", "--vpn-key", "abc"
+    )
+
+    assert resultat.exit_code == 1
+    assert "type de VPN inconnu" in resultat.output
+    assert "Traceback" not in resultat.output
+
+
+# ------------------------------- reposer le port, pas seulement le constater
+
+
+def _releves(monkeypatch, *suites):
+    """Fait rendre a `ports_entrants` un releve different a chaque appel."""
+    restants = list(suites)
+    monkeypatch.setattr(vpncheck, "ports_entrants", lambda cfg: restants.pop(0))
+    return restants
+
+
+def test_un_port_synchronise_ne_declenche_aucune_remise(monkeypatch):
+    """Annoncer « rien a faire » a chaque diagnostic noierait le cas ou il y a
+    vraiment eu quelque chose."""
+    _releves(monkeypatch, {"annonce": 47878, "qbittorrent": 47878})
+
+    assert vpncheck.reparer_port(_cfg_pf("qbittorrent")) is None
+
+
+def test_sans_port_annonce_il_n_y_a_rien_a_reposer(monkeypatch):
+    """0 est le sentinel de Gluetun : pas de port du tout. Poser 0 chez le client
+    serait pire que ne rien faire."""
+    _releves(monkeypatch, {"annonce": 0, "qbittorrent": 45270})
+
+    assert vpncheck.reparer_port(_cfg_pf("qbittorrent")) is None
+
+
+def test_le_port_desynchronise_est_repose_avec_le_script_de_gluetun(monkeypatch):
+    """On rejoue le script que Gluetun lance lui-meme plutot que d ecrire une
+    seconde pose : deux implementations de la meme chose finiraient par ne plus
+    faire la meme chose."""
+    from plugarr.compose import PORT_SYNC
+
+    _releves(
+        monkeypatch,
+        {"annonce": 48406, "qbittorrent": 45270},
+        {"annonce": 48406, "qbittorrent": 48406},
+    )
+    appels = []
+    monkeypatch.setattr(
+        vpncheck, "exec_in", lambda c, cmd, **kw: (appels.append((c, cmd)), (True, ""))[1]
+    )
+
+    controle = vpncheck.reparer_port(_cfg_pf("qbittorrent"))
+
+    assert appels == [("plugarr-gluetun", ["sh", f"/gluetun/{PORT_SYNC}", "48406"])]
+    assert controle is not None and controle.ok
+    assert "48406" in controle.detail
+
+
+def test_la_remise_est_RELUE_avant_d_etre_annoncee(monkeypatch):
+    """Meme exigence que partout ailleurs : on ne dit pas « j ai repose le
+    port », on redemande au client ce qu il ecoute. Ici la pose echoue en
+    silence et le controle doit le voir."""
+    _releves(
+        monkeypatch,
+        {"annonce": 48406, "qbittorrent": 45270},
+        {"annonce": 48406, "qbittorrent": 45270},
+    )
+    monkeypatch.setattr(vpncheck, "exec_in", lambda c, cmd, **kw: (True, ""))
+
+    controle = vpncheck.reparer_port(_cfg_pf("qbittorrent"))
+
+    assert controle is not None and not controle.ok
+    assert "qbittorrent" in controle.detail
+
+
+def test_la_remise_ne_bloque_jamais(monkeypatch):
+    """Sans port entrant on telecharge tres bien, on partage seulement moins."""
+    _releves(
+        monkeypatch,
+        {"annonce": 48406, "qbittorrent": 45270},
+        {"annonce": 48406, "qbittorrent": 45270},
+    )
+    monkeypatch.setattr(vpncheck, "exec_in", lambda c, cmd, **kw: (True, ""))
+
+    assert vpncheck.reparer_port(_cfg_pf("qbittorrent")).blocking is False
+
+
+def test_doctor_repose_le_port_au_lieu_de_seulement_le_signaler():
+    """Le test porte sur la STRUCTURE : `doctor` doit appeler la remise, et
+    seulement quand un controle de port a echoue — sans cette condition, chaque
+    diagnostic relirait les ports une seconde fois pour rien."""
+    import ast
+    import inspect
+    import textwrap
+
+    from plugarr import cli
+
+    source = textwrap.dedent(inspect.getsource(cli.doctor))
+    arbre = ast.parse(source)
+    appelle = any(
+        isinstance(n, ast.Attribute) and n.attr == "reparer_port" for n in ast.walk(arbre)
+    )
+
+    assert appelle, "doctor doit reposer le port, pas seulement le constater"
+    assert "PREFIXE_PORT" in source, "et seulement si un controle de port a echoue"
+

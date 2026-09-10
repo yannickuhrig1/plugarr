@@ -128,7 +128,7 @@ English.
 **Including when it breaks.** That is the part everyone forgets: a phrase added
 in French and missing from the catalogue breaks nothing, it simply shows up in
 French to someone who asked for English, with no error and no warning. So a
-check collects all **548** displayable phrases — error messages, wiring
+check collects all **639** displayable phrases — error messages, wiring
 warnings, the VPN check's verdict, down to the headers written into your `.env`
 — and **fails if one is missing**, or if the catalogue holds an entry that has
 gone dead:
@@ -542,10 +542,14 @@ nothing anywhere said so. PlugArr therefore drops a script into
 `${CONFIG_ROOT}/gluetun` that Gluetun runs on every assignment; it sets the new
 port on qBittorrent or Transmission from inside the tunnel.
 
-**The check reads the port back from the client.** Same requirement as for
-wiring: we do not say "the port has been set", we read the value back and
-compare. The verdict is **separate** from the protection one, because a
-desynchronised port costs sharing and not exposure — and it never blocks.
+**The check reads the port back from the client, and sets it again if it has
+drifted.** Same requirement as for wiring: we do not say "the port has been set",
+we read the value back and compare. The verdict is **separate** from the
+protection one, because a desynchronised port costs sharing and not exposure —
+and it never blocks. `plugarr doctor` no longer merely reports it: it replays the
+very script Gluetun runs, then **reads back** before concluding. That covers the
+single blind spot of an event-driven mechanism — a client recreated between two
+port attributions gets no call at all.
 
 With ProtonVPN over OpenVPN, the port depends on the username suffix. On the
 test account it arrived **both with and without** `+pmp`, so PlugArr does not

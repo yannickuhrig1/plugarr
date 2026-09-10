@@ -131,7 +131,7 @@ session est en anglais.
 **Y compris quand ça casse.** C'est la partie qu'on oublie : une phrase ajoutée
 en français et absente du catalogue ne casse rien, elle s'affiche simplement en
 français à quelqu'un qui a demandé l'anglais, sans erreur ni avertissement. Un
-contrôle relève donc les **548 phrases** affichables — messages d'erreur,
+contrôle relève donc les **639 phrases** affichables — messages d'erreur,
 avertissements de câblage, verdict du contrôle VPN, jusqu'aux en-têtes écrits
 dans votre `.env` — et **échoue s'il en manque une**, ou si le catalogue porte
 une entrée devenue morte :
@@ -558,10 +558,14 @@ rien nulle part ne le disait. PlugArr dépose donc un script dans
 `${CONFIG_ROOT}/gluetun`, que Gluetun lance à chaque attribution ; il pose le
 nouveau port chez qBittorrent ou Transmission depuis l'intérieur du tunnel.
 
-**Le contrôle relit le port chez le client.** Même exigence que pour le câblage :
-on ne dit pas « j'ai posé le port », on relit la valeur et on la compare. Le
-verdict est **séparé** de celui de la protection, parce qu'un port désynchronisé
-coûte du partage et non de l'exposition — et il n'est jamais bloquant.
+**Le contrôle relit le port chez le client, et le repose s'il a glissé.** Même
+exigence que pour le câblage : on ne dit pas « j'ai posé le port », on relit la
+valeur et on la compare. Le verdict est **séparé** de celui de la protection,
+parce qu'un port désynchronisé coûte du partage et non de l'exposition — et il
+n'est jamais bloquant. `plugarr doctor` ne se contente plus de le signaler : il
+rejoue le script que Gluetun lance lui-même, puis **relit** avant de conclure.
+C'est ce qui rattrape le seul angle mort d'un mécanisme événementiel — un client
+recréé entre deux attributions de port ne reçoit aucun appel.
 
 Chez ProtonVPN en OpenVPN, le port dépend du suffixe de l'identifiant. Sur le
 compte d'essai il est arrivé **avec et sans** `+pmp`, donc PlugArr ne touche pas

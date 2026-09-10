@@ -602,6 +602,57 @@ them good. The marker carries the underscore (`auth_failed`) rather than the wor
 alone, because the log contains `AUTH: Received control message` and
 `Authentication file path` in perfectly normal lines.
 
+### Setting the port is an EVENT, not a poll — verified on 2026-09-10
+
+`VPN_PORT_FORWARDING_UP_COMMAND` does exist in v3.41.3 (read off the binary) and Gluetun
+calls it **one second** after obtaining the port, with the value substituted:
+
+```
+2026-09-10T10:50:27Z INFO [port forwarding] port forwarded is 45726
+up-command appele avec le port 45726 a Thu Sep 10 10:50:28 UTC 2026
+```
+
+That is why PlugArr ships no third-party mod polling Gluetun's API in a loop. An event
+does have a blind spot, and it is real: if the client is recreated **between two
+attributions**, no call happens and it keeps its default port until the lease is renewed.
+`plugarr doctor` therefore replays the script itself when it sees the gap.
+
+### `wget` is not the same everywhere
+
+| Image | `wget` | `--save-cookies` |
+|---|---|---|
+| `qmcgaw/gluetun:v3.41.3` | GNU Wget 1.25.0 | yes |
+| `lscr.io/linuxserver/qbittorrent:5.2.3` | BusyBox 1.37.0 | **no** |
+
+The sync script talks to qBittorrent's API, which requires keeping a session cookie. It
+runs **inside Gluetun**, the only one of the two carrying a real `wget` — an equivalent
+script placed in the qBittorrent container could not authenticate with the same tools.
+
+### qBittorrent 5.2.3: `web_ui_api_key` exists and does nothing
+
+Verified against a real instance, WebAPI **2.15.1**. The key shows up in the preferences:
+
+```
+"web_ui_api_key":""
+```
+
+But it is **inert** in this version:
+
+- `POST app/setPreferences` with `web_ui_api_key` is accepted and the value read back stays empty;
+- no dedicated endpoint (`app/apiKeys`, `app/generateApiKey`, … all answer **404**);
+- set by hand in `qBittorrent.conf` (`WebUI\APIKey=…`), header authentication still fails —
+  `X-Api-Key`, `X-API-Key` and `Authorization` all return **403**.
+
+Authentication therefore goes through `api/v2/auth/login`, username and password. To
+revisit when a qBittorrent release makes that field functional.
+
+Two traps along the way, both observed by querying the instance:
+
+- the WebUI **validates the `Host` header**. From the host on a different published port,
+  everything answers `Unauthorized` until you force `Host: localhost:8080`;
+- it **bans after five failed** authentications (`web_ui_max_auth_fail_count: 5`), which is
+  why the wiring never tries more than four passwords.
+
 ### The artefacts and their permissions
 
 Read off the test bench, and confirmed by searching for every secret in the

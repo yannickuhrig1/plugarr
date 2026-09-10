@@ -1,8 +1,9 @@
 # Tester la branche locale PlugArr
 
 Prérequis : Python 3.11 ou plus récent sous Windows, avec la commande `py`.
-Extraire toute l’archive dans un nouveau dossier. Les fichiers ne sont pas encore
-sur GitHub. Les lanceurs ci-dessous n’utilisent ni GitHub Actions ni Vercel.
+Extraire toute l’archive dans un nouveau dossier. Les sources sont également
+publiées sur la branche GitHub `feature/local-web-wizard` et dans la préversion
+`v0.8.0-web-preview.1`. Les lanceurs ci-dessous n’utilisent pas Vercel.
 
 ## Le plus simple : double-cliquer
 
@@ -73,7 +74,9 @@ les archives créées par ce centre de maintenance.
 ## Mise à jour automatique de plugarr.exe
 
 Le code est intégré, mais la validation du remplacement réel reste à faire sous
-Windows. Aucun nouvel exécutable compilé n’est fourni dans cette archive.
+Windows. Le ZIP de démonstration ne contient pas d’exécutable ; `plugarr.exe`
+est construit séparément par GitHub Actions et joint à la préversion si la
+compilation et ses contrôles réussissent.
 
 Les compilations locales sont protégées contre leur remplacement automatique
 par une release publique. La recherche GitHub reste accessible dans la console.

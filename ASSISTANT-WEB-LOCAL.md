@@ -1,10 +1,10 @@
 # PlugArr — assistant web local
 
 Branche : `feature/local-web-wizard`.
-Base : `d8b3d2b`, dernière branche locale de la console et de la carte V2.
-Cette branche conserve les travaux locaux précédents. Elle n'intègre pas les
-modifications ultérieures de la branche distante `main` (notamment la version
-0.7.1 observée sur GitHub). Aucun fichier n'a été publié.
+Base : PlugArr v0.8.0, commit officiel `ff58ee7`.
+Cette branche conserve les travaux de la console, de la carte V2 et de
+l'assistant web, puis les applique à la version 0.8.0. Elle est distribuée comme
+préversion `v0.8.0-web-preview.1`, distincte de la release stable `v0.8.0`.
 
 ## Essayer sans installer de services
 
@@ -269,5 +269,6 @@ l'accès à l'adresse locale (`ERR_BLOCKED_BY_CLIENT`). Les essais automatisés
 restent distincts d'une validation de rendu sur le PC Windows de l'utilisateur.
 
 Validation de ces corrections : **134 tests ciblés réussis** (assistant,
-profils Recyclarr, graphes, console, page d’accès et empaquetage). Ruff et
-contrôles de syntaxe JavaScript réussis. Aucun déploiement ni publication.
+profils Recyclarr, graphes, console, page d’accès et empaquetage). Après fusion
+avec la v0.8.0 : **1 147 tests réussis, 5 ignorés** et Ruff réussi. Aucun essai
+réel Windows/Docker n'est revendiqué par cette validation Linux.

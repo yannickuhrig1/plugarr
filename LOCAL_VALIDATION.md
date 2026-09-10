@@ -1,9 +1,17 @@
-# Vérifications du paquet local — 6 septembre 2026
+# Vérifications de la préversion web — 10 septembre 2026
 
-Base de l’application : v0.7.0, commit `f5582fc`.
-Branche : `feature/local-console-site-autoupdate`.
-Site : branche `feature/local-discovery-demo`, à partir d’une copie des fichiers
-du commit distant `4ee6786` (le clone Git privé n’était pas disponible).
+Base de l’application : v0.8.0, commit officiel `ff58ee7`.
+Branche : `feature/local-web-wizard`.
+Préversion : `v0.8.0-web-preview.1`.
+
+Validation finale sous Linux : **1 147 tests réussis, 5 ignorés** en 94,15
+secondes. Ruff et le contrôle des différences Git réussissent. L’arbre Git
+transféré sur GitHub correspond exactement à l’arbre local. La compilation et
+l’exécution réelles sous Windows restent confiées au workflow GitHub Actions ;
+aucun test réel Docker n’est revendiqué ici.
+
+Les résultats datés ci-dessous retracent les validations intermédiaires qui ont
+précédé cette fusion avec la v0.8.0.
 
 ## Carte des connexions — modification du 6 septembre
 
@@ -62,5 +70,5 @@ Les nouveaux panneaux de console restent en français. L’audit du catalogue
 existant ne constitue pas une validation de traduction de ces nouveaux panneaux.
 Les limites fonctionnelles sont détaillées dans `LOCAL_TESTING.md`.
 
-Aucun push GitHub, aucune pull request, aucune release et aucun déploiement
-Vercel ou Sites n’ont été effectués pour ce travail local.
+La branche de préversion est publiée séparément de `main`. Aucun déploiement
+Vercel ou Sites n’est nécessaire pour cette version locale de l’assistant.

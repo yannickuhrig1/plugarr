@@ -673,9 +673,11 @@ progress, what will not be done and why. Summary below.
 **The PlugArr console is available.** Run `plugarr serve` on the host to manage
 services, updates, diagnostics, backups and credentials with authenticated access.
 
-The local branch adds connection tests and repair, scheduled backups, history,
-in-console alerts and Windows executable updates. These changes are not a
-published release. See [LOCAL_TESTING.md](LOCAL_TESTING.md).
+The [`v0.8.0-web-preview.1`](../../releases/tag/v0.8.0-web-preview.1)
+pre-release adds a web wizard, a dynamic connection map, targeted tests and
+repairs, scheduled maintenance, history, in-console alerts and Windows
+executable updates. It remains separate from the stable release. See
+[LOCAL_TESTING.md](LOCAL_TESTING.md).
 
 Services still under consideration:
 

@@ -698,10 +698,11 @@ consulter les états, démarrer ou arrêter les services, appliquer leurs mises 
 jour, faire un diagnostic, sauvegarder, ajouter des services et renouveler les
 identifiants. Elle utilise un jeton ou un mot de passe pour l’authentification.
 
-La branche locale ajoute une carte des liaisons *arr, des tests et réparations
-ciblés, une maintenance planifiée, un historique, des alertes dans la console
-et la mise à jour automatique de l’exécutable Windows. Ces changements ne
-constituent pas une release publiée. Voir [LOCAL_TESTING.md](LOCAL_TESTING.md).
+La préversion [`v0.8.0-web-preview.1`](../../releases/tag/v0.8.0-web-preview.1)
+ajoute un assistant web, une carte dynamique des liaisons, des tests et
+réparations ciblés, une maintenance planifiée, un historique, des alertes dans
+la console et la mise à jour automatique de l’exécutable Windows. Elle reste
+séparée de la version stable. Voir [LOCAL_TESTING.md](LOCAL_TESTING.md).
 
 Côté services, dans l'ordre où ils seront étudiés :
 

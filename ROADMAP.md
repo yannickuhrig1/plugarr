@@ -5,7 +5,7 @@
 Où en est PlugArr, ce qui vient ensuite, et pourquoi. Tenue à jour à chaque
 séance de travail.
 
-**Dernière mise à jour : 9 septembre 2026** — version publiée : **0.8.0**
+**Dernière mise à jour : 12 septembre 2026** — version publiée : **0.8.0**
 
 ---
 
@@ -170,6 +170,8 @@ une instance réelle. L'ordre ci-dessous est celui de l'étude.
 | **Tracearr** | Suivi des lectures et détection de partage de comptes. L'image `latest` réclame une base et un Redis externes ; le tag `supervised` réunit le tout en un conteneur. |
 | **Shelfarr** | `ghcr.io/pedro-revez-silva/shelfarr`, **2026.08.31.1**. Demandes de livres pour l'écosystème *arr — un Seerr des livres. Cherche dans Prowlarr, télécharge par qBittorrent, livre à Audiobookshelf. Comble le trou laissé par Readarr, archivé depuis le 27 juin 2025. |
 | **Shelfmark** | `ghcr.io/calibrain/shelfmark`, **v1.3.15**, 60 versions. Interface de recherche et de demande de livres, sources et clients apportés par vous. |
+| **Whisparr v2 et v3** | Demandé par un utilisateur, en opt-in explicite. **Deux applications distinctes sous un même nom**, pas deux versions : la v2 dérive de Sonarr (un site est une série, une scène un épisode, métadonnées ThePornDB), la v3 « Eros » de Radarr (une scène est un film, métadonnées StashDB). La v3 ne reprend pas une bibliothèque rangée par la v2, d'où l'intérêt d'offrir les deux. Images relevées chez hotio : `ghcr.io/hotio/whisparr`, tags `v2` (2.2.0) et `v3` (3.5.0), **toutes deux sur le port 6969** : il faut en décaler un pour qu'ils cohabitent. Leurs API diffèrent comme celles de Sonarr et Radarr : deux câblages, pas un. À vérifier contre une instance réelle avant d'y croire : que Prowlarr câble les deux (son connecteur vise `/api/v3`, qui est la version de l'API et non celle de Whisparr), que le type `WHISPARR` d'autobrr accepte la v3, et que le pré-semis de `config.xml` tient pour l'une et l'autre. |
+| **Deluge** | Demandé à l'usage. Troisième client BitTorrent, à côté de Transmission et de qBittorrent. Image relevée chez linuxserver : `lscr.io/linuxserver/deluge`, tag `2.2.0` (24/08/2026), avec une **seconde ligne `libtorrentv1`** (`libtorrentv1-2.2.0-ls62`, 07/09/2026) : deux bibliothèques libtorrent pour la même version de Deluge, il faudra choisir laquelle on épingle et écrire pourquoi. Interface web sur **8112**, mot de passe par défaut `deluge` — aucun heurt de port avec les clients déjà au catalogue. Le piège est ailleurs : les *arr exigent que **les greffons WebUI ET Label soient actifs**, et sans Label il n'y a aucune catégorie, donc aucun suivi des téléchargements. C'est le même angle mort que les répertoires vides des catégories SABnzbd, et il se traite au pré-semis, pas dans une note de README. À vérifier contre une instance réelle avant d'y croire : que le connecteur *arr s'authentifie par mot de passe SEUL, sans identifiant, contrairement à Transmission et qBittorrent ; que le greffon Label s'active depuis un fichier de configuration et pas seulement depuis l'interface ; et ce que Deluge fait du port entrant, car `port_sync_clients` ne rend aujourd'hui qu'**un** client (qBittorrent prioritaire) et Deluge devra soit y entrer, soit être explicitement exclu du port entrant plutôt que de l'être par omission. |
 
 **Readarr n'est pas au programme** : le projet est archivé depuis le 27 juin 2025.
 
@@ -196,7 +198,57 @@ reste une commande à lancer.
 | Renouveler une clé API, avec recâblage | ✅ |
 | Ajouter un service absent de l'installation | ✅ |
 | Démarrage automatique, sans lancer de commande | ✅ 0.1.9 |
+| Gluetun sur la page : état, redémarrage, mise à jour, changement de serveur | ⬜ à faire |
 | Console traduite en anglais | ⬜ à faire |
+
+**Gluetun manque à la page, et pas de la même façon selon la fonction.** Demandé
+à l'usage. Le relevé, avant d'écrire quoi que ce soit :
+
+- **Son état est déjà là.** `status_payload` l'ajoute quand le VPN est actif, et
+  le diagnostic le sonde comme les autres. Ce qui manque, c'est la **carte** :
+  `dashboard.py` construit ses cartes depuis `cfg.services`, où Gluetun n'entre
+  pas. Il n'est au catalogue d'aucune façon — il n'existe que dans le document
+  compose, écrit par `_gluetun_block`.
+- **Le redémarrer est refusé.** `/api/action` vérifie `cfg.enabled(service)`, qui
+  répond non pour Gluetun. Le bouton n'existe pas, et s'il existait il serait
+  rejeté. C'est la partie la moins chère du lot.
+- **Le mettre à jour n'a rien à lire.** Son tag est en dur dans `compose.py`
+  (`GLUETUN_TAG = "v3.41.3"`), pas dans une `ServiceInstance.image`. Or
+  `apply_update` lit précisément cette image. Il faut donc d'abord donner à
+  Gluetun une image épinglée dans le modèle, sinon la console n'a aucune version
+  à comparer ni à remplacer.
+- **Changer de serveur ne passe pas par son API.** Son serveur de contrôle
+  expose `GET/PUT /v1/vpn/status`, `GET /v1/vpn/settings`, `GET/PUT
+  /v1/portforward`, `GET/PUT /v1/dns/status`, `GET/PUT /v1/updater/status` et
+  `GET /v1/publicip/ip` — **aucune route ne change le pays ou le serveur**. Il
+  faut réécrire l'environnement (`SERVER_COUNTRIES` et ses variantes selon le
+  fournisseur) puis **recréer le conteneur**.
+
+Et c'est là le piège à ne pas emballer joliment : recréer Gluetun emporte tout
+ce qui tourne en `network_mode: service:gluetun`. Les clients protégés tombent
+avec lui. « Changer de serveur » n'est donc pas un bouton anodin à côté de
+« redémarrer » : c'est une interruption de tous les téléchargements, et la page
+doit le dire avant, pas après.
+
+Deux fonctions distinctes se cachent d'ailleurs derrière la demande, et les
+confondre dans l'interface serait une erreur :
+
+- **se reconnecter** — `PUT /v1/vpn/status {"status":"stopped"}` puis
+  `{"status":"running"}` remonte le tunnel sans recréer le conteneur. Quand
+  plusieurs localisations sont configurées, c'est le moyen de changer de serveur
+  DANS la liste déjà choisie, sans toucher au compose et sans emporter les
+  clients ;
+- **changer de localisation** — réécriture de `stack.yml`, régénération du
+  compose, recréation du conteneur. Coûteux, et à confirmer.
+
+Deux contraintes de mise en œuvre, enfin. Le port 8000 du serveur de contrôle
+**n'est jamais publié sur l'hôte**, volontairement : c'est ce qui rend le
+contrôle de fuite concluant. La console devra donc l'atteindre par `exec_in`,
+comme `vpncheck` le fait déjà, et non par une requête HTTP depuis l'hôte. Et
+après tout changement de serveur il faut rejouer le contrôle de fuite ET la
+synchronisation du port entrant : `VPN_PORT_FORWARDING_UP_COMMAND` n'est appelé
+que lorsque Gluetun obtient un port, donc un client recréé entre deux
+attributions garde l'ancien.
 
 **La console vivante parle français, en dur.** `_LIVE_SCRIPT`, dans
 `dashboard.py`, écrit ses libellés directement dans le JavaScript : « en
@@ -227,6 +279,83 @@ et démarre toute seule avec `plugarr autostart`. Le confort recherché est le
 même. Et parce qu'une console qui change des mots de passe doit s'authentifier
 sérieusement, `plugarr admin-password` pose un mot de passe : empreinte seule
 dans `stack.yml`, sessions expirables, tentatives limitées.
+
+---
+
+## Choisir le client de téléchargement
+
+Demandé à l'usage : « lorsqu'on met plusieurs logiciels de téléchargement,
+demander vers lequel on crée le lien ».
+
+Aujourd'hui PlugArr ne demande rien, et ce n'est pas neutre. Le plan de câblage
+déclare **chaque** client dans **chaque** *arr, tous avec `priority: 1`. Or la
+documentation de Sonarr est explicite : « Round-Robin is used for clients of the
+same type (torrent/usenet) that have the same priority ». Deux clients torrent
+installés, et les épisodes partent donc **alternativement** dans l'un et dans
+l'autre. Personne ne l'a demandé, et rien ne le dit.
+
+Le cas se présente précisément quand quelqu'un installe qBittorrent pour son
+interface `qui` ou Flood tout en gardant Transmission, ou l'inverse : il a un
+client principal en tête, et PlugArr en fabrique deux à égalité.
+
+Ce qu'il reste à faire :
+
+- [ ] Demander le client **préféré** dans l'assistant, seulement quand plusieurs
+      clients du même protocole sont cochés. Une question qui ne se pose que
+      lorsqu'elle a un sens.
+- [ ] Le traduire en priorités plutôt qu'en suppressions : le client choisi passe
+      à `priority: 1`, les autres descendent. Ils restent déclarés et
+      fonctionnels, ce qui préserve le repli et n'efface rien d'une installation
+      existante.
+- [ ] Poser la même question pour l'Usenet dès que Deluge ou un second client
+      Usenet entrera : le round-robin ne joue qu'entre clients de même protocole,
+      donc SABnzbd à côté de qBittorrent ne pose pas ce problème.
+- [ ] Étudier l'affectation **par indexeur**, que Prowlarr et les *arr offrent en
+      option avancée (« Download Client - Select and specify which download
+      client is used for grabs from this indexer »). C'est plus fin que le choix
+      global, et c'est la seule voie officielle pour router par source.
+
+**Une précision sur la demande.** Seerr n'entre pas dans ce choix : il ne
+connaît aucun client de téléchargement. Il déclare Sonarr et Radarr, et c'est
+eux qui téléchargent. Le réglage porte donc sur les *arr et sur Prowlarr, et le
+poser ailleurs n'aurait rien à régler.
+
+---
+
+## Personnalisation des interfaces
+
+Demandé à l'usage : pouvoir remplacer l'interface web d'un service, ou lui poser
+un thème, sans sortir de PlugArr.
+
+Deux mécanismes, tous deux portés par les mods linuxserver.io — donc limités aux
+images `lscr.io/...` du catalogue. Gluetun, Recyclarr, Seerr et Silo n'en sont
+pas et resteront à l'écart.
+
+| | Ce qu'il reste à faire |
+|---|---|
+| **VueTorrent** | Interface de remplacement pour qBittorrent, **v2.35.0** (24/08/2026). Mod relevé : `ghcr.io/vuetorrent/vuetorrent-lsio-mod:latest`, qui ne fonctionne **qu'avec** `lscr.io/linuxserver/qbittorrent`. Le mod ne suffit pas : deux réglages doivent suivre DANS qBittorrent, `WebUI\AlternativeUIEnabled=true` et `WebUI\RootFolder=/vuetorrent`. Bonne nouvelle, c'est exactement la forme que le pré-semis écrit déjà dans `qBittorrent.conf` — ça se pose donc là, et pas à la main après coup. |
+| **theme.park** | Thèmes pour les interfaces existantes, sans les remplacer. Mod relevé : `ghcr.io/themepark-dev/theme.park:<app>`, réglé par `TP_THEME` et, au besoin, `TP_DOMAIN`, `TP_SCHEME`, `TP_ADDON`, `TP_COMMUNITY_THEME`. Couvre Sonarr, Radarr, Lidarr, Prowlarr, Bazarr, Jellyfin, qBittorrent, Deluge et SABnzbd, entre autres — un mod par application, donc une valeur par service et non un réglage global. |
+
+**Ce que ça coûte, et c'est le point à trancher avant d'écrire une ligne.** Un
+mod est une archive téléchargée et extraite **au démarrage du conteneur**, avant
+son init. Trois conséquences, aucune anodine :
+
+- `DOCKER_MODS` vise `:latest`. Tout le catalogue est épinglé par tag, et Silo
+  par condensat, précisément pour qu'une installation soit reproductible. Un mod
+  en `latest` rouvre la porte qu'on a fermée : deux démarrages du même compose
+  peuvent ne pas donner la même interface, et une régression du mod arrive sans
+  qu'on ait rien changé ;
+- le démarrage réclame alors le réseau. Un conteneur qui redémarre sans accès à
+  GitHub perd son thème, ou échoue, selon le mod. Une pile média doit pouvoir
+  redémarrer hors ligne ;
+- plusieurs mods sur un même service se séparent par `|` dans une seule
+  variable. VueTorrent et theme.park sur qBittorrent, c'est donc `mod1|mod2`
+  dans `DOCKER_MODS`, et il faudra vérifier ce que font deux mods qui touchent
+  la même interface.
+
+La voie honnête est probablement d'épingler le mod par tag comme le reste, de le
+proposer en option explicite plutôt que par défaut, et d'écrire dans l'assistant
+ce que ça implique. Pas de l'activer en silence pour que ce soit joli.
 
 ---
 

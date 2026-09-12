@@ -5,7 +5,7 @@
 Where PlugArr stands, what comes next, and why. Kept up to date after every
 working session.
 
-**Last updated: 9 September 2026** — published version: **0.8.0**
+**Last updated: 12 September 2026** — published version: **0.8.0**
 
 ---
 
@@ -168,6 +168,8 @@ real instance. The order below is the order of study.
 | **Tracearr** | Playback tracking and account sharing detection. The `latest` image demands an external database and Redis; the `supervised` tag bundles everything into one container. |
 | **Shelfarr** | `ghcr.io/pedro-revez-silva/shelfarr`, **2026.08.31.1**. Book requests for the *arr ecosystem — a Seerr for books. Searches through Prowlarr, downloads via qBittorrent, delivers to Audiobookshelf. Fills the hole left by Readarr, archived since 27 June 2025. |
 | **Shelfmark** | `ghcr.io/calibrain/shelfmark`, **v1.3.15**, 60 releases. A search and request UI for books, with sources and clients brought by you. |
+| **Whisparr v2 and v3** | Requested by a user, as an explicit opt-in. **Two distinct applications sharing one name**, not two versions: v2 derives from Sonarr (a site is a series, a scene an episode, ThePornDB metadata), v3 "Eros" from Radarr (a scene is a movie, StashDB metadata). v3 does not take over a library organised by v2, hence the point of offering both. Images recorded at hotio: `ghcr.io/hotio/whisparr`, tags `v2` (2.2.0) and `v3` (3.5.0), **both on port 6969**: one must be shifted for them to coexist. Their APIs differ the way Sonarr's and Radarr's do: two wirings, not one. To verify against a real instance before relying on it: that Prowlarr wires both (its connector targets `/api/v3`, which is the API version and not Whisparr's), that autobrr's `WHISPARR` type accepts v3, and that pre-seeding `config.xml` holds for each. |
+| **Deluge** | Requested in use. A third BitTorrent client, alongside Transmission and qBittorrent. Image recorded at linuxserver: `lscr.io/linuxserver/deluge`, tag `2.2.0` (2026-08-24), with a **second `libtorrentv1` line** (`libtorrentv1-2.2.0-ls62`, 2026-09-07): two libtorrent libraries for the same Deluge version, so we will have to pick which one we pin and write down why. Web interface on **8112**, default password `deluge` — no port clash with the clients already in the catalogue. The trap is elsewhere: the *arr require **both the WebUI AND Label plugins to be active**, and without Label there are no categories at all, therefore no download tracking. That is the same blind spot as SABnzbd's empty category directories, and it belongs in pre-seeding, not in a README note. To verify against a real instance before relying on it: that the *arr connector authenticates with a password ALONE, without a username, unlike Transmission and qBittorrent; that the Label plugin can be enabled from a configuration file and not only from the interface; and what Deluge does with the incoming port, because `port_sync_clients` currently returns only **one** client (qBittorrent first) and Deluge will have to either join it or be excluded from port forwarding explicitly rather than by omission. |
 
 **Readarr is not on the list**: the project has been archived since 27 June 2025.
 
@@ -198,7 +200,55 @@ a command you have to launch.
 | Rotate an API key, with re-wiring | ✅ |
 | Add a service missing from the installation | ✅ |
 | Automatic startup, without launching a command | ✅ 0.1.9 |
+| Gluetun on the page: status, restart, update, server change | ⬜ to do |
 | Console translated into English | ⬜ to do |
+
+**Gluetun is missing from the page, and not in the same way for each function.**
+Requested in use. What was recorded, before writing anything:
+
+- **Its status is already there.** `status_payload` adds it when the VPN is on,
+  and the diagnostic probes it like the others. What is missing is the **card**:
+  `dashboard.py` builds its cards from `cfg.services`, which Gluetun does not
+  enter. It is in the catalogue in no form at all — it exists only in the compose
+  document, written by `_gluetun_block`.
+- **Restarting it is refused.** `/api/action` checks `cfg.enabled(service)`,
+  which answers no for Gluetun. The button does not exist, and if it did it would
+  be rejected. This is the cheapest part of the lot.
+- **Updating it has nothing to read.** Its tag is hardcoded in `compose.py`
+  (`GLUETUN_TAG = "v3.41.3"`), not in a `ServiceInstance.image`. And
+  `apply_update` reads exactly that image. Gluetun must therefore first be given
+  a pinned image in the model, otherwise the console has no version to compare or
+  to replace.
+- **Changing servers does not go through its API.** Its control server exposes
+  `GET/PUT /v1/vpn/status`, `GET /v1/vpn/settings`, `GET/PUT /v1/portforward`,
+  `GET/PUT /v1/dns/status`, `GET/PUT /v1/updater/status` and
+  `GET /v1/publicip/ip` — **no route changes the country or the server**. The
+  environment has to be rewritten (`SERVER_COUNTRIES` and its per-provider
+  variants), then the **container recreated**.
+
+And there lies the trap not to wrap up prettily: recreating Gluetun takes down
+everything running in `network_mode: service:gluetun`. The protected clients fall
+with it. "Change server" is therefore not a harmless button next to "restart":
+it interrupts every download, and the page must say so beforehand, not after.
+
+Two distinct functions in fact hide behind the request, and confusing them in the
+interface would be a mistake:
+
+- **reconnect** — `PUT /v1/vpn/status {"status":"stopped"}` then
+  `{"status":"running"}` brings the tunnel back up without recreating the
+  container. When several locations are configured, this is the way to change
+  server WITHIN the list already chosen, without touching the compose and
+  without taking the clients down;
+- **change location** — rewriting `stack.yml`, regenerating the compose,
+  recreating the container. Expensive, and to be confirmed.
+
+Two implementation constraints, finally. The control server's port 8000 is
+**never published on the host**, deliberately: that is what makes the leak check
+conclusive. The console will therefore have to reach it through `exec_in`, as
+`vpncheck` already does, and not with an HTTP request from the host. And after
+any server change, both the leak check AND the incoming-port synchronisation must
+be replayed: `VPN_PORT_FORWARDING_UP_COMMAND` is only called when Gluetun obtains
+a port, so a client recreated between two allocations keeps the old one.
 
 **The live console speaks French, hardcoded.** `_LIVE_SCRIPT`, in
 `dashboard.py`, writes its labels straight into the JavaScript: "en marche",
@@ -228,6 +278,82 @@ its own with `plugarr autostart`. The convenience sought is the same. And becaus
 a console that changes passwords must authenticate itself seriously, `plugarr
 admin-password` sets a password: hash only in `stack.yml`, expiring sessions,
 rate-limited attempts.
+
+---
+
+## Choosing the download client
+
+Requested in use: "when you install several download clients, ask which one the
+link is created towards".
+
+Today PlugArr asks nothing, and that is not neutral. The wiring plan declares
+**every** client in **every** *arr, all with `priority: 1`. Sonarr's own
+documentation is explicit: "Round-Robin is used for clients of the same type
+(torrent/usenet) that have the same priority". Install two torrent clients and
+episodes therefore land **alternately** in one and the other. Nobody asked for
+that, and nothing says it is happening.
+
+The case arises precisely when someone installs qBittorrent for its `qui` or
+Flood interface while keeping Transmission, or the other way round: they have a
+main client in mind, and PlugArr builds two of them as equals.
+
+What remains to be done:
+
+- [ ] Ask for the **preferred** client in the wizard, only when several clients
+      of the same protocol are selected. A question that is only asked when it
+      means something.
+- [ ] Express it as priorities rather than as removals: the chosen client goes to
+      `priority: 1`, the others move down. They stay declared and working, which
+      keeps the fallback and erases nothing from an existing installation.
+- [ ] Ask the same question for Usenet as soon as a second Usenet client appears:
+      round-robin only applies between clients of the same protocol, so SABnzbd
+      next to qBittorrent does not raise this problem.
+- [ ] Study **per-indexer** assignment, which Prowlarr and the *arr offer as an
+      advanced option ("Download Client - Select and specify which download
+      client is used for grabs from this indexer"). It is finer than a global
+      choice, and it is the only official way to route by source.
+
+**One correction to the request.** Seerr is not part of this choice: it knows no
+download client at all. It declares Sonarr and Radarr, and they are the ones
+that download. The setting therefore belongs to the *arr and to Prowlarr, and
+putting it anywhere else would have nothing to settle.
+
+---
+
+## Customising the interfaces
+
+Requested in use: being able to replace a service's web interface, or give it a
+theme, without leaving PlugArr.
+
+Two mechanisms, both carried by linuxserver.io mods — therefore limited to the
+catalogue's `lscr.io/...` images. Gluetun, Recyclarr, Seerr and Silo are not
+among them and will stay out.
+
+| | What remains to be done |
+|---|---|
+| **VueTorrent** | A replacement interface for qBittorrent, **v2.35.0** (2026-08-24). Mod recorded: `ghcr.io/vuetorrent/vuetorrent-lsio-mod:latest`, which works **only** with `lscr.io/linuxserver/qbittorrent`. The mod is not enough: two settings must follow INSIDE qBittorrent, `WebUI\AlternativeUIEnabled=true` and `WebUI\RootFolder=/vuetorrent`. Good news, that is exactly the shape pre-seeding already writes into `qBittorrent.conf` — so that is where it belongs, not in a manual step afterwards. |
+| **theme.park** | Themes for the existing interfaces, without replacing them. Mod recorded: `ghcr.io/themepark-dev/theme.park:<app>`, driven by `TP_THEME` and, if needed, `TP_DOMAIN`, `TP_SCHEME`, `TP_ADDON`, `TP_COMMUNITY_THEME`. Covers Sonarr, Radarr, Lidarr, Prowlarr, Bazarr, Jellyfin, qBittorrent, Deluge and SABnzbd, among others — one mod per application, so one value per service and not a single global setting. |
+
+**What it costs, and this is the point to settle before writing a line.** A mod
+is an archive downloaded and extracted **when the container boots**, before its
+init. Three consequences, none of them harmless:
+
+- `DOCKER_MODS` targets `:latest`. The whole catalogue is pinned by tag, and Silo
+  by digest, precisely so that an installation is reproducible. A mod on `latest`
+  reopens the door we closed: two boots of the same compose may not give the same
+  interface, and a regression in the mod arrives without us having changed
+  anything;
+- boot then requires the network. A container restarting without access to
+  GitHub loses its theme, or fails, depending on the mod. A media stack must be
+  able to restart offline;
+- several mods on one service are separated by `|` in a single variable.
+  VueTorrent and theme.park on qBittorrent is therefore `mod1|mod2` in
+  `DOCKER_MODS`, and we will have to check what two mods touching the same
+  interface do to each other.
+
+The honest route is probably to pin the mod by tag like everything else, to offer
+it as an explicit option rather than a default, and to write in the wizard what
+it implies. Not to enable it silently because it looks nicer.
 
 ---
 

@@ -78,6 +78,62 @@ def test_demo_goes_from_catalog_to_completion_without_docker_or_user_config(serv
     forbidden.assert_not_called()
 
 
+def test_un_corps_refuse_recoit_sa_reponse_et_pas_une_coupure(server):
+    """L'instabilite qui deplacait l'echec de test en test.
+
+    Refuser un POST sans lire son corps laisse des octets non lus dans la
+    socket. La fermer dans cet etat fait repondre un RST a la pile TCP, et le
+    client perd la reponse deja ecrite : « [WinError 10053] Une connexion
+    etablie a ete abandonnee » au lieu du 400 annonce.
+
+    A 65 537 octets le corps tient souvent dans les tampons, et la suite
+    echouait donc environ une fois sur trois, sur un test different a chaque
+    fois. A 5 Mo c'est certain. Dans un navigateur, cela donne un
+    « Failed to fetch » la ou l'assistant avait une phrase a dire.
+
+    Les quatre chemins de refus sont couverts : la taille, le type de contenu,
+    l'origine et le jeton. Chacun repond sans le corps, donc chacun peut fermer
+    sur des octets non lus.
+    """
+    _, client = server
+    gros = "x" * 5_000_000
+
+    taille = client.post(
+        "/api/install", content=gros, headers={"Content-Type": "application/json"}
+    )
+    assert taille.status_code == 400
+    assert "error" in taille.json(), "le refus doit porter son message, pas une coupure"
+
+    typage = client.post("/api/install", content=gros, headers={"Content-Type": "text/plain"})
+    assert typage.status_code == 400
+
+    origine = client.post(
+        "/api/install",
+        content=gros,
+        headers={"Content-Type": "application/json", "Origin": "https://attaquant.test"},
+    )
+    assert origine.status_code == 403
+
+    jeton = client.post(
+        "/api/install",
+        content=gros,
+        headers={"Content-Type": "application/json", "Authorization": ""},
+    )
+    assert jeton.status_code == 401
+
+
+def test_la_vidange_est_plafonnee(server):
+    """Un Content-Length enorme ne doit pas faire lire des giga-octets.
+
+    Le plafond est assume : au-dela, la coupure nette est preferable a une
+    lecture sans fin. Aucun client legitime n'envoie autant, et le serveur
+    n'ecoute que sur 127.0.0.1 derriere un jeton.
+    """
+    from plugarr.admin import VIDANGE_MAX
+
+    assert 0 < VIDANGE_MAX <= 64 * 1024 * 1024
+
+
 def test_api_rejects_other_origins_hosts_and_missing_sessions(server):
     _, client = server
     assert client.get("/").status_code == 200

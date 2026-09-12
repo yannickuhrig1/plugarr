@@ -42,6 +42,7 @@ from . import (
     vpnservers,
     wizard_graph,
 )
+from .admin import vider_corps_requete
 from .clients import recyclarr
 from .clients.arr import ArrClient
 from .clients.prowlarr import IndexerDefinition, ProwlarrIndexers
@@ -380,6 +381,12 @@ class WizardState:
                 current.image = old.image or current.image
                 current.extra_ports = dict(old.extra_ports)
                 current.secret_key = old.secret_key or current.secret_key
+            # Les ports repris valaient pour l'ANCIENNE selection.
+            # `build_config` avait deja resolu les conflits ; on vient d'ecrire
+            # par-dessus. Sans cette seconde passe, ajouter Jellyfin a une pile
+            # Silo restaurait le 8096 de Silo et le compose publiait deux fois
+            # le meme port, pour toute la pile.
+            orchestrator.resolve_port_conflicts(cfg)
             if self.previous_project_dir is not None:
                 self.project_dir = self.previous_project_dir
         cfg.project_dir = self.project_dir
@@ -1246,14 +1253,19 @@ class WizardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.allowed():
+            # Vider le corps avant de fermer : sinon la pile TCP repond un RST
+            # et le client perd le 401 ou le 403 qu'on vient d'ecrire.
+            vider_corps_requete(self)
             return
         try:
             if self.headers.get("Content-Type", "").split(";")[
                 0
             ] != "application/json" or self.headers.get("Transfer-Encoding"):
+                vider_corps_requete(self)
                 raise ValueError("Corps JSON requis.")
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= 65536:
+                vider_corps_requete(self)
                 raise ValueError("Taille de requete refusee.")
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):

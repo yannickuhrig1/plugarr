@@ -248,6 +248,50 @@ def check_project_collision(cfg: StackConfig, project_dir: Path | None) -> Check
     )
 
 
+def check_port_doublons(cfg: StackConfig) -> list[Check]:
+    """Deux services de NOTRE pile qui publient le meme port. BLOQUANT.
+
+    Le controle qui manquait a cote de `check_port_free`, et qui ne pouvait pas
+    etre le meme : celui-la sonde l'HOTE, et ne voit donc que ce qui ecoute
+    deja. Un conflit entre deux services que nous allons demarrer nous-memes ne
+    fait ecouter personne : les deux lignes annoncent « libre », et
+    `docker compose up` echoue ensuite pour la pile ENTIERE avec
+    « port is already allocated ».
+
+    Reproduit : une pile Silo seul, puis Jellyfin ajoute. Silo publie une API
+    compatible Jellyfin sur 8096 en port supplementaire ; `resolve_port_conflicts`
+    la decale bien quand Jellyfin arrive, mais l'assistant web restaurait ensuite
+    les ports de l'ancienne installation PAR-DESSUS ce decalage. Le compose
+    publiait 8096 deux fois, et le preflight le declarait libre.
+
+    La cause est corrigee dans l'assistant ; ce controle reste le filet. Il ne
+    suppose rien du chemin qui a produit la configuration, et c'est precisement
+    ce qu'on veut d'un preflight.
+    """
+    proprietaires: dict[int, list[str]] = {}
+    for sid in catalog.STARTUP_ORDER:
+        if not cfg.enabled(sid):
+            continue
+        inst = cfg.services[sid]
+        for port in [inst.host_port, *sorted(inst.extra_ports.values())]:
+            if port:
+                proprietaires.setdefault(port, []).append(sid)
+    return [
+        Check(
+            f"port {port}",
+            False,
+            t(
+                "publie deux fois par cette pile : {services}. `docker compose up` "
+                "echouerait pour la pile entiere. Changez le port de l'un des deux "
+                "dans stack.yml.",
+                services=", ".join(catalog.get(s).display_name for s in services),
+            ),
+        )
+        for port, services in sorted(proprietaires.items())
+        if len(services) > 1
+    ]
+
+
 def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
     checks = check_docker()
     nos_ports = our_published_ports(cfg, project_dir)
@@ -274,6 +318,9 @@ def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
                 )
             else:
                 checks.append(check_port_free(port, sid))
+    # Un conflit INTERNE ne fait ecouter personne : les lignes ci-dessus le
+    # declarent libre. Il se voit en comparant le plan a lui-meme.
+    checks.extend(check_port_doublons(cfg))
     # AVANT l'espace disque et les hardlinks, et surtout avant toute ecriture :
     # les deux racines doivent etre inscriptibles. C'est le controle qui
     # manquait. Sans lui, un chemin impossible ne se signalait qu'en

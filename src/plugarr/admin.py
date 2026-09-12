@@ -602,6 +602,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if not self._authorised():
             self._deny()
+            # Vider le corps avant de fermer : sinon la pile TCP repond un RST
+            # et le client perd le refus qu'on vient d'ecrire.
+            vider_corps_requete(self)
             return
         # Les actions qui touchent Docker ou les fichiers restent serialisees,
         # mais sous le verrou d'OPERATION : les lectures d'etat passent.
@@ -612,11 +615,13 @@ class _Handler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         if route not in ({"/api/action", "/api/update", "/api/rotate", "/api/add", "/api/backup"} | admin_extensions.POST_ROUTES):
             self._json({"error": "route inconnue"}, HTTPStatus.NOT_FOUND)
+            vider_corps_requete(self)
             return
 
         try:
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 <= length <= 16384:
+                vider_corps_requete(self)
                 raise ValueError('body too large')
             payload = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(payload, dict):
@@ -766,6 +771,39 @@ class _Handler(BaseHTTPRequestHandler):
             {"ok": ok, "service": service, "action": action, "message": message[:400]},
             HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
         )
+
+
+#: Plafond de vidange d'un corps refuse. Au-dela, on accepte la coupure nette :
+#: aucun client legitime n'envoie autant, et les deux serveurs n'ecoutent que
+#: sur 127.0.0.1 derriere un jeton.
+VIDANGE_MAX = 8 * 1024 * 1024
+
+
+def vider_corps_requete(handler, limite: int = VIDANGE_MAX) -> None:
+    """Lit et jette le corps d'une requete qu'on refuse, AVANT de fermer.
+
+    Panne reproduite : un POST de 5 Mo recevait
+    « [WinError 10053] Une connexion etablie a ete abandonnee » au lieu du 400
+    annonce. Refuser sans lire laisse des octets non lus dans la socket ; la
+    fermer dans cet etat fait repondre un RST a la pile TCP, et le client perd
+    la reponse deja ecrite.
+
+    Elle se montrait comme une instabilite plutot que comme un defaut : a
+    65 537 octets le corps tient souvent dans les tampons, et la suite de tests
+    echouait environ une fois sur trois, sur un test different a chaque fois.
+    Dans un navigateur, cela donne un « Failed to fetch » la ou l'assistant
+    avait une phrase a dire.
+    """
+    try:
+        reste = int(handler.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        return
+    reste = min(max(reste, 0), limite)
+    while reste > 0:
+        morceau = handler.rfile.read(min(reste, 65536))
+        if not morceau:
+            return
+        reste -= len(morceau)
 
 
 class _Server(ThreadingHTTPServer):

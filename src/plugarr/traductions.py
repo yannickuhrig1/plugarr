@@ -537,6 +537,12 @@ EN: dict[str, str] = {
     'plugin `docker compose` absent. Installez docker-compose-plugin.': '`docker compose` plugin missing. Install docker-compose-plugin.',
     'libre': 'free',
     'deja utilise. Changez le port de {service} dans stack.yml.': "already in use. Change {service}'s port in stack.yml.",
+    "publie deux fois par cette pile : {services}. `docker compose up` "
+    "echouerait pour la pile entiere. Changez le port de l'un des deux "
+    "dans stack.yml.": (
+        "published twice by this stack: {services}. `docker compose up` would fail "
+        "for the whole stack. Change one of the two ports in stack.yml."
+    ),
     'occupe par votre propre pile plugarr': 'used by your own plugarr stack',
     'racine des donnees': 'data root',
     'racine des configurations': 'config root',

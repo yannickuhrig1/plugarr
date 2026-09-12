@@ -54,29 +54,34 @@ def test_console_still_answers_while_a_backup_runs(live, monkeypatch, tmp_path):
     a real CONFIG_ROOT, with no service state, no graph and no usable button in
     between.
     """
-    import time
-
     client, _maintenance = live
-    started = threading.Event()
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
     archive = tmp_path / 'slow.zip'
     archive.write_bytes(b'archive')
 
     def slow(*_args, **_kwargs):
+        # Pas de sleep : l'archivage dure exactement le temps que ce test lui
+        # laisse. Une borne en secondes se serait fait piéger par la charge de
+        # la machine, et c'est arrivé — l'invariant n'est pas « status répond
+        # vite », c'est « status répond SANS attendre la fin ».
         started.set()
-        time.sleep(3)
+        release.wait(30)
+        finished.set()
         return SimpleNamespace(archive=archive, fichiers=1, volumes=[], mega=0.1, arret=False)
 
     monkeypatch.setattr('plugarr.maintenance.sauvegarde.sauvegarder', slow)
     with httpx.Client(base_url=str(client.base_url),
                       cookies={'plugarr_token': 'test-token'}, trust_env=False) as reader:
-        worker = threading.Thread(target=lambda: client.post('/api/backup', timeout=30))
+        worker = threading.Thread(target=lambda: client.post('/api/backup', timeout=60))
         worker.start()
-        assert started.wait(10)
-        begun = time.monotonic()
-        assert reader.get('/api/status', timeout=10).status_code == 200
-        elapsed = time.monotonic() - begun
-        worker.join(timeout=30)
-    assert elapsed < 2, f'/api/status a attendu la sauvegarde ({elapsed:.1f}s)'
+        assert started.wait(10), "la sauvegarde n'a pas demarre"
+        answered = reader.get('/api/status', timeout=10)
+        pending = not finished.is_set()
+        release.set()
+        worker.join(timeout=60)
+
+    assert answered.status_code == 200
+    assert pending, '/api/status n a repondu qu apres la fin de la sauvegarde'
 
 
 def test_a_backup_does_not_raise_alerts_about_the_stack_it_stopped(live, monkeypatch, tmp_path):

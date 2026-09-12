@@ -14,12 +14,10 @@ presentent pour de vrai :
   forme — Docker retient le DIGEST, donc l'installation est reproductible, et le
   tag reste la pour etre lu.
 
-Pourquoi ce module existe maintenant : deux services de la feuille de route ne
-publient aucune version utilisable. Silo n'expose que des SHA de commit — 488
-tags, aucun ne ressemblant a une version. Wizarr publie des tags dates qui ne
-correspondent pas a leur contenu : son `2025.7.8` contient la version 2.2.1, et
-sa version courante 2026.9.0 n'existe que sous `latest`. Les epingler demande de
-savoir lire un digest.
+Pourquoi ce module existe maintenant : certaines images ne publient aucun tag
+versionne exploitable, et toutes gagnent a etre epinglees par digest. Silo est
+maintenant epingle sous la forme `build-522@sha256:…` : le numero de construction
+reste comparable, tandis que Docker retient le contenu exact.
 """
 
 from __future__ import annotations

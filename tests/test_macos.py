@@ -107,6 +107,41 @@ def test_le_controle_ne_cree_rien(tmp_path):
     assert list(tmp_path.iterdir()) == [], "un fichier temoin a ete laisse derriere"
 
 
+def test_la_racine_d_un_disque_windows_est_acceptee_et_repond_tout_de_suite(tmp_path):
+    r"""Deux pannes enchainees, trouvees en lancant la suite sur un vrai PC.
+
+    `C:/plugarr/data`, le chemin propose par defaut sous Windows, a pour
+    premier ancetre existant la racine du disque tant que `C:\plugarr` n'a pas
+    ete cree — c'est-a-dire a la toute premiere installation, celle de tout le
+    monde.
+
+    1. Le sondage passait par `tempfile.NamedTemporaryFile`, qui sous Windows
+       RATTRAPE `PermissionError` et recommence jusqu'a `tempfile.TMP_MAX`
+       quand `os.access(dir, W_OK)` repond oui — ce qu'il fait a tort pour
+       `C:\`. Le controle ne rendait la main qu'apres plus de dix minutes, en
+       silence. La suite de tests elle-meme paraissait figee.
+    2. Une fois le sondage rendu immediat, il repondait « impossible d'ecrire
+       dans C:\ » : a la racine d'un disque, un compte standard ne peut pas
+       creer un FICHIER, mais peut tres bien creer un DOSSIER et ecrire dedans.
+       Le controle bloquait donc une installation parfaitement realisable.
+    """
+    import time
+
+    if sys.platform != "win32":
+        pytest.skip("la racine d'un disque Windows n'a pas d'equivalent ici")
+
+    racine = Path(tmp_path.anchor)
+    cible = racine / "plugarr-essai-qui-n-existe-pas" / "data"
+    avant = time.monotonic()
+
+    controle = check_writable(cible, "racine des donnees")
+    duree = time.monotonic() - avant
+
+    assert duree < 5, f"le controle a mis {duree:.0f}s au lieu de repondre tout de suite"
+    assert controle.ok, controle.detail
+    assert not cible.parent.exists(), "le controle a laisse un dossier derriere lui"
+
+
 def test_un_emplacement_impossible_est_BLOQUANT(tmp_path, monkeypatch):
     """Le coeur du correctif. En avertissement, l'installation partait quand
     meme et mourait sur sa premiere ecriture."""
@@ -114,7 +149,9 @@ def test_un_emplacement_impossible_est_BLOQUANT(tmp_path, monkeypatch):
     def refuser(*_a, **_kw):
         raise OSError(30, "Read-only file system")
 
-    monkeypatch.setattr("tempfile.NamedTemporaryFile", refuser)
+    # Le controle cree un dossier temoin avant d'y ecrire : c'est la suite
+    # d'operations que l'installation fera reellement.
+    monkeypatch.setattr("pathlib.Path.mkdir", refuser)
 
     controle = check_writable(tmp_path / "data", "racine des donnees")
 
@@ -129,7 +166,9 @@ def test_le_refus_dit_quoi_changer(tmp_path, monkeypatch):
     def refuser(*_a, **_kw):
         raise OSError(30, "Read-only file system")
 
-    monkeypatch.setattr("tempfile.NamedTemporaryFile", refuser)
+    # Le controle cree un dossier temoin avant d'y ecrire : c'est la suite
+    # d'operations que l'installation fera reellement.
+    monkeypatch.setattr("pathlib.Path.mkdir", refuser)
 
     detail = check_writable(tmp_path / "data", "racine des donnees").detail
 

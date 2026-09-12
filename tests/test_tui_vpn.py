@@ -77,6 +77,31 @@ async def test_sans_vpn_par_defaut(app):
 
 
 @pytest.mark.asyncio
+async def test_sabnzbd_est_direct_et_tls_recommande_par_defaut(app):
+    async with app.run_test() as pilot:
+        screen = await _vpn(pilot, ("sabnzbd",))
+
+        assert screen.sab_vpn_voulu() is False
+        assert screen.config().protect_sabnzbd is False
+        assert "SSL/TLS" in str(screen.query_one("#sab-direct", RadioButton).label)
+
+
+@pytest.mark.asyncio
+async def test_choisir_le_vpn_pour_sabnzbd_active_gluetun(app):
+    async with app.run_test() as pilot:
+        screen = await _vpn(pilot, ("sabnzbd",))
+        screen.query_one("#sab-vpn", RadioButton).value = True
+        await pilot.pause()
+        screen.query_one("#vpn-key", Input).value = "cle-privee-wireguard"
+        await pilot.pause()
+
+        vpn = screen.config()
+        assert screen.vpn_voulu() is True
+        assert vpn.enabled is True
+        assert vpn.protect_sabnzbd is True
+
+
+@pytest.mark.asyncio
 async def test_tous_les_fournisseurs_sont_proposes(app):
     """Ils viennent de Gluetun lui-meme, pas d'une liste recopiee.
 

@@ -18,6 +18,7 @@ authentication failed ».
 from __future__ import annotations
 
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -106,6 +107,20 @@ def test_les_journaux_et_les_caches_sont_exclus(projet, tmp_path):
     sauvegarde.sauvegarder(cfg, dossier, tmp_path / "a.zip")
 
     assert not [n for n in _noms(tmp_path / "a.zip") if "/logs/" in n]
+
+
+def test_un_fichier_date_de_1970_ne_fait_pas_echouer_toute_la_sauvegarde(
+    projet, tmp_path
+):
+    """Des conteneurs posent parfois des mtimes Unix impossibles pour ZIP."""
+    cfg, dossier, config = projet
+    ancien = config / "sonarr" / "epoch.db"
+    ancien.write_bytes(b"etat important")
+    os.utime(ancien, (0, 0))
+
+    sauvegarde.sauvegarder(cfg, dossier, tmp_path / "a.zip")
+
+    assert "config/sonarr/epoch.db" in _noms(tmp_path / "a.zip")
 
 
 def test_les_medias_ne_sont_jamais_touches(projet, tmp_path):
@@ -201,6 +216,94 @@ def test_un_format_inconnu_est_refuse(tmp_path):
 
     with pytest.raises(ValueError, match="format"):
         sauvegarde.lire_manifeste(futur)
+
+
+def test_un_manifeste_malforme_est_refuse_proprement(tmp_path):
+    archive = tmp_path / "manifeste-invalide.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(sauvegarde.MANIFESTE, "{pas du json")
+
+    with pytest.raises(ValueError, match="manifeste"):
+        sauvegarde.lire_manifeste(archive)
+
+
+@pytest.mark.parametrize(
+    "membre",
+    (
+        "config/../../hors-racine.txt",
+        "config/..\\hors-racine.txt",
+        "projet/../../hors-racine.txt",
+    ),
+)
+def test_la_restauration_refuse_toute_sortie_des_racines(tmp_path, membre):
+    """L'archive choisie dans l'assistant web peut etre hostile."""
+    archive = tmp_path / "hostile.zip"
+    manifeste = {
+        "format": sauvegarde.FORMAT,
+        "project_name": "plugarr",
+        "config_root": str(tmp_path / "ancien"),
+        "data_root": str(tmp_path / "data"),
+        "services": [],
+        "volumes": [],
+        "a_chaud": False,
+    }
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(sauvegarde.MANIFESTE, json.dumps(manifeste))
+        zf.writestr(membre, "interdit")
+
+    with pytest.raises(ValueError, match="interdit"):
+        sauvegarde.restaurer(
+            archive,
+            tmp_path / "projet-neuf",
+            config_root=str(tmp_path / "config-neuve"),
+        )
+    assert not (tmp_path / "hors-racine.txt").exists()
+
+
+def test_la_restauration_ne_suit_pas_un_lien_symbolique_hors_config(tmp_path):
+    archive = tmp_path / "hostile-lien.zip"
+    dehors = tmp_path / "dehors"
+    dehors.mkdir()
+    config = tmp_path / "config-neuve"
+    config.mkdir()
+    try:
+        (config / "lien").symlink_to(dehors, target_is_directory=True)
+    except OSError:
+        pytest.skip("la creation de liens symboliques n'est pas autorisee")
+    manifeste = {
+        "format": sauvegarde.FORMAT,
+        "project_name": "plugarr",
+        "config_root": str(config),
+        "data_root": str(tmp_path / "data"),
+        "services": [],
+        "volumes": [],
+        "a_chaud": False,
+    }
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(sauvegarde.MANIFESTE, json.dumps(manifeste))
+        zf.writestr("config/lien/secret.txt", "interdit")
+
+    with pytest.raises(ValueError, match="interdit"):
+        sauvegarde.restaurer(archive, tmp_path / "projet-neuf", config_root=str(config))
+    assert not (dehors / "secret.txt").exists()
+
+
+def test_la_restauration_refuse_un_nom_de_volume_injecte(tmp_path):
+    archive = tmp_path / "hostile-volume.zip"
+    manifeste = {
+        "format": sauvegarde.FORMAT,
+        "project_name": "plugarr",
+        "config_root": str(tmp_path / "config"),
+        "data_root": str(tmp_path / "data"),
+        "services": [],
+        "volumes": ["../volume"],
+        "a_chaud": False,
+    }
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(sauvegarde.MANIFESTE, json.dumps(manifeste))
+
+    with pytest.raises(ValueError, match="volumes"):
+        sauvegarde.restaurer(archive, tmp_path / "projet-neuf")
 
 
 def test_le_volume_de_silo_est_reclame(monkeypatch):

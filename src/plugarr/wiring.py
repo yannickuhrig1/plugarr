@@ -26,7 +26,7 @@ from .clients.qui import QuiClient
 from .downloadclients import profile_for
 from .i18n import t
 from .layout import BIBLIOTHEQUES, CONTAINER_PATHS
-from .models import Category, StackConfig
+from .models import StackConfig
 
 #: Categories d'indexeurs Prowlarr poussees vers chaque application (conventions Newznab).
 #: 2000 = Movies, 3000 = Audio, 5000 = TV.
@@ -60,6 +60,15 @@ ROOT_FOLDERS = {
 }
 
 
+def _autobrr_targets(cfg: StackConfig) -> list[str]:
+    """Cibles que l'API autobrr sait reellement representer."""
+    return [
+        sid
+        for sid in (*catalog.MANAGED_ARRS, *catalog.TORRENT_CLIENTS)
+        if cfg.enabled(sid)
+    ]
+
+
 @dataclass
 class StepResult:
     name: str
@@ -67,6 +76,7 @@ class StepResult:
     detail: str
     created: bool = False
     warnings: list[str] = field(default_factory=list)
+    step_id: str = ""
 
 
 @dataclass
@@ -200,7 +210,7 @@ class Wirer:
         compose et doit etre joint par l'hote.
         """
         spec = catalog.get(service_id)
-        behind_vpn = self.cfg.vpn.enabled and spec.category is Category.DOWNLOAD
+        behind_vpn = self.cfg.vpn.protects(service_id)
         return self.cfg.services[service_id].internal_url(
             spec, self.cfg.host, behind_vpn=behind_vpn
         )
@@ -1117,10 +1127,12 @@ class Wirer:
         )
 
     def step_autobrr(self) -> StepResult:
-        """Declare les applications et le client de telechargement dans autobrr.
+        """Declare les applications et les clients torrent dans autobrr.
 
         autobrr ne distingue pas les deux : Sonarr et qBittorrent passent par le
-        meme endpoint, seul le `type` change.
+        meme endpoint, seul le `type` change. SABnzbd n'y entre pas : autobrr ne
+        propose aucun type Usenet/SABnzbd, et le lui envoyer faisait terminer
+        toute installation comprenant les deux en etat partiel.
         """
         inst = self.cfg.services["autobrr"]
         url = f"http://{self.cfg.host}:{inst.host_port}"
@@ -1137,11 +1149,7 @@ class Wirer:
             )
             inst.api_key = brr.ensure_api_key("plugarr")
 
-            targets = [
-                sid
-                for sid in (*catalog.MANAGED_ARRS, *catalog.DOWNLOAD_CLIENTS)
-                if self.cfg.enabled(sid)
-            ]
+            targets = _autobrr_targets(self.cfg)
             for sid in targets:
                 spec, target = catalog.get(sid), self.cfg.services[sid]
                 added, _ = brr.ensure_client(
@@ -1581,9 +1589,14 @@ class Wirer:
             steps.append(WiringStep("seerr/setup", self.step_seerr_setup))
         return steps
 
-    def execute(self, *, on_step: Callable[[StepResult], None] | None = None) -> list[StepResult]:
+    def execute(
+        self, *, on_step: Callable[[StepResult], None] | None = None,
+        on_start: Callable[[str], None] | None = None,
+    ) -> list[StepResult]:
         results: list[StepResult] = []
         for step in self.build_plan():
+            if on_start:
+                on_start(step.name)
             try:
                 result = step.run()
             except WiringError as exc:
@@ -1618,6 +1631,9 @@ class Wirer:
                         t("ceci est un defaut de plugarr, pas de votre installation")
                     ],
                 )
+            # Le libelle du resultat est traduit ; seul cet identifiant relie
+            # sans ambiguite le resultat a l'etape annoncee dans le graphe.
+            result.step_id = step.name
             results.append(result)
             if on_step:
                 on_step(result)

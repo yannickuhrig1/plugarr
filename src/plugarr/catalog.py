@@ -182,9 +182,12 @@ CATALOG: dict[str, ServiceSpec] = {
         display_name="SABnzbd",
         category=Category.DOWNLOAD,
         image=_SABNZBD,
-        internal_port=8080,
-        # 8080 est deja le port hote de qBittorrent. SABnzbd ecoute lui aussi
-        # sur 8080 dans son conteneur : c'est cote hote qu'il faut decaler.
+        # Sous VPN, tous les clients de telechargement partagent la pile reseau
+        # de Gluetun. Decaler seulement le port HOTE ne suffit alors pas :
+        # `8085:8080` et `8080:8080` aboutissent au meme socket de Gluetun, et
+        # qBittorrent repond a la place de SABnzbd. Le port d'ecoute de SABnzbd
+        # est donc distinct jusque dans le conteneur.
+        internal_port=8085,
         default_host_port=8085,
         config_dir="sabnzbd",
         api_family="sabnzbd",
@@ -372,7 +375,11 @@ MANAGED_ARRS = ("sonarr", "radarr", "lidarr")
 #: demarrage de la meme facon, et il passe par le VPN de la meme facon. Ce qui
 #: change — protocole, cle API au lieu d'un mot de passe — est isole dans
 #: downloadclients.py.
-DOWNLOAD_CLIENTS = ("transmission", "qbittorrent", "sabnzbd")
+# Les clients BitTorrent et Usenet partagent une categorie d'interface, mais
+# pas le meme besoin reseau. Garder les deux listes evite de refaire l'erreur
+# « tout telechargement est du torrent » dans les avertissements et le VPN.
+TORRENT_CLIENTS = ("transmission", "qbittorrent")
+DOWNLOAD_CLIENTS = (*TORRENT_CLIENTS, "sabnzbd")
 
 #: Selection par defaut du profil "Debutant tout-en-un" en Phase 1.
 #: Coches par defaut dans l'assistant. Recyclarr en fait partie : il ne coute

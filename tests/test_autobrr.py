@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import pytest
 
+from plugarr import orchestrator
 from plugarr.clients.autobrr import CLIENT_TYPES, AutobrrClient, client_host
 from plugarr.clients.base import WiringError
+from plugarr.wiring import _autobrr_targets
 
 
 class FakeResponse:
@@ -157,6 +159,17 @@ def test_a_download_client_carries_no_api_key():
 
 def test_every_known_type_is_uppercase():
     assert all(v == v.upper() for v in CLIENT_TYPES.values())
+
+
+def test_sabnzbd_is_not_sent_to_autobrr():
+    """autobrr v1.85 n'a pas de type SABnzbd et refusait tout le cablage."""
+    cfg = orchestrator.build_config(
+        services=["sonarr", "autobrr", "qbittorrent", "sabnzbd"],
+        config_root="/c",
+        data_root="/d",
+    )
+
+    assert set(_autobrr_targets(cfg)) == {"sonarr", "qbittorrent"}
 
 
 # ------------------------------------------------- point d'entree Transmission

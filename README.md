@@ -505,11 +505,20 @@ métacaractère de shell. Les valeurs du `.env` sont en outre écrites entre apo
 l'affiche au récapitulatif.
 
 L'assistant pose la question juste après les chemins, dès qu'un client de
-téléchargement est coché. En ligne de commande, c'est `--vpn` : dans les deux
-cas le client passe par [Gluetun](https://github.com/passteque/gluetun).
+téléchargement est coché. Les clients BitTorrent passent par
+[Gluetun](https://github.com/qdm12/gluetun) lorsque le VPN est activé.
+
+SABnzbd est traité séparément : une connexion directe avec SSL/TLS chez le
+fournisseur Usenet est recommandée par défaut. Le faire aussi passer par le VPN
+masque le serveur Usenet au FAI, mais ajoute une dépendance à Gluetun et peut
+réduire le débit ; cela ne remplace jamais SSL/TLS. L'assistant demande ce choix
+explicitement. En ligne de commande, ajoutez `--sabnzbd-vpn` pour le tunnel.
 
 ```bash
 plugarr install --vpn --vpn-provider nordvpn --vpn-key <votre-cle-wireguard>
+
+# SABnzbd aussi dans le tunnel (facultatif)
+plugarr install --vpn --sabnzbd-vpn --vpn-provider nordvpn --vpn-key <votre-cle-wireguard>
 ```
 
 ```bash
@@ -594,14 +603,15 @@ secondes — l'essai lui accorde donc deux minutes au lieu de quarante-cinq
 secondes. Une configuration valide répond toujours en une quinzaine de secondes.
 
 Ce qui compte n'est pas que le tunnel existe, c'est qu'**aucun paquet ne puisse sortir
-sans lui**. Le client de téléchargement ne démarre pas tant que Gluetun n'est pas
+sans lui**. Un client protégé ne démarre pas tant que Gluetun n'est pas
 *healthy* — vérifié avec des identifiants volontairement faux : Gluetun reste
 `unhealthy`, et qBittorrent ne quitte jamais l'état `created`.
 
-Deux subtilités traitées, chacune capable de tout casser en silence : les ports du
-client **migrent vers Gluetun** (un conteneur qui partage une pile réseau ne peut plus
-publier de port), et le câblage vise `http://gluetun:8080` car le client **perd son
-alias DNS**.
+Deux subtilités traitées, chacune capable de tout casser en silence : les ports des
+clients protégés **migrent vers Gluetun** (un conteneur qui partage une pile réseau ne
+peut plus publier de port), et le câblage vise Gluetun car le client **perd son alias
+DNS**. Les ports internes restent distincts : 8080 pour qBittorrent et 8085 pour
+SABnzbd.
 
 ---
 
@@ -693,24 +703,16 @@ installer une seconde à côté. Le préflight avertit si le cas se présente.
 Le détail vit dans [ROADMAP.md](ROADMAP.md), tenue à jour : ce qui marche, ce
 qui est en cours, ce qu'on ne fera pas et pourquoi. Résumé ci-dessous.
 
-**La console PlugArr** est le prochain gros morceau, et le seul qui ne soit pas
-un service de plus au catalogue. Aujourd'hui l'assistant installe puis s'efface :
-la page d'accès est un fichier HTML mort, et tout ce qui vient après se fait à la
-main, service par service. Une console web, dans son propre conteneur, tiendrait
-la stack dans la durée :
+**La console PlugArr est disponible.** Lancez `plugarr serve` sur l’hôte pour
+consulter les états, démarrer ou arrêter les services, appliquer leurs mises à
+jour, faire un diagnostic, sauvegarder, ajouter des services et renouveler les
+identifiants. Elle utilise un jeton ou un mot de passe pour l’authentification.
 
-| | |
-|---|---|
-| État des services | En marche, arrêté, en panne, et depuis quand. `docker ps` le sait déjà ; c'est l'affichage qui manque. |
-| Démarrer, arrêter, redémarrer | Sans passer par Docker Desktop ni la ligne de commande. |
-| Mises à jour | Voir qu'une image plus récente existe, et l'appliquer. Le catalogue épingle des versions exactes : c'est justement ce qui rend la comparaison fiable. |
-| Mots de passe et clés API | Changer en un clic, et **re-câbler dans la foulée** — c'est là que tout se joue. Une clé changée à la main casse aujourd'hui six liaisons en silence. |
-| Ajouter un service | Installer et câbler un service absent de l'installation initiale, sans tout reprendre. `plugarr wire` sait déjà le faire ; il lui manque une interface. |
-
-Deux questions à trancher avant d'écrire quoi que ce soit : le conteneur doit
-piloter Docker, donc accéder au socket Docker — ce qui revient à donner les
-pleins pouvoirs sur la machine, et doit être dit clairement. Et une console qui
-change des mots de passe doit s'authentifier elle-même, sérieusement.
+La préversion [`v0.8.0-web-preview.1`](../../releases/tag/v0.8.0-web-preview.1)
+ajoute un assistant web, une carte dynamique des liaisons, des tests et
+réparations ciblés, une maintenance planifiée, un historique, des alertes dans
+la console et la mise à jour automatique de l’exécutable Windows. Elle reste
+séparée de la version stable. Voir [LOCAL_TESTING.md](LOCAL_TESTING.md).
 
 Côté services, dans l'ordre où ils seront étudiés :
 

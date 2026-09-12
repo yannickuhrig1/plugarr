@@ -18,4 +18,7 @@ if __name__ == "__main__":
     # Obligatoire dans un executable gele : sans cela, tout processus enfant
     # relancerait l'executable entier au lieu du travailleur attendu.
     multiprocessing.freeze_support()
+    from plugarr.selfupdate import startup
+
+    startup()
     app()

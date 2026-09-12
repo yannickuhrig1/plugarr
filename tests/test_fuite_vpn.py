@@ -146,6 +146,11 @@ def test_un_conteneur_arrete_n_est_pas_une_fuite(monkeypatch):
     monkeypatch.setattr(vpncheck, "container_id", lambda n: "abc123")
     monkeypatch.setattr(vpncheck, "network_mode", lambda n: None)
 
+    def port_interdit(*args, **kwargs):
+        raise AssertionError("un conteneur arrete n'a aucun port a verifier")
+
+    monkeypatch.setattr(vpncheck, "exec_in", port_interdit)
+
     controle = vpncheck.verifier(_cfg("qbittorrent", vpn=True))[0]
 
     assert controle.ok and not controle.blocking
@@ -436,10 +441,10 @@ def test_sans_vpn_aucune_synchronisation():
     assert compose.port_sync_clients(_cfg("qbittorrent")) == []
 
 
-def test_les_deux_clients_sont_synchronises():
+def test_un_seul_client_recoit_le_port_du_tunnel():
+    """Un port et une pile reseau ne peuvent avoir qu'un processus proprietaire."""
     assert compose.port_sync_clients(_cfg_pf("qbittorrent", "transmission")) == [
-        "qbittorrent",
-        "transmission",
+        "qbittorrent"
     ]
 
 
@@ -461,7 +466,7 @@ def test_gluetun_recoit_la_commande_et_les_identifiants():
     assert "{{PORT}}" in env["VPN_PORT_FORWARDING_UP_COMMAND"]
     # Les mots de passe passent par le .env, comme celui de Flood.
     assert env["QBT_PASS"] == "${QBITTORRENT_PASS}"
-    assert env["TR_PASS"] == "${TRANSMISSION_PASS}"
+    assert "TR_PASS" not in env
 
 
 def test_aucun_mot_de_passe_en_clair_dans_le_compose():
@@ -487,7 +492,7 @@ def test_le_script_vise_les_ports_internes():
     script = compose.render_port_sync(_cfg_pf("qbittorrent", "transmission"))
 
     assert "127.0.0.1:8080/api/v2/app/setPreferences" in script
-    assert "127.0.0.1:9091/transmission/rpc" in script
+    assert "127.0.0.1:9091/transmission/rpc" not in script
 
 
 def test_le_script_attend_que_le_client_ecoute():
@@ -548,7 +553,6 @@ def test_le_releve_des_ports_est_analyse(monkeypatch):
     assert vpncheck.ports_entrants(_cfg_pf("qbittorrent", "transmission")) == {
         "annonce": 37899,
         "qbittorrent": 37899,
-        "transmission": 51413,
     }
 
 
@@ -908,4 +912,3 @@ def test_doctor_repose_le_port_au_lieu_de_seulement_le_signaler():
 
     assert appelle, "doctor doit reposer le port, pas seulement le constater"
     assert "PREFIXE_PORT" in source, "et seulement si un controle de port a echoue"
-

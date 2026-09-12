@@ -36,6 +36,7 @@ from .models import StackConfig
 _UNSTABLE = ("develop", "nightly", "beta", "alpha", "rc", "master", "latest", "edge", "test")
 
 _VERSION = re.compile(r"^v?(\d+(?:\.\d+)*)$")
+_BUILD = re.compile(r"^build-(\d+)$")
 
 
 @dataclass
@@ -57,10 +58,15 @@ class UpdateInfo:
 def parse_version(tag: str) -> tuple[int, ...] | None:
     """Convertit un tag en tuple comparable, ou None s'il n'est pas une version.
 
-    Accepte `4.0.19` et `v1.85.0`. Refuse `version-3.0.4.999`, `latest`,
-    `4.0.19-develop` : comparer des formes differentes n'a pas de sens.
+    Accepte `4.0.19`, `v1.85.0` et les constructions monotones de Silo comme
+    `build-522`. Refuse `version-3.0.4.999`, `latest`, `4.0.19-develop` :
+    comparer des formes differentes n'a pas de sens.
     """
-    match = _VERSION.match(tag.strip())
+    propre = tag.strip()
+    build = _BUILD.match(propre)
+    if build is not None:
+        return (int(build.group(1)),)
+    match = _VERSION.match(propre)
     if match is None:
         return None
     return tuple(int(part) for part in match.group(1).split("."))
@@ -72,6 +78,10 @@ def _same_shape(candidate: str, current: str) -> bool:
     Un depot melange `v1.85.0`, `1.85`, `version-1.85.0` et `latest`. Comparer
     entre conventions produirait des propositions absurdes.
     """
+    candidate_build = _BUILD.fullmatch(candidate) is not None
+    current_build = _BUILD.fullmatch(current) is not None
+    if candidate_build or current_build:
+        return candidate_build and current_build
     if candidate.startswith("v") != current.startswith("v"):
         return False
     return candidate.count(".") == current.count(".")
@@ -84,8 +94,8 @@ def newer_tags(image: str, *, timeout: float = 15.0) -> tuple[list[str], str | N
     current = parse_version(current_tag)
     if current is None:
         # Sans tag lisible, il n'y a rien a comparer. C'est le cas d'une image
-        # epinglee par digest seul, et de Silo, dont les 488 tags sont des SHA
-        # de commit. Le controle de reconstruction, lui, continue de valoir.
+        # epinglee par digest seul. Le controle de reconstruction, lui, continue
+        # de valoir. Silo porte desormais un tag `build-N`, traite plus haut.
         manque = (
             t("aucun tag")
             if not current_tag

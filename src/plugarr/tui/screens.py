@@ -982,15 +982,16 @@ def _fournisseurs_vpn() -> list[tuple[str, str]]:
 
 
 class VpnScreen(WizardScreen):
-    """Choix du VPN pour le client de telechargement.
+    """Choix du VPN pour BitTorrent et, separement, pour SABnzbd.
 
     Etape facultative, mais elle manquait completement : les sept options
     `--vpn*` n'existaient qu'en ligne de commande, et le recapitulatif se
     contentait d'AVERTIR qu'aucun VPN n'etait configure — sans offrir le moindre
     moyen d'en mettre un. Signale a l'usage.
 
-    L'ecran n'apparait que si un client de telechargement est installe : sans
-    trafic BitTorrent, Gluetun ne protegerait rien.
+    L'ecran apparait aussi avec SABnzbd seul : son trajet est une decision
+    explicite. Une connexion directe au fournisseur avec TLS est recommandee ;
+    Gluetun reste disponible comme couche de confidentialite supplementaire.
     """
 
     SUB_TITLE = "Etape optionnelle - VPN du client de telechargement"
@@ -998,16 +999,36 @@ class VpnScreen(WizardScreen):
     def content(self) -> ComposeResult:
         yield Static(
             "Sans VPN, le trafic BitTorrent sort sur [b]l'adresse IP publique de cette "
-            "machine[/b], visible par tous les autres pairs.\n"
+            "machine[/b], visible par tous les autres pairs. SABnzbd, lui, parle a un "
+            "serveur Usenet : activez SSL/TLS chez le fournisseur.\n"
             "[dim]Avec Gluetun, le client de telechargement perd son propre reseau : il "
             "ne demarre pas tant que le tunnel n'est pas etabli, donc aucun paquet ne "
             "peut sortir en clair.[/dim]",
             id="vpn-intro",
         )
         with VerticalScroll(id="vpn"):
+            if "sabnzbd" in self.app.selection:
+                yield Label("Trajet de SABnzbd", classes="group-title")
+                with RadioSet(id="sab-route"):
+                    yield RadioButton(
+                        "Connexion directe + SSL/TLS (recommande)",
+                        value=True,
+                        id="sab-direct",
+                    )
+                    yield RadioButton(
+                        "Faire aussi passer SABnzbd par le VPN",
+                        id="sab-vpn",
+                    )
+                yield Static(
+                    "[dim]Le VPN masque le serveur Usenet a votre FAI, mais ajoute "
+                    "une dependance a Gluetun et peut reduire le debit. Il ne "
+                    "remplace pas SSL/TLS.[/dim]",
+                    classes="service-note",
+                )
+
             with RadioSet(id="vpn-choix"):
-                yield RadioButton("Sans VPN", value=True, id="vpn-non")
-                yield RadioButton("Faire passer le client par un VPN", id="vpn-oui")
+                yield RadioButton("Ne pas activer Gluetun", value=True, id="vpn-non")
+                yield RadioButton("Activer Gluetun pour les clients choisis", id="vpn-oui")
 
             with Vertical(id="vpn-details", classes="hidden"):
                 yield Label("Fournisseur", classes="group-title")
@@ -1099,9 +1120,26 @@ class VpnScreen(WizardScreen):
         self._peupler_lieux()
 
     @on(RadioSet.Changed, "#vpn-choix")
-    def _on_choice(self) -> None:
-        self.query_one("#vpn-details", Vertical).set_class(not self.vpn_voulu(), "hidden")
+    def _on_choice(self, event: RadioSet.Changed) -> None:
+        vpn_voulu = event.pressed.id == "vpn-oui"
+        if not vpn_voulu and "sabnzbd" in self.app.selection:
+            self.query_one("#sab-direct", RadioButton).value = True
+        self.query_one("#vpn-details", Vertical).set_class(not vpn_voulu, "hidden")
         self._validate()
+
+    @on(RadioSet.Changed, "#sab-route")
+    def _on_sab_route(self, event: RadioSet.Changed) -> None:
+        if event.pressed.id == "sab-vpn":
+            # Changer un autre RadioSet pendant le traitement de cet evenement
+            # laisse son `pressed_button` sur l'ancienne valeur dans Textual.
+            # Le basculement au rafraichissement suivant garde donc aussi
+            # l'affichage et la configuration synchronises.
+            self.call_after_refresh(self._activer_vpn_pour_sab)
+        self._validate()
+
+    def _activer_vpn_pour_sab(self) -> None:
+        if not self.vpn_voulu():
+            self.query_one("#vpn-oui", RadioButton).toggle()
 
     @on(Select.Changed, "#vpn-provider")
     def _on_provider(self) -> None:
@@ -1181,6 +1219,12 @@ class VpnScreen(WizardScreen):
         coche = self.query_one("#vpn-choix", RadioSet).pressed_button
         return coche is not None and coche.id == "vpn-oui"
 
+    def sab_vpn_voulu(self) -> bool:
+        if "sabnzbd" not in self.app.selection:
+            return False
+        coche = self.query_one("#sab-route", RadioSet).pressed_button
+        return coche is not None and coche.id == "sab-vpn"
+
     def config(self) -> VpnConfig:
         """Traduit la saisie. Une valeur invalide est ecartee ici, pas plus tard."""
         if not self.vpn_voulu():
@@ -1195,6 +1239,7 @@ class VpnScreen(WizardScreen):
                 openvpn_user=self.query_one("#vpn-user", Input).value.strip(),
                 openvpn_password=self.query_one("#vpn-pass", Input).value.strip(),
                 countries=",".join(self.query_one("#vpn-lieux", SelectionList).selected),
+                protect_sabnzbd=self.sab_vpn_voulu(),
             )
         except ValueError:
             return VpnConfig()
@@ -1311,6 +1356,15 @@ class SummaryScreen(WizardScreen):
                     protocole=cfg.vpn.vpn_type,
                 )
             )
+        if cfg.enabled("sabnzbd"):
+            lignes.append(
+                "[b]SABnzbd[/b]       "
+                + (
+                    t("via Gluetun ; SSL/TLS reste necessaire")
+                    if cfg.vpn.protects("sabnzbd")
+                    else t("connexion directe + SSL/TLS recommandee")
+                )
+            )
         lignes.append(
             t("[b]Liens a cabler[/b] {nombre}", nombre=orchestrator.planned_links(cfg))
         )
@@ -1326,7 +1380,7 @@ class SummaryScreen(WizardScreen):
         # pas ; avec l'ecran VPN, avertir sans regarder revenait a annoncer
         # « aucun VPN » a quelqu'un qui venait d'en saisir un.
         warnings = []
-        if orchestrator.has_download_client(cfg) and not cfg.vpn_enabled:
+        if any(cfg.enabled(sid) for sid in catalog.TORRENT_CLIENTS) and not cfg.vpn_enabled:
             warnings.append(vpn_warning)
         if not cfg.ids_certain:
             warnings.append(
@@ -1494,11 +1548,18 @@ class InstallScreen(WizardScreen):
         app.call_from_thread(self._set_total, orchestrator.expected_events(cfg))
 
         def on_progress(progress: Progress) -> None:
-            mark = "[green]OK[/green]" if progress.ok else "[red]ECHEC[/red]"
+            mark = (
+                "[cyan]…[/cyan]"
+                if progress.started
+                else "[green]OK[/green]"
+                if progress.ok
+                else "[red]ECHEC[/red]"
+            )
             journal.progress(progress.phase, progress.message, progress.ok)
             app.call_from_thread(self._phase, f"{progress.phase} : {progress.message}")
             app.call_from_thread(self._log, f"  {mark}  {progress.phase} : {progress.message}")
-            app.call_from_thread(self._advance)
+            if not progress.started:
+                app.call_from_thread(self._advance)
 
         def on_step(result: StepResult) -> None:
             journal.step(result)

@@ -1,16 +1,8 @@
 """Lecture d'une reference d'image Docker.
 
 `image.rpartition(":")` marchait pour `lscr.io/linuxserver/sonarr:4.0.19` et se
-trompait partout ailleurs. Ce module existe parce que deux services de la
-feuille de route ne publient aucune version utilisable :
-
-- **Silo** n'expose que des SHA de commit — 488 tags, aucun ne ressemblant a une
-  version, plus `latest` et `nightly` ;
-- **Wizarr** publie des tags dates qui ne correspondent pas a leur contenu : son
-  `2025.7.8` contient la version 2.2.1, et sa version courante 2026.9.0
-  n'existe que sous `latest`.
-
-Les epingler demande de savoir lire un digest — et de ne pas confondre le port
+trompait partout ailleurs. Lire correctement tag et digest reste necessaire,
+notamment pour la forme Silo `build-N@sha256:…`, et pour ne pas confondre le port
 d'un registre avec un tag.
 """
 
@@ -34,7 +26,7 @@ SHA = "sha256:" + "a" * 64
         ("pgvector/pgvector:pg18", "pgvector/pgvector", "pg18", ""),
         # Sans tag : le depot seul.
         ("getmeili/meilisearch", "getmeili/meilisearch", "", ""),
-        # Digest seul, comme Silo devra etre epingle.
+        # Digest seul : aucune version lisible, mais un contenu immuable.
         (f"ghcr.io/silo-server/silo-server@{SHA}", "ghcr.io/silo-server/silo-server", "", SHA),
         # Tag ET digest : la meilleure forme. Docker retient le digest, le tag
         # reste lisible.
@@ -148,7 +140,7 @@ def test_une_image_epinglee_n_affiche_pas_son_condensat_comme_version():
 
 
 def test_sans_tag_comparable_le_probleme_est_dit():
-    """Les 488 tags de Silo sont des SHA de commit : aucun n'est une version."""
+    """Une reference par digest seul ne permet pas de proposer une version."""
     _tags, probleme = updates.newer_tags(f"ghcr.io/silo-server/silo-server@{SHA}")
 
     assert probleme is not None

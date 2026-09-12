@@ -18,6 +18,8 @@ d'origine ne voyait pas, parce qu'elle ne regardait que le disque.
 
 from __future__ import annotations
 
+import pytest
+
 from plugarr import compose, orchestrator, runner
 
 
@@ -81,6 +83,18 @@ def test_la_remise_a_zero_ne_touche_a_rien_si_le_volume_n_existe_pas(monkeypatch
     orchestrator.reset_configs(_cfg(), ["silo-postgres"])
 
     assert supprimes == []
+
+
+def test_la_remise_a_zero_n_annonce_pas_un_volume_que_docker_refuse(monkeypatch):
+    monkeypatch.setattr(orchestrator, "volume_exists", lambda nom: True)
+    monkeypatch.setattr(
+        orchestrator,
+        "remove_volume",
+        lambda nom: (False, "volume is in use"),
+    )
+
+    with pytest.raises(OSError, match="volume is in use"):
+        orchestrator.reset_configs(_cfg(), ["silo-postgres"])
 
 
 def test_l_emplacement_annonce_est_le_vrai():

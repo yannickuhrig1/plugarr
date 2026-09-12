@@ -51,7 +51,7 @@ import httpx
 
 from . import catalog
 from .i18n import t
-from .models import Category, StackConfig
+from .models import StackConfig
 from .runner import Check, container_id, exec_in, network_mode
 
 #: Serveur de controle de Gluetun, dans sa propre pile reseau. Le port n'est
@@ -63,8 +63,17 @@ CONTROLE = "http://127.0.0.1:8000/v1/publicip/ip"
 def clients_torrent(cfg: StackConfig) -> list[str]:
     return [
         sid
-        for sid in catalog.STARTUP_ORDER
-        if cfg.enabled(sid) and catalog.get(sid).category is Category.DOWNLOAD
+        for sid in catalog.TORRENT_CLIENTS
+        if cfg.enabled(sid)
+    ]
+
+
+def clients_proteges(cfg: StackConfig) -> list[str]:
+    """Services qui doivent reellement partager la pile de Gluetun."""
+    return [
+        sid
+        for sid in catalog.DOWNLOAD_CLIENTS
+        if cfg.enabled(sid) and cfg.vpn.protects(sid)
     ]
 
 
@@ -127,7 +136,7 @@ def piles_orphelines(cfg: StackConfig) -> list[str]:
         return []
     attendu = f"container:{gluetun}"
     orphelins = []
-    for sid in clients_torrent(cfg):
+    for sid in clients_proteges(cfg):
         if cfg.services[sid].adopted:
             continue
         mode = network_mode(f"{cfg.project_name}-{sid}")
@@ -194,9 +203,10 @@ def ports_entrants(cfg: StackConfig) -> dict[str, int]:
     if not ok:
         return {}
     releve = {}
+    attendus = {"annonce", *clients}
     for ligne in sortie.splitlines():
         cle, _, valeur = ligne.partition("=")
-        if valeur.strip().isdigit():
+        if cle.strip() in attendus and valeur.strip().isdigit():
             releve[cle.strip()] = int(valeur)
     return releve
 
@@ -428,28 +438,55 @@ def _sortie(conteneur: str) -> tuple[bool, str]:
 
 def verifier(cfg: StackConfig) -> list[Check]:
     """Controles de fuite VPN. Vide si aucun client torrent n'est installe."""
-    clients = clients_torrent(cfg)
-    if not clients:
+    torrents = clients_torrent(cfg)
+    sab_direct = cfg.enabled("sabnzbd") and not cfg.vpn.protects("sabnzbd")
+    if not torrents and not cfg.enabled("sabnzbd"):
         return []
 
     if not cfg.vpn.enabled:
         # Ce n'est pas une panne : se passer de VPN est un choix. Mais il doit
         # etre visible, pas silencieux.
-        return [
+        controles = [
             Check(
                 "VPN",
                 True,
                 t(
                     "aucun VPN configure : {clients} sort par votre connexion",
-                    clients=", ".join(clients),
+                    clients=", ".join(torrents),
                 ),
                 blocking=False,
             )
-        ]
+        ] if torrents else []
+        if cfg.enabled("sabnzbd"):
+            controles.append(
+                Check(
+                    "Trajet SABnzbd",
+                    True,
+                    t(
+                        "connexion directe choisie ; activez SSL/TLS vers le "
+                        "serveur Usenet (port 563 recommande par SABnzbd)"
+                    ),
+                    blocking=False,
+                )
+            )
+        return controles
 
     gluetun = container_id(f"{cfg.project_name}-gluetun")
     controles: list[Check] = []
-    for sid in clients:
+    if sab_direct:
+        controles.append(
+            Check(
+                "Trajet SABnzbd",
+                True,
+                t(
+                    "connexion directe choisie ; SSL/TLS vers le serveur Usenet "
+                    "reste recommande"
+                ),
+                blocking=False,
+            )
+        )
+    tunnel_verifie = False
+    for sid in clients_proteges(cfg):
         conteneur = nom_conteneur(cfg, sid)
         mode = network_mode(conteneur)
         if mode is None:
@@ -502,9 +539,10 @@ def verifier(cfg: StackConfig) -> list[Check]:
 
         protege, description = _sortie(conteneur)
         controles.append(Check(f"VPN {sid}", protege, description, blocking=not protege))
+        tunnel_verifie = tunnel_verifie or protege
 
     # Le port entrant EN DERNIER : il ne se lit que si le tunnel tient, et un
     # verdict de protection doit passer avant une question de ratio.
-    if any(c.ok for c in controles):
+    if tunnel_verifie:
         controles += _controle_port(cfg)
     return controles

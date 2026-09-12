@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import shutil
 import socket
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -206,7 +206,7 @@ def check_port_free(port: int, label: str) -> Check:
 
 
 def check_writable(path: str | Path, label: str) -> Check:
-    """Peut-on REELLEMENT ecrire a cet endroit ? BLOQUANT.
+    r"""Peut-on REELLEMENT ecrire a cet endroit ? BLOQUANT.
 
     Le controle qui manquait, et son absence coutait cher. Le preflight ne
     testait que les hardlinks, en non bloquant : un chemin impossible a creer
@@ -223,6 +223,26 @@ def check_writable(path: str | Path, label: str) -> Check:
     L'essai porte sur le premier ancetre EXISTANT, et ne laisse rien derriere
     lui — un preflight, a plus forte raison sous `--dry-run`, ne doit pas
     creer l'arborescence qu'il controle.
+
+    L'essai se fait a la main, PAS avec `tempfile.NamedTemporaryFile`. Sous
+    Windows, celui-ci RATTRAPE `PermissionError` et recommence — jusqu'a
+    `tempfile.TMP_MAX`, soit dix mille fois — des lors que `os.access(dir,
+    W_OK)` repond oui. Or c'est exactement ce qu'`os.access` repond pour
+    `C:\`, ou l'ecriture est en realite refusee a un compte non eleve. Le
+    controle ne rendait alors la main qu'apres plus de dix minutes, sans un
+    mot, au lieu de dire tout de suite « impossible d'ecrire ».
+
+    Le cas n'a rien d'exotique : `C:/plugarr/data`, le defaut du profil
+    Windows, a pour premier ancetre existant la racine du disque tant que
+    `C:\plugarr` n'existe pas — c'est-a-dire a la toute premiere installation.
+
+    Et l'essai doit reproduire ce que PlugArr fera VRAIMENT. A la racine d'un
+    disque Windows, un compte standard n'a pas le droit de creer un FICHIER
+    mais a bien celui de creer un DOSSIER, puis d'ecrire dedans. Sonder par un
+    fichier y repondait « impossible d'ecrire dans C:\ » et BLOQUAIT une
+    installation parfaitement realisable — celle des chemins proposes par
+    defaut. Quand la cible n'existe pas encore, on cree donc un dossier, on
+    ecrit dedans, et on retire les deux.
     """
     cible = Path(path).expanduser()
     ancetre = cible
@@ -241,9 +261,26 @@ def check_writable(path: str | Path, label: str) -> Check:
             ),
         )
 
+    essai = ancetre / f".plugarr-ecriture-{secrets.token_hex(8)}"
     try:
-        with tempfile.NamedTemporaryFile(dir=ancetre, prefix=".plugarr-ecriture-"):
-            pass
+        if ancetre == cible:
+            # La cible existe : PlugArr y ecrira des fichiers.
+            try:
+                with essai.open("xb"):
+                    pass
+            finally:
+                essai.unlink(missing_ok=True)
+        else:
+            # PlugArr creera l'arborescence : on essaie un dossier, puis un
+            # fichier DEDANS, ce qui est exactement la suite d'operations reelle.
+            essai.mkdir()
+            try:
+                fichier = essai / "essai"
+                with fichier.open("xb"):
+                    pass
+                fichier.unlink(missing_ok=True)
+            finally:
+                essai.rmdir()
     except OSError as exc:
         return Check(
             label,
@@ -324,9 +361,18 @@ class Compose:
         Renvoie (quelque_chose_a_ete_arrete, message). Un projet inexistant n'est
         pas une erreur : c'est le cas d'une premiere installation.
         """
+        # La sortie de Docker n'est pas une API : elle peut changer de langue
+        # ou de forme. On releve donc les conteneurs en marche AVANT l'arret,
+        # au lieu de chercher les mots anglais "Stopping" / "Stopped" pour
+        # decider s'il faudra les relancer apres une sauvegarde.
+        running = _run(self._cmd("ps", "-q"), cwd=self.dir, timeout=PROBE_TIMEOUT)
         proc = _run(self._cmd("stop"), cwd=self.dir, timeout=timeout)
         sortie = (proc.stderr or "") + (proc.stdout or "")
-        return proc.returncode == 0 and "Stopping" in sortie or "Stopped" in sortie, sortie.strip()
+        if proc.returncode != 0:
+            raise OSError(sortie.strip() or t("docker compose stop a echoue"))
+        if running.returncode == 0:
+            return bool((running.stdout or "").strip()), sortie.strip()
+        return "Stopping" in sortie or "Stopped" in sortie, sortie.strip()
 
     def down(self, *, volumes: bool = False) -> tuple[bool, str]:
         args = ["down"] + (["-v"] if volumes else [])
@@ -347,6 +393,8 @@ class Compose:
         anciennes emettent un tableau unique. Les deux formes sont acceptees.
         """
         proc = _run(self._cmd("ps", "--all", "--format", "json"), cwd=self.dir)
+        if proc.returncode != 0:
+            raise OSError((proc.stderr or proc.stdout or "docker compose ps a echoue").strip())
         raw = (proc.stdout or "").strip()
         if not raw:
             return []
@@ -378,6 +426,17 @@ class Compose:
 
     def pull(self, service: str, timeout: int = 900) -> tuple[bool, str]:
         proc = _run(self._cmd("pull", service), cwd=self.dir, timeout=timeout)
+        return proc.returncode == 0, (proc.stderr or proc.stdout).strip()
+
+    def pull_many(self, services: list[str], timeout: int = 1800) -> tuple[bool, str]:
+        """Telecharge en parallele toutes les images de l'installation.
+
+        `docker compose up` sait le faire implicitement, mais melange alors le
+        telechargement, la creation et le demarrage dans une seule attente
+        opaque. Une commande separee permet aux interfaces d'annoncer la phase
+        exacte sans ralentir le telechargement par un `pull` sequentiel.
+        """
+        proc = _run(self._cmd("pull", *services), cwd=self.dir, timeout=timeout)
         return proc.returncode == 0, (proc.stderr or proc.stdout).strip()
 
     def recreate(self, service: str, timeout: int = 600) -> tuple[bool, str]:

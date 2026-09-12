@@ -11,7 +11,7 @@ Quatre pieges, chacun trouve en essayant pour de vrai, et chacun muet.
 
 **La liste blanche d'hotes.** SABnzbd refuse toute requete dont l'en-tete `Host`
 n'y figure pas, et n'y met par defaut QUE l'identifiant de son conteneur. Sonarr
-appelant `http://sabnzbd:8080` recoit « Access denied - Hostname verification
+appelant `http://sabnzbd:8085` recoit « Access denied - Hostname verification
 failed », message qui ne nomme ni l'appelant ni le reglage.
 
 **Sa cle API n'etait pas generee.** SABnzbd n'a ni identifiant ni mot de passe :
@@ -34,12 +34,14 @@ Et Prowlarr refuse de se declarer si SA categorie n'existe pas cote client :
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from plugarr import catalog, compose, orchestrator, seed
 from plugarr.clients.sabnzbd import SabnzbdClient
 from plugarr.downloadclients import profile_for
 from plugarr.layout import CONTAINER_PATHS, DATA_SUBDIRS
+from plugarr.models import VpnConfig
 from plugarr.wiring import Wirer
 
 
@@ -67,11 +69,57 @@ def test_il_compte_comme_client_de_telechargement():
     assert catalog.get("sabnzbd").category is catalog.Category.DOWNLOAD
 
 
-def test_son_port_hote_ne_heurte_pas_qbittorrent():
-    """Les deux ecoutent sur 8080 dans leur conteneur. C'est cote hote qu'il
-    faut decaler, sinon `compose up` echoue pour la pile entiere."""
-    assert catalog.get("sabnzbd").internal_port == 8080
-    assert catalog.get("sabnzbd").default_host_port != catalog.get("qbittorrent").default_host_port
+def test_son_port_interne_ne_heurte_pas_qbittorrent():
+    """Sous Gluetun les conteneurs partagent aussi leurs ports INTERNES."""
+    assert catalog.get("sabnzbd").internal_port == 8085
+    assert catalog.get("sabnzbd").internal_port != catalog.get("qbittorrent").internal_port
+
+
+def test_sous_vpn_les_deux_interfaces_ont_des_sockets_distincts():
+    cfg = _cfg("qbittorrent", "sabnzbd")
+    cfg.vpn = VpnConfig(
+        enabled=True,
+        provider="nordvpn",
+        wireguard_private_key="k" * 44,
+        protect_sabnzbd=True,
+    )
+
+    doc = compose.build_compose(cfg)
+
+    assert doc["services"]["gluetun"]["ports"] == ["8080:8080", "8085:8085"]
+    wirer = Wirer(cfg)
+    try:
+        assert wirer.internal_url("qbittorrent") == "http://gluetun:8080"
+        assert wirer.internal_url("sabnzbd") == "http://gluetun:8085"
+    finally:
+        wirer.close()
+
+
+def test_sabnzbd_reste_direct_par_defaut_meme_si_les_torrents_ont_un_vpn():
+    cfg = _cfg("qbittorrent", "sabnzbd")
+    cfg.vpn = VpnConfig(
+        enabled=True,
+        provider="nordvpn",
+        wireguard_private_key="k" * 44,
+    )
+
+    doc = compose.build_compose(cfg)
+
+    assert doc["services"]["gluetun"]["ports"] == ["8080:8080"]
+    assert doc["services"]["sabnzbd"]["ports"] == ["8085:8085"]
+    assert "network_mode" not in doc["services"]["sabnzbd"]
+    wirer = Wirer(cfg)
+    try:
+        assert wirer.internal_url("sabnzbd") == "http://sabnzbd:8085"
+    finally:
+        wirer.close()
+
+
+def test_sous_vpn_tous_les_ports_internes_partages_sont_uniques():
+    cfg = _cfg(*catalog.DOWNLOAD_CLIENTS)
+    ports = [catalog.get(sid).internal_port for sid in cfg.services]
+
+    assert len(ports) == len(set(ports))
 
 
 def test_il_parle_usenet_et_non_torrent():
@@ -99,6 +147,34 @@ def test_la_cle_sert_aussi_de_mot_de_passe():
     inst = _cfg().services["sabnzbd"]
 
     assert inst.password == inst.api_key
+
+
+def test_la_sonde_sabnzbd_refuse_une_reponse_404_de_qbittorrent(monkeypatch):
+    appels = []
+
+    def faux_get(url, **kwargs):
+        appels.append((url, kwargs))
+        return httpx.Response(404, text="Not Found")
+
+    monkeypatch.setattr(httpx, "get", faux_get)
+
+    assert not orchestrator._download_client_responds(
+        "sabnzbd", "http://localhost:8085", api_key="CLE"
+    )
+    assert appels[0][0] == "http://localhost:8085/api"
+    assert appels[0][1]["params"]["mode"] == "version"
+
+
+def test_la_sonde_sabnzbd_exige_sa_signature_api(monkeypatch):
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda *a, **kw: httpx.Response(200, json={"version": "5.1.2"}),
+    )
+
+    assert orchestrator._download_client_responds(
+        "sabnzbd", "http://localhost:8085", api_key="CLE"
+    )
 
 
 def test_il_est_pre_seme():
@@ -135,6 +211,26 @@ def test_le_pre_semis_pose_les_noms_d_hote(tmp_path):
         assert hote in texte
 
 
+def test_sous_vpn_le_pre_semis_autorise_les_noms_de_gluetun(tmp_path):
+    """C'est Gluetun, et non `sabnzbd`, que les autres conteneurs appellent."""
+    cfg = orchestrator.build_config(
+        services=["sabnzbd"], config_root=str(tmp_path), data_root="/d"
+    )
+    cfg.vpn = VpnConfig(
+        enabled=True,
+        provider="nordvpn",
+        wireguard_private_key="k" * 44,
+        protect_sabnzbd=True,
+    )
+
+    orchestrator.seed_all(cfg)
+    texte = (tmp_path / "sabnzbd" / "sabnzbd.ini").read_text(encoding="utf-8")
+
+    assert "port = 8085" in texte
+    for hote in ("gluetun", "plugarr-gluetun"):
+        assert hote in texte
+
+
 def test_le_pre_semis_met_les_telechargements_sous_data(tmp_path):
     """Par defaut ils sont sous /config : les liens physiques deviennent
     impossibles et chaque import recopie le fichier."""
@@ -148,9 +244,8 @@ def test_le_pre_semis_met_les_telechargements_sous_data(tmp_path):
     assert "/data/usenet" in texte
 
 
-def test_un_fichier_existant_fait_autorite(tmp_path):
-    """Quelqu'un a pu regler son serveur Usenet et ses categories. On n'AJOUTE
-    que les hotes manquants."""
+def test_un_fichier_existant_garde_ses_secrets_et_aligne_sa_topologie(tmp_path):
+    """La cle reste souveraine ; le port interne et les hotes suivent le compose."""
     seed.seed_sabnzbd(
         tmp_path, api_key="PREMIERE", port=8080, hotes_autorises=["sabnzbd"],
         incomplet="/a", complet="/b",
@@ -163,8 +258,72 @@ def test_un_fichier_existant_fait_autorite(tmp_path):
 
     assert ecrit is False
     assert "PREMIERE" in texte, "la cle existante a ete ecrasee"
+    assert "port = 9999" in texte, "le port interne n'a pas suivi le compose"
     assert "autre-nom" in texte, "le nouvel hote n'a pas ete ajoute"
+    assert "port 8080 -> 9999" in message
     assert "autre-nom" in message
+
+
+def test_un_ini_sans_section_misc_recoit_vraiment_ce_qu_on_annonce(tmp_path):
+    """Le message disait « port ajoute » et « hotes ajoutes » sans rien ecrire.
+
+    Sans section `[misc]`, le port et la liste d'hotes n'avaient nulle part ou
+    aller : la boucle ne les posait pas, et le rapport d'installation annoncait
+    pourtant les deux. SABnzbd restait sur 8080 et refusait les *arr, avec un
+    journal qui affirmait le contraire.
+    """
+    existant = "__version__ = 19\n[servers]\nhost = news.example.invalid\n"
+    (tmp_path / "sabnzbd.ini").write_text(existant, encoding="utf-8")
+
+    _ecrit, message = seed.seed_sabnzbd(
+        tmp_path,
+        api_key="CLE",
+        port=8085,
+        hotes_autorises=["sabnzbd", "plugarr-sabnzbd", "localhost"],
+        incomplet="/data/usenet/.incomplete",
+        complet="/data/usenet",
+    )
+    texte = (tmp_path / "sabnzbd.ini").read_text(encoding="utf-8")
+
+    assert "news.example.invalid" in texte, "la configuration existante a ete perdue"
+    if "port ajoute" in message:
+        assert "port = 8085" in texte, "port annonce mais absent du fichier"
+    if "hotes ajoutes" in message:
+        assert "host_whitelist" in texte, "hotes annonces mais absents du fichier"
+
+
+def test_un_fichier_080_est_migre_vers_le_nouveau_port_sans_perdre_sa_cle(tmp_path):
+    seed.seed_sabnzbd(
+        tmp_path,
+        api_key="CLE-080",
+        port=8080,
+        hotes_autorises=["sabnzbd", "plugarr-sabnzbd", "localhost"],
+        incomplet="/data/usenet/.incomplete",
+        complet="/data/usenet",
+    )
+
+    _ecrit, message = seed.seed_sabnzbd(
+        tmp_path,
+        api_key="NOUVELLE-CLE-A-IGNORER",
+        port=8085,
+        hotes_autorises=[
+            "sabnzbd",
+            "plugarr-sabnzbd",
+            "localhost",
+            "gluetun",
+            "plugarr-gluetun",
+        ],
+        incomplet="/autre/incomplet",
+        complet="/autre/complet",
+    )
+    texte = (tmp_path / "sabnzbd.ini").read_text(encoding="utf-8")
+
+    assert "port = 8085" in texte
+    assert "CLE-080" in texte
+    assert "NOUVELLE-CLE-A-IGNORER" not in texte
+    assert '/data/usenet/.incomplete' in texte
+    assert "gluetun" in texte and "plugarr-gluetun" in texte
+    assert "port 8080 -> 8085" in message
 
 
 # ------------------------------------------------------------------ arborescence

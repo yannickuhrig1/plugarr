@@ -10,7 +10,7 @@ Deux cas rencontres pour de vrai :
   pas du tout. Panne bruyante, mais invisible tant que personne ne lance
   l'executable produit ;
 - `data/vpn_countries.json` manquant en 0.1.8 : l'assistant s'ouvrait
-  parfaitement, affichait ses onze services, et plantait plus loin — sur l'ecran
+  parfaitement, affichait ses services, et plantait plus loin — sur l'ecran
   VPN, c'est-a-dire des qu'un client de telechargement etait coche. Ce controle
   s'arretait a l'ecran des services : il ne voyait rien.
 

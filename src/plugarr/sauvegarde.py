@@ -36,12 +36,14 @@ cause, et le dit.
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -109,6 +111,23 @@ def nom_par_defaut(cfg: StackConfig) -> str:
 def _exclu(chemin: Path, racine: Path) -> bool:
     relatif = chemin.relative_to(racine).as_posix()
     return any(f"/{relatif}/".find(f"/{motif}/") >= 0 for motif in EXCLUS)
+
+
+def _fichiers_config(racine: Path, dire: Callable[[str], None]):
+    """Parcourt CONFIG_ROOT sans qu'un dossier Windows verrouille tout le ZIP."""
+
+    def inaccessible(exc: OSError) -> None:
+        dire(f"ignore (inaccessible) : {exc.filename or exc}")
+
+    for dossier, sous_dossiers, noms in os.walk(racine, onerror=inaccessible):
+        base = Path(dossier)
+        sous_dossiers[:] = sorted(
+            nom for nom in sous_dossiers if not _exclu(base / nom, racine)
+        )
+        for nom in sorted(noms):
+            chemin = base / nom
+            if not _exclu(chemin, racine):
+                yield chemin
 
 
 def volumes_du_projet(cfg: StackConfig) -> list[str]:
@@ -183,9 +202,10 @@ def sauvegarder(
         dire(t("arret des conteneurs (une base copiee a chaud est corrompue)"))
         arrete, _ = runner.stop()
 
+    temporaires = destination.parent / f".{destination.stem}-volumes"
+    complete = False
     try:
         volumes = volumes_du_projet(cfg)
-        temporaires = destination.parent / f".{destination.stem}-volumes"
         archives_volumes: dict[str, Path] = {}
         for nom in volumes:
             dire(f"volume {nom}")
@@ -196,7 +216,18 @@ def sauvegarder(
         config_root = Path(cfg.config_root)
         fichiers = 0
         octets = 0
-        with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        # Des images de conteneurs posent parfois des fichiers dates de l'epoch
+        # Unix (1970). Le format ZIP commence en 1980 et `strict_timestamps=True`
+        # leve alors ValueError APRES avoir parcouru une bonne partie de la
+        # configuration. On borne la date au minimum representable au lieu de
+        # faire echouer toute la sauvegarde.
+        with zipfile.ZipFile(
+            destination,
+            "w",
+            zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            strict_timestamps=False,
+        ) as zf:
             for nom_fichier in FICHIERS_PROJET:
                 source = project_dir / nom_fichier
                 if source.is_file():
@@ -206,19 +237,20 @@ def sauvegarder(
 
             if config_root.is_dir():
                 dire(f"configuration : {config_root}")
-                for chemin in sorted(config_root.rglob("*")):
-                    if not chemin.is_file() or _exclu(chemin, config_root):
-                        continue
+                for chemin in _fichiers_config(config_root, dire):
                     relatif = chemin.relative_to(config_root).as_posix()
                     try:
+                        if not chemin.is_file():
+                            continue
                         zf.write(chemin, f"{DOSSIER_CONFIG}/{relatif}")
-                    except (OSError, PermissionError):
+                        taille = chemin.stat().st_size
+                    except OSError:
                         # Un fichier verrouille ne doit pas faire echouer toute
                         # la sauvegarde : on le note et on continue.
                         dire(f"ignore (verrouille) : {relatif}")
                         continue
                     fichiers += 1
-                    octets += chemin.stat().st_size
+                    octets += taille
 
             for nom, chemin in archives_volumes.items():
                 zf.write(chemin, f"{DOSSIER_VOLUMES}/{nom}.tar.gz")
@@ -242,11 +274,24 @@ def sauvegarder(
                     ensure_ascii=False,
                 ),
             )
-        shutil.rmtree(temporaires, ignore_errors=True)
+        complete = True
+    except Exception:
+        # Une archive partielle ne doit jamais ressembler a une sauvegarde
+        # utilisable dans le dossier de maintenance.
+        destination.unlink(missing_ok=True)
+        raise
     finally:
+        shutil.rmtree(temporaires, ignore_errors=True)
         if arrete:
             dire(t("redemarrage des conteneurs"))
-            runner.up()
+            relance, detail = runner.up()
+            if complete and not relance:
+                raise OSError(
+                    t(
+                        "sauvegarde creee mais redemarrage des conteneurs echoue : {detail}",
+                        detail=detail or t("cause inconnue"),
+                    )
+                )
 
     compose_mod._restrict(destination)
     return Rapport(
@@ -280,7 +325,16 @@ def lire_manifeste(archive: Path) -> dict:
             raise ValueError(
                 t("{fichier} n'est pas une sauvegarde PlugArr", fichier=archive.name)
             )
-        manifeste = json.loads(zf.read(MANIFESTE))
+        if zf.getinfo(MANIFESTE).file_size > 1_048_576:
+            raise ValueError(t("manifeste de sauvegarde anormalement volumineux"))
+        try:
+            manifeste = json.loads(zf.read(MANIFESTE))
+        except (json.JSONDecodeError, UnicodeDecodeError, zipfile.BadZipFile) as exc:
+            raise ValueError(t("manifeste de sauvegarde illisible")) from exc
+    if not isinstance(manifeste, dict):
+        # Le type vient du contenu d'une archive externe : c'est une valeur
+        # invalide pour l'utilisateur, pas un mauvais appel de l'API Python.
+        raise ValueError(t("manifeste de sauvegarde invalide"))  # noqa: TRY004
     if manifeste.get("format") != FORMAT:
         raise ValueError(
             t(
@@ -289,7 +343,72 @@ def lire_manifeste(archive: Path) -> dict:
                 attendu=FORMAT,
             )
         )
+    champs_textes = ("project_name", "config_root", "data_root")
+    if any(
+        not isinstance(manifeste.get(champ), str) or not manifeste[champ].strip()
+        for champ in champs_textes
+    ) or any(
+        not isinstance(manifeste.get(champ), list)
+        or not all(isinstance(valeur, str) for valeur in manifeste[champ])
+        for champ in ("services", "volumes")
+    ):
+        raise ValueError(t("manifeste de sauvegarde incomplet ou invalide"))
     return manifeste
+
+
+def _cible_archive(racine: Path, relatif: str) -> Path:
+    """Resout un membre ZIP sous sa racine, y compris face aux liens symboliques."""
+    pur = PurePosixPath(relatif)
+    if (
+        not relatif
+        or pur.is_absolute()
+        or "\\" in relatif
+        or "\x00" in relatif
+        or any(part in ("", ".", "..") or ":" in part for part in pur.parts)
+    ):
+        raise ValueError(t("chemin interdit dans l'archive : {chemin}", chemin=relatif))
+    racine_resolue = racine.resolve()
+    cible = racine_resolue.joinpath(*pur.parts).resolve()
+    if not cible.is_relative_to(racine_resolue):
+        raise ValueError(t("chemin interdit dans l'archive : {chemin}", chemin=relatif))
+    return cible
+
+
+def _membres_valides(
+    zf: zipfile.ZipFile, manifeste: dict, project_dir: Path, config: Path
+) -> list[tuple[str, Path | None, str | None]]:
+    """Valide toute la disposition avant la premiere ecriture sur disque."""
+    volumes = manifeste.get("volumes", [])
+    if not isinstance(volumes, list) or not all(
+        isinstance(nom, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", nom)
+        for nom in volumes
+    ):
+        raise ValueError(t("liste de volumes invalide dans l'archive"))
+    attendus = {f"{DOSSIER_VOLUMES}/{nom}.tar.gz": nom for nom in volumes}
+    membres = []
+    for membre in zf.namelist():
+        if membre.startswith(f"{DOSSIER_PROJET}/"):
+            relatif = membre.split("/", 1)[1]
+            if relatif not in FICHIERS_PROJET:
+                raise ValueError(
+                    t(
+                        "fichier de projet interdit dans l'archive : {fichier}",
+                        fichier=relatif,
+                    )
+                )
+            membres.append((membre, _cible_archive(project_dir, relatif), None))
+        elif membre.startswith(f"{DOSSIER_CONFIG}/"):
+            relatif = membre.split("/", 1)[1]
+            if not relatif or membre.endswith("/"):
+                continue
+            membres.append((membre, _cible_archive(config, relatif), None))
+        elif membre.startswith(f"{DOSSIER_VOLUMES}/"):
+            if membre not in attendus:
+                raise ValueError(
+                    t("volume interdit dans l'archive : {fichier}", fichier=membre)
+                )
+            membres.append((membre, None, attendus[membre]))
+    return membres
 
 
 def restaurer(
@@ -318,20 +437,14 @@ def restaurer(
 
     try:
         with zipfile.ZipFile(archive) as zf:
-            for membre in zf.namelist():
-                if membre.startswith(f"{DOSSIER_PROJET}/"):
-                    nom = membre.split("/", 1)[1]
-                    if nom:
-                        (project_dir / nom).write_bytes(zf.read(membre))
-                elif membre.startswith(f"{DOSSIER_CONFIG}/"):
-                    relatif = membre.split("/", 1)[1]
-                    if not relatif or membre.endswith("/"):
-                        continue
-                    cible = cible_config / relatif
+            for membre, cible, volume in _membres_valides(
+                zf, manifeste, project_dir, cible_config
+            ):
+                if cible is not None:
                     cible.parent.mkdir(parents=True, exist_ok=True)
                     cible.write_bytes(zf.read(membre))
-                elif membre.startswith(f"{DOSSIER_VOLUMES}/"):
-                    (temporaires / Path(membre).name).write_bytes(zf.read(membre))
+                elif volume is not None:
+                    (temporaires / f"{volume}.tar.gz").write_bytes(zf.read(membre))
 
         for nom in manifeste.get("volumes", []):
             source = temporaires / f"{nom}.tar.gz"

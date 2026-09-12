@@ -491,11 +491,19 @@ values are additionally written between single quotes.
 in the summary.
 
 The wizard asks the question right after the paths, as soon as a download client is ticked.
-On the command line it is `--vpn`: either way the client goes through
-[Gluetun](https://github.com/passteque/gluetun).
+BitTorrent clients go through [Gluetun](https://github.com/qdm12/gluetun) when the VPN is
+enabled.
+
+SABnzbd is handled separately: a direct connection using SSL/TLS at the Usenet provider is
+recommended by default. Routing it through the VPN as well hides the Usenet server from the
+ISP, but adds a Gluetun dependency and may reduce throughput; it never replaces SSL/TLS.
+The wizard asks explicitly. On the command line, add `--sabnzbd-vpn` to select the tunnel.
 
 ```bash
 plugarr install --vpn --vpn-provider nordvpn --vpn-key <your-wireguard-key>
+
+# Also route SABnzbd through the tunnel (optional)
+plugarr install --vpn --sabnzbd-vpn --vpn-provider nordvpn --vpn-key <your-wireguard-key>
 ```
 
 ```bash
@@ -578,13 +586,14 @@ seconds — so the trial gives it two minutes instead of forty-five seconds. A
 valid configuration always answers in about fifteen seconds.
 
 What matters is not that the tunnel exists, it is that **no packet can leave without it**.
-The download client does not start until Gluetun is *healthy*, verified with deliberately
+A protected client does not start until Gluetun is *healthy*, verified with deliberately
 wrong credentials: Gluetun stays `unhealthy`, and qBittorrent never leaves the `created`
 state.
 
-Two subtleties handled, each able to break everything silently: the client's ports **move
-onto Gluetun** (a container sharing a network stack can no longer publish a port), and the
-wiring targets `http://gluetun:8080` because the client **loses its DNS alias**.
+Two subtleties handled, each able to break everything silently: protected clients' ports
+**move onto Gluetun** (a container sharing a network stack can no longer publish a port),
+and wiring targets Gluetun because the client **loses its DNS alias**. Internal ports remain
+distinct: 8080 for qBittorrent and 8085 for SABnzbd.
 
 ---
 
@@ -670,28 +679,20 @@ wizard) to install a second one alongside. The preflight warns you if the case a
 The detail lives in [ROADMAP.en.md](ROADMAP.en.md), kept up to date: what works, what is in
 progress, what will not be done and why. Summary below.
 
-**The PlugArr console** is the next big piece, and the only one that is not simply another
-service in the catalogue. Today the wizard installs and then steps aside: the access page is
-a dead HTML file, and everything that comes afterwards is done by hand, service by service.
-A web console, in its own container, would hold the stack together over time:
+**The PlugArr console is available.** Run `plugarr serve` on the host to manage
+services, updates, diagnostics, backups and credentials with authenticated access.
 
-| | |
+The [`v0.8.0-web-preview.1`](../../releases/tag/v0.8.0-web-preview.1)
+pre-release adds a web wizard, a dynamic connection map, targeted tests and
+repairs, scheduled maintenance, history, in-console alerts and Windows
+executable updates. It remains separate from the stable release. See
+[LOCAL_TESTING.md](LOCAL_TESTING.md).
+
+Services still under consideration:
+
+| Service | Remaining work |
 |---|---|
-| Service status | Running, stopped, broken, and since when. `docker ps` already knows; it is the display that is missing. |
-| Start, stop, restart | Without going through Docker Desktop or the command line. |
-| Updates | See that a newer image exists, and apply it. The catalogue pins exact versions: that is precisely what makes the comparison reliable. |
-| Passwords and API keys | Change them in one click, and **re-wire immediately after**. That is where it all happens: a key changed by hand silently breaks six links today. |
-| Add a service | Install and wire a service missing from the initial installation, without redoing everything. `plugarr wire` already knows how; it lacks an interface. |
 
-Two questions to settle before writing anything: the container has to drive Docker, so it
-needs access to the Docker socket, which amounts to giving full powers over the machine, and
-must be said plainly. And a console that changes passwords must authenticate itself,
-seriously.
-
-On the services side, in the order they will be studied:
-
-| | What is left to do |
-|---|---|
 | **Plex** | A second media server, next to Jellyfin. Its token comes from `plex.tv`, not from the local API: that is the point to verify before adding it. |
 | **Notifiarr** | Centralised notifications for the whole stack. Every *arr registers with an API key. |
 | **Bazarr** | Subtitles. Studied, but its configuration goes through a YAML file rather than an API, so nothing is verified yet. |

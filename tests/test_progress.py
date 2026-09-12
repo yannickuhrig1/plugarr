@@ -44,6 +44,10 @@ class _FakeCompose:
     def up(self, timeout=1800):
         return True, ""
 
+    def pull_many(self, services, timeout=1800):
+        assert services
+        return True, ""
+
 
 @pytest.mark.parametrize("services", SELECTIONS, ids=["defaut", "minimal", "catalogue"])
 def test_le_total_annonce_correspond_aux_evenements_emis(tmp_path, monkeypatch, services):
@@ -89,8 +93,17 @@ def test_le_total_annonce_correspond_aux_evenements_emis(tmp_path, monkeypatch, 
         cfg, tmp_path, on_progress=lambda p: emitted.append(p), on_step=lambda s: emitted.append(s)
     )
 
-    assert len(emitted) == expected_events(cfg), (
-        f"la barre annoncerait {expected_events(cfg)} etapes pour {len(emitted)} evenements"
+    completed = [event for event in emitted if not getattr(event, "started", False)]
+    assert len(completed) == expected_events(cfg), (
+        f"la barre annoncerait {expected_events(cfg)} etapes pour {len(completed)} terminees"
+    )
+    assert any(
+        isinstance(event, Progress) and event.phase == "images Docker" and event.started
+        for event in emitted
+    )
+    assert any(
+        isinstance(event, Progress) and event.phase == "demarrage" and event.started
+        for event in emitted
     )
 
 

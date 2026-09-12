@@ -89,7 +89,15 @@ def print_summary(cfg: StackConfig) -> None:
         )
     )
 
-    if not cfg.vpn_enabled and any(cfg.enabled(s) for s in catalog.DOWNLOAD_CLIENTS):
+    if cfg.enabled("sabnzbd"):
+        trajet = (
+            t("via Gluetun ; SSL/TLS reste necessaire")
+            if cfg.vpn.protects("sabnzbd")
+            else t("connexion directe ; SSL/TLS recommande vers le fournisseur Usenet")
+        )
+        console.print(Panel(trajet, title="SABnzbd", border_style="cyan"))
+
+    if not cfg.vpn_enabled and any(cfg.enabled(s) for s in catalog.TORRENT_CLIENTS):
         console.print(
             Panel(
                 t(
@@ -144,10 +152,17 @@ def install_with_progress(cfg: StackConfig, project_dir, install) -> list[StepRe
             bar.update(task, completed=done, description=description[:28])
 
         def on_progress(progress: orchestrator.Progress) -> None:
-            mark = "[green]OK[/green]" if progress.ok else f"[red]{t('ECHEC')}[/red]"
+            mark = (
+                "[cyan]…[/cyan]"
+                if progress.started
+                else "[green]OK[/green]"
+                if progress.ok
+                else f"[red]{t('ECHEC')}[/red]"
+            )
             journal.progress(progress.phase, progress.message, progress.ok)
             console.print(f"  {mark} {progress.phase} : {progress.message}")
-            advance(progress.phase)
+            if not progress.started:
+                advance(progress.phase)
 
         def on_step(result: StepResult) -> None:
             journal.step(result)

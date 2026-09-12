@@ -453,7 +453,7 @@ def seed_sabnzbd(
 
     **La liste blanche d'hotes.** SABnzbd refuse toute requete dont l'en-tete
     `Host` ne figure pas dans `host_whitelist`, et n'y met par defaut QUE
-    l'identifiant du conteneur. Sonarr appelant `http://sabnzbd:8080` recoit
+    l'identifiant du conteneur. Sonarr appelant `http://sabnzbd:8085` recoit
     donc :
 
         Access denied - Hostname verification failed
@@ -465,9 +465,11 @@ def seed_sabnzbd(
     telechargements hors de `/data` : les liens physiques deviennent impossibles
     et chaque import recopie le fichier.
 
-    Un fichier existant fait autorite : on ne fait qu'y AJOUTER les hotes
-    manquants, sans toucher au reste. Quelqu'un a pu regler son serveur Usenet,
-    ses categories et ses scripts.
+    Un fichier existant fait autorite pour sa cle, ses categories, ses serveurs
+    et ses scripts. Deux valeurs relevent toutefois de la topologie que PlugArr
+    genere et doivent rester coherentes avec le compose : le port d'ecoute
+    INTERNE et les noms d'hote autorises. Les laisser diverger rendrait le
+    service injoignable tout en conservant une configuration apparemment valide.
     """
     config_dir.mkdir(parents=True, exist_ok=True)
     ini = config_dir / "sabnzbd.ini"
@@ -475,19 +477,67 @@ def seed_sabnzbd(
 
     if ini.exists():
         texte = ini.read_text(encoding="utf-8", errors="replace")
-        manquants = [h for h in hotes_autorises if h and h not in texte]
-        if not manquants:
-            return False, t("sabnzbd.ini existant, liste d'hotes deja complete")
         lignes = []
+        section = ""
+        ancien_port: int | None = None
+        port_trouve = False
+        hotes_trouves = False
+        manquants = list(filter(None, hotes_autorises))
+
+        def completer_misc() -> None:
+            nonlocal port_trouve, hotes_trouves
+            if not port_trouve:
+                lignes.append(f"port = {port}")
+                port_trouve = True
+            if not hotes_trouves:
+                lignes.append(f"host_whitelist = {hotes}")
+                hotes_trouves = True
+
         for ligne in texte.splitlines():
-            if ligne.startswith("host_whitelist"):
-                actuels = ligne.split("=", 1)[1].strip().rstrip(",")
-                ligne = "host_whitelist = " + ",".join(
-                    filter(None, [actuels, *manquants])
-                ) + ","
+            depouillee = ligne.strip()
+            if depouillee.startswith("[") and depouillee.endswith("]"):
+                if section == "misc":
+                    completer_misc()
+                section = depouillee[1:-1].strip().lower()
+            if section == "misc" and re.match(r"^\s*port\s*=", ligne):
+                trouve = re.match(r"^(\s*port\s*=\s*)(\d+)(.*)$", ligne)
+                if trouve:
+                    port_trouve = True
+                    ancien_port = int(trouve.group(2))
+                    ligne = f"{trouve.group(1)}{port}{trouve.group(3)}"
+            if section == "misc" and re.match(r"^\s*host_whitelist\s*=", ligne):
+                hotes_trouves = True
+                actuels = [
+                    h.strip()
+                    for h in ligne.split("=", 1)[1].strip().rstrip(",").split(",")
+                    if h.strip()
+                ]
+                manquants = [h for h in hotes_autorises if h and h not in actuels]
+                if manquants:
+                    ligne = "host_whitelist = " + ",".join([*actuels, *manquants]) + ","
             lignes.append(ligne)
+        if section == "misc":
+            completer_misc()
+        elif not port_trouve or not hotes_trouves:
+            # Fichier sans `[misc]` : ni le port ni la liste d'hotes n'avaient
+            # d'endroit ou aller. La fonction annoncait pourtant « port ajoute »
+            # et « hotes ajoutes » en n'ecrivant rien, et SABnzbd restait sur
+            # 8080 en refusant les *arr. On cree la section manquante.
+            lignes.append("[misc]")
+            completer_misc()
+        port_change = ancien_port != port
+        hotes_change = bool(manquants)
+        if not hotes_change and not port_change:
+            return False, t("sabnzbd.ini existant, port et liste d'hotes deja alignes")
         ini.write_text("\n".join(lignes) + "\n", encoding="utf-8")
-        return False, f"sabnzbd.ini existant, hotes ajoutes : {', '.join(manquants)}"
+        changements = []
+        if port_change:
+            changements.append(
+                f"port {ancien_port} -> {port}" if ancien_port is not None else f"port ajoute : {port}"
+            )
+        if hotes_change:
+            changements.append(f"hotes ajoutes : {', '.join(manquants)}")
+        return False, "sabnzbd.ini existant, " + ", ".join(changements)
 
     ini.write_text(
         "\n".join(

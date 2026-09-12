@@ -120,18 +120,43 @@ EN: dict[str, str] = {
         "Optional step - download client VPN"
     ),
     "Sans VPN, le trafic BitTorrent sort sur [b]l'adresse IP publique de cette "
-    "machine[/b], visible par tous les autres pairs.\n"
+    "machine[/b], visible par tous les autres pairs. SABnzbd, lui, parle a un "
+    "serveur Usenet : activez SSL/TLS chez le fournisseur.\n"
     "[dim]Avec Gluetun, le client de telechargement perd son propre reseau : il "
     "ne demarre pas tant que le tunnel n'est pas etabli, donc aucun paquet ne "
     "peut sortir en clair.[/dim]": (
         "Without a VPN, BitTorrent traffic leaves through [b]this machine's "
-        "public IP address[/b], visible to every other peer.\n"
+        "public IP address[/b], visible to every other peer. SABnzbd connects "
+        "to a Usenet server: enable SSL/TLS at the provider.\n"
         "[dim]With Gluetun, the download client loses its own network: it does "
         "not start until the tunnel is up, so no packet can leave in the "
         "clear.[/dim]"
     ),
-    "Sans VPN": "No VPN",
-    "Faire passer le client par un VPN": "Route the client through a VPN",
+    "Trajet de SABnzbd": "SABnzbd route",
+    "Connexion directe + SSL/TLS (recommande)": "Direct connection + SSL/TLS (recommended)",
+    "Faire aussi passer SABnzbd par le VPN": "Also route SABnzbd through the VPN",
+    "[dim]Le VPN masque le serveur Usenet a votre FAI, mais ajoute une dependance a "
+    "Gluetun et peut reduire le debit. Il ne remplace pas SSL/TLS.[/dim]": (
+        "[dim]The VPN hides the Usenet server from your ISP, but adds a dependency "
+        "on Gluetun and may reduce throughput. It does not replace SSL/TLS.[/dim]"
+    ),
+    "Ne pas activer Gluetun": "Do not enable Gluetun",
+    "Activer Gluetun pour les clients choisis": "Enable Gluetun for selected clients",
+    "connexion directe + SSL/TLS recommandee": "direct connection + SSL/TLS recommended",
+    "connexion directe ; SSL/TLS recommande vers le fournisseur Usenet": (
+        "direct connection; SSL/TLS recommended to the Usenet provider"
+    ),
+    "via Gluetun ; SSL/TLS reste necessaire": (
+        "through Gluetun; SSL/TLS is still required"
+    ),
+    "connexion directe choisie ; SSL/TLS vers le serveur Usenet reste recommande": (
+        "direct connection selected; SSL/TLS to the Usenet server remains recommended"
+    ),
+    "connexion directe choisie ; activez SSL/TLS vers le serveur Usenet "
+    "(port 563 recommande par SABnzbd)": (
+        "direct connection selected; enable SSL/TLS to the Usenet server "
+        "(port 563 recommended by SABnzbd)"
+    ),
     "Fournisseur": "Provider",
     "Protocole": "Protocol",
     "Cle privee WireGuard": "WireGuard private key",
@@ -408,6 +433,7 @@ EN: dict[str, str] = {
     'Adresse de cette machine, joignable DEPUIS les conteneurs.': "This machine's address, reachable FROM the containers.",
     'Langue des interfaces (code ISO : fr, en, es...). Voir `plugarr langues`.': 'Language of the service interfaces (ISO code: fr, en, es...). See `plugarr langues`.',
     'Faire passer le client torrent par un VPN.': 'Route the torrent client through a VPN.',
+    "Trajet de SABnzbd. Direct + SSL/TLS est recommande ; cette option l'ajoute a Gluetun.": 'SABnzbd route. Direct + SSL/TLS is recommended; this option adds it to Gluetun.',
     'Fournisseur VPN. Voir `plugarr vpn-providers`.': 'VPN provider. See `plugarr vpn-providers`.',
     'wireguard ou openvpn.': 'wireguard or openvpn.',
     'Cle privee WireGuard.': 'WireGuard private key.',
@@ -443,7 +469,9 @@ EN: dict[str, str] = {
     '[dim]Configurations conservees.[/dim]': '[dim]Configurations kept.[/dim]',
     '[dim]Conservee (--yes ne supprime rien). Utilisez --reset-config pour repartir de zero.[/dim]': '[dim]Kept (--yes deletes nothing). Use --reset-config to start over.[/dim]',
     "[yellow]Un template a ete choisi mais Recyclarr n'est pas dans la selection : il ne sera pas applique.[/yellow]": '[yellow]A template was chosen but Recyclarr is not in the selection: it will not be applied.[/yellow]',
-    '[yellow]--vpn sans client de telechargement : Gluetun ne protegerait rien.[/yellow]': '[yellow]--vpn with no download client: Gluetun would protect nothing.[/yellow]',
+    '[red]--sabnzbd-vpn demande aussi --vpn.[/red]': '[red]--sabnzbd-vpn also requires --vpn.[/red]',
+    '[red]--sabnzbd-vpn demande que SABnzbd soit selectionne.[/red]': '[red]--sabnzbd-vpn requires SABnzbd to be selected.[/red]',
+    '[red]--vpn sans client de telechargement a proteger : choisissez un client torrent ou ajoutez --sabnzbd-vpn.[/red]': '[red]--vpn has no download client to protect: select a torrent client or add --sabnzbd-vpn.[/red]',
     '[cyan]--dry-run : aucune ecriture. Compose qui serait genere :[/cyan]': '[cyan]--dry-run: nothing written. The Compose that would be generated:[/cyan]',
     '[red]Des controles bloquants ont echoue.[/red]': '[red]Blocking checks failed.[/red]',
     '[dim]Diagnostic : `plugarr doctor`[/dim]': '[dim]Diagnostic: `plugarr doctor`[/dim]',
@@ -640,7 +668,11 @@ EN: dict[str, str] = {
     ' (deja actif)': ' (already on)',
     'conteneurs existants arretes avant pre-semis': 'existing containers stopped before pre-seeding',
     'aucun conteneur a arreter': 'no container to stop',
-    'docker compose up (peut prendre plusieurs minutes)': 'docker compose up (may take several minutes)',
+    'docker compose stop a echoue': 'docker compose stop failed',
+    'telechargement ou verification de {nombre} images : {services}': 'downloading or checking {nombre} images: {services}',
+    '{nombre} images pretes': '{nombre} images ready',
+    'creation et demarrage des conteneurs Docker': 'creating and starting Docker containers',
+    'attente de {service} : verification de son API': 'waiting for {service}: checking its API',
     "{service} n'a aucun dossier racine et plugarr ne peut pas deviner votre arborescence. Ajoutez-le dans {service} avant d'importer.": '{service} has no root folder and plugarr cannot guess your directory tree. Add one in {service} before importing.',
     "{service} a une configuration prealable dans {dossier}, et son mot de passe n'y est stocke que hache. PlugArr a essaye les {nombre} mots de passe qu'il connait pour ce service : aucun n'est accepte. Supprimez ce dossier pour repartir a zero — vous perdrez ce que ce service seul contenait, pas vos medias.": '{service} already has a configuration in {dossier}, and its password is stored hashed only. PlugArr tried the {nombre} passwords it knows for this service: none is accepted. Delete that folder to start over — you will lose what that service alone held, not your media.',
     "{service} a une configuration prealable dans {dossier}. Son mot de passe n'y est stocke que hache : PlugArr ne peut pas le retrouver, et celui qu'il annonce est refuse. Aucune installation precedente de PlugArr n'est connue sur cette machine — ce service a donc ete configure autrement. Supprimez ce dossier pour repartir a zero.": '{service} already has a configuration in {dossier}. Its password is stored hashed only: PlugArr cannot recover it, and the one it announces is refused. No previous PlugArr installation is known on this machine — so this service was configured some other way. Delete that folder to start over.',
@@ -691,6 +723,9 @@ EN: dict[str, str] = {
     '{services} etaient accroches a un Gluetun detruit, rattaches au tunnel': '{services} were attached to a destroyed Gluetun, reconnected to the tunnel',
     'impossible de rattacher {services} au tunnel : lancez `plugarr doctor`': 'could not reattach {services} to the tunnel: run `plugarr doctor`',
     "{chemin} n'est pas sous {racine} : suppression refusee": '{chemin} is not under {racine}: deletion refused',
+    'impossible de supprimer le volume Docker {volume} : {detail}': 'could not delete Docker volume {volume}: {detail}',
+    "impossible de retirer l'ancienne pile Docker avant nettoyage : {detail}": 'could not remove the old Docker stack before cleanup: {detail}',
+    'cause inconnue': 'unknown cause',
     'Le fichier compose genere est invalide : {cause}': 'The generated compose file is invalid: {cause}',
     'aucun service selectionne': 'no service selected',
     'le chemin ne peut pas etre vide': 'the path cannot be empty',
@@ -705,7 +740,8 @@ EN: dict[str, str] = {
     "le volume /config n'est pas monte depuis l'hote : impossible de lire la cle API": 'the /config volume is not mounted from the host: cannot read the API key',
     'arret des conteneurs (une base copiee a chaud est corrompue)': 'stopping the containers (a database copied hot comes out corrupt)',
     'redemarrage des conteneurs': 'restarting the containers',
-    "sabnzbd.ini existant, liste d'hotes deja complete": 'sabnzbd.ini already there, host list already complete',
+    'sauvegarde creee mais redemarrage des conteneurs echoue : {detail}': 'backup created, but restarting the containers failed: {detail}',
+    "sabnzbd.ini existant, port et liste d'hotes deja alignes": 'sabnzbd.ini already there, port and host list already aligned',
     'Gerer vos indexeurs dans Prowlarr.': 'Manage your indexers in Prowlarr.',
     "Prowlarr n'est pas installe dans cette stack.": 'Prowlarr is not installed in this stack.',
     'Nom exact de la definition (voir `search`).': 'Exact name of the definition (see `search`).',
@@ -768,6 +804,14 @@ EN: dict[str, str] = {
     '[red]{fichier} introuvable.[/red]': '[red]{fichier} not found.[/red]',
     "{chemin} introuvable. Lancez d'abord `plugarr install`.": '{chemin} not found. Run `plugarr install` first.',
     "{fichier} n'est pas une archive lisible": '{fichier} is not a readable archive',
+    "manifeste de sauvegarde anormalement volumineux": "abnormally large backup manifest",
+    "manifeste de sauvegarde illisible": "unreadable backup manifest",
+    "manifeste de sauvegarde invalide": "invalid backup manifest",
+    "manifeste de sauvegarde incomplet ou invalide": "incomplete or invalid backup manifest",
+    "chemin interdit dans l'archive : {chemin}": "forbidden path in archive: {chemin}",
+    "liste de volumes invalide dans l'archive": "invalid volume list in archive",
+    "fichier de projet interdit dans l'archive : {fichier}": "forbidden project file in archive: {fichier}",
+    "volume interdit dans l'archive : {fichier}": "forbidden volume in archive: {fichier}",
     # -- mise a jour du pack et migrations de stack.yml -----------------------------
     "stack.yml est en version {trouvee}, cette version de PlugArr lit jusqu'a la {connue}. Mettez PlugArr a jour : continuer effacerait les reglages qu'il ne sait pas lire.": 'stack.yml is at version {trouvee}, this version of PlugArr reads up to {connue}. Update PlugArr: going on would erase the settings it cannot read.',
     'stack.yml migre en version {version}': 'stack.yml migrated to version {version}',
@@ -836,3 +880,10 @@ EN: dict[str, str] = {
     '[yellow]Aucune installation trouvee.[/yellow]\n[dim]Indiquez ci-dessus le dossier qui contient stack.yml, puis validez avec Entree.[/dim]': '[yellow]No installation found.[/yellow]\n[dim]Enter above the folder holding stack.yml, then confirm with Enter.[/dim]',
     '[green]Sauvegarde terminee.[/green]\n\n{archive}\n{taille} Mo, {fichiers} fichiers, volumes : {volumes}': '[green]Backup complete.[/green]\n\n{archive}\n{taille} MB, {fichiers} files, volumes: {volumes}',
 }
+
+EN.update({
+    "Aucun terminal interactif. Utilisez plugarr web --no-open.": "No interactive terminal. Use plugarr web --no-open.",
+    "Choisir l'interface : web (graphique) ou tui (terminal).": "Choose an interface: web (graphical) or tui (terminal).",
+    "Mode d'interface": "Interface mode",
+    "Memoriser ce choix sur cet ordinateur ?": "Remember this choice on this computer?",
+})

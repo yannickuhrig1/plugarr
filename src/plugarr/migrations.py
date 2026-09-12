@@ -45,13 +45,34 @@ from .models import StackConfig
 #: Ajouter un champ neuf avec une valeur par defaut ne demande PAS de
 #: migration — pydantic l'absorbe, et c'est le cas courant. Ce qui en demande
 #: une : un champ qui change de sens, de type, ou qui disparait.
-VERSION_COURANTE = 1
+VERSION_COURANTE = 2
 
 #: `version depuis` -> transformation du dictionnaire brut. Chaque fonction
 #: recoit le contenu du fichier tel qu'il a ete lu et rend la forme attendue
 #: par la version suivante. Elle ne doit rien supposer de valide : le fichier
 #: peut venir de n'importe quelle version passee.
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+def _vpn_sabnzbd_explicite(donnees: dict[str, Any]) -> dict[str, Any]:
+    """Preserve le trajet SABnzbd des stacks creees avant le choix separe.
+
+    En version 1, ``vpn.enabled`` placait TOUS les clients de telechargement
+    derriere Gluetun. Le nouveau defaut direct ne vaut que pour une nouvelle
+    installation ; une ancienne stack avec VPN et SABnzbd doit donc recevoir
+    la valeur explicite ``True``.
+    """
+    vpn = donnees.get("vpn")
+    services = donnees.get("services")
+    if isinstance(vpn, dict) and "protect_sabnzbd" not in vpn:
+        vpn = dict(vpn)
+        vpn["protect_sabnzbd"] = bool(
+            vpn.get("enabled") and isinstance(services, dict) and "sabnzbd" in services
+        )
+        donnees["vpn"] = vpn
+    return donnees
+
+
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    1: _vpn_sabnzbd_explicite,
+}
 
 
 class VersionFuture(ValueError):

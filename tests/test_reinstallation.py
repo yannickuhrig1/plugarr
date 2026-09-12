@@ -241,3 +241,30 @@ def test_un_dossier_absent_n_est_pas_une_erreur(tmp_path):
     cfg = _cfg(tmp_path, ["jellyfin"])
 
     assert orchestrator.reset_configs(cfg, ["jellyfin"]) == []
+
+
+def test_nettoyer_une_ancienne_installation_retire_d_abord_ses_conteneurs(
+    tmp_path, monkeypatch
+):
+    cfg = _cfg(tmp_path, ["jellyfin"])
+    calls = []
+
+    class Stack:
+        def __init__(self, project_dir, project_name):
+            assert project_dir == tmp_path
+            assert project_name == cfg.project_name
+
+        def down(self):
+            calls.append("down")
+            return True, ""
+
+    monkeypatch.setattr(orchestrator, "Compose", Stack)
+    monkeypatch.setattr(
+        orchestrator,
+        "reset_configs",
+        lambda _cfg, services: (calls.append(("reset", services)) or []),
+    )
+
+    orchestrator.reset_installation_configs(cfg, tmp_path, ["jellyfin"])
+
+    assert calls == ["down", ("reset", ["jellyfin"])]

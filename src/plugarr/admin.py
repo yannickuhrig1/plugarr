@@ -34,6 +34,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import (
+    admin_extensions,
     adminauth,
     autoupdate,
     catalog,
@@ -42,12 +43,14 @@ from . import (
     imageref,
     journal,
     orchestrator,
-    sauvegarde,
     updates,
     vpncheck,
 )
 from .clients.arr import ArrClient
+from .clients.sabnzbd import SabnzbdClient
+from .clients.silo import SiloClient
 from .i18n import t
+from .maintenance import Maintenance
 from .models import StackConfig
 from .runner import Compose
 
@@ -68,7 +71,19 @@ class ServiceState:
 
     @property
     def up(self) -> bool:
-        return self.state == "running"
+        # Docker dit encore `running` pendant qu'un healthcheck est en echec.
+        # Pour une console d'administration, « processus vivant » n'est pas
+        # synonyme de « service disponible ». Certaines versions de Compose ne
+        # remplissent pas `Health` mais l'incluent dans `Status` : les deux
+        # sources sont donc controlees.
+        statut = self.status.lower()
+        sante = self.health.lower()
+        return (
+            self.state.lower() == "running"
+            and sante not in ("unhealthy", "starting")
+            and "unhealthy" not in statut
+            and "health: starting" not in statut
+        )
 
 
 def read_states(compose: Compose) -> dict[str, ServiceState]:
@@ -90,23 +105,28 @@ def read_states(compose: Compose) -> dict[str, ServiceState]:
 def status_payload(cfg: StackConfig, compose: Compose) -> dict:
     """Etat de chaque service SELECTIONNE, meme absent de docker : un service
     installe mais jamais demarre doit apparaitre, pas disparaitre."""
-    states = read_states(compose)
+    try:
+        states = read_states(compose)
+        engine_error = False
+    except OSError:
+        states = {}
+        engine_error = True
     services = []
-    for sid in catalog.STARTUP_ORDER:
-        if not cfg.enabled(sid):
+    for sid in (*catalog.STARTUP_ORDER, *(("gluetun",) if cfg.vpn_enabled else ())):
+        if sid != "gluetun" and not cfg.enabled(sid):
             continue
         found = states.get(sid)
         services.append(
             {
                 "id": sid,
-                "name": catalog.get(sid).display_name,
-                "state": found.state if found else "absent",
-                "status": found.status if found else "conteneur absent",
+                "name": "Gluetun" if sid == "gluetun" else catalog.get(sid).display_name,
+                "state": found.state if found else ("unknown" if engine_error else "absent"),
+                "status": found.status if found else ("Docker inaccessible" if engine_error else "conteneur absent"),
                 "health": found.health if found else "",
                 "up": bool(found and found.up),
             }
         )
-    return {"services": services}
+    return {"services": services, "engine_available": not engine_error}
 
 
 def updates_payload(cfg: StackConfig) -> dict:
@@ -148,7 +168,102 @@ def updates_payload(cfg: StackConfig) -> dict:
 _AVANT_INSTALLATION = ("configuration existante", "nom de projet")
 
 
-def doctor_payload(cfg: StackConfig, project_dir: Path) -> dict:
+def _silo_next_step(runner: Compose) -> str:
+    """Piste courte issue des journaux Silo, sans recopier les journaux."""
+    try:
+        logs = "\n".join(
+            runner.logs(sid, tail=100) for sid in ("silo", "silo-postgres", "silo-redis")
+        ).lower()
+    except (OSError, AttributeError):
+        logs = ""
+    if "password authentication failed" in logs or "authentication failed for user" in logs:
+        return (
+            "La base conserve probablement un autre mot de passe que le .env. "
+            "Sauvegardez d'abord, puis restaurez le couple .env/volume d'origine "
+            "ou utilisez la remise a zero Silo en acceptant la perte de sa seule base."
+        )
+    if "database files are incompatible" in logs or "database version mismatch" in logs:
+        return (
+            "La version PostgreSQL ne correspond pas au volume. Ne supprimez pas la base : "
+            "restaurez l'image precedente ou migrez le volume apres sauvegarde."
+        )
+    if "migration" in logs and any(word in logs for word in ("failed", "fatal", "error")):
+        return (
+            "Une migration Silo a echoue. Ne redemarrez pas en boucle et ne supprimez pas "
+            "le volume : conservez la sauvegarde et revenez a l'image precedente."
+        )
+    if "connection refused" in logs and any(word in logs for word in ("postgres", "redis")):
+        return (
+            "Silo n'atteint pas PostgreSQL ou Redis. Verifiez d'abord l'etat de ces deux "
+            "dependances dans ce diagnostic."
+        )
+    return (
+        "Consultez `docker compose logs --tail 100 silo silo-postgres silo-redis`. "
+        "Sauvegardez avant toute remise a zero ; le diagnostic ne supprime rien."
+    )
+
+
+def _runtime_checks(cfg: StackConfig, runner: Compose) -> tuple[list[dict], set[str]]:
+    """Etat Docker reel et services qu'il est inutile de sonder par HTTP."""
+    try:
+        states = read_states(runner)
+    except OSError as exc:
+        return [
+            {
+                "name": "Etat Docker",
+                "ok": False,
+                "detail": f"Docker Compose est injoignable : {str(exc).splitlines()[0][:200]}",
+                "blocking": False,
+                "partage": False,
+                "next_step": "Demarrez Docker, puis relancez le diagnostic.",
+            }
+        ], set(cfg.services)
+
+    checks: list[dict] = []
+    unavailable: set[str] = set()
+    ids = [sid for sid in catalog.STARTUP_ORDER if cfg.enabled(sid)]
+    if cfg.vpn_enabled:
+        ids.append("gluetun")
+    for sid in ids:
+        if sid != "gluetun" and cfg.services[sid].adopted:
+            continue
+        state = states.get(sid)
+        name = "Gluetun" if sid == "gluetun" else catalog.get(sid).display_name
+        ok = bool(state and state.up)
+        if ok:
+            detail = state.status
+            if state.health:
+                detail += f" ; sante {state.health}"
+            next_step = "Aucune action necessaire."
+        else:
+            unavailable.add(sid)
+            if state is None:
+                detail = "conteneur absent de cette pile Docker"
+            else:
+                detail = state.status or state.state or "etat Docker inconnu"
+                if state.health:
+                    detail += f" ; sante {state.health}"
+            next_step = (
+                _silo_next_step(runner)
+                if sid in ("silo", "silo-postgres", "silo-redis")
+                else f"Consultez `docker compose logs --tail 100 {sid}`, corrigez la cause puis redemarrez ce service."
+            )
+        checks.append(
+            {
+                "name": f"Etat {name}",
+                "ok": ok,
+                "detail": detail,
+                "blocking": False,
+                "partage": False,
+                "next_step": next_step,
+            }
+        )
+    return checks, unavailable
+
+
+def doctor_payload(
+    cfg: StackConfig, project_dir: Path, runner: Compose | None = None
+) -> dict:
     """Le meme diagnostic que `plugarr doctor`, rendu depuis la console.
 
     Demande a l'usage : « un bouton pour lancer plugarr doctor ». Il n'existait
@@ -158,31 +273,47 @@ def doctor_payload(cfg: StackConfig, project_dir: Path) -> dict:
     On reutilise `preflight` plutot que d'ecrire un second diagnostic : deux
     verifications du meme systeme finiraient par ne plus dire la meme chose.
     """
-    controles = [
+    controles: list[dict] = [
         {"name": c.name, "ok": c.ok, "detail": c.detail, "blocking": c.blocking, "partage": False}
         for c in orchestrator.preflight(cfg, project_dir)
         if c.name not in _AVANT_INSTALLATION
     ]
+    indisponibles: set[str] = set()
+    if runner is not None:
+        runtime, indisponibles = _runtime_checks(cfg, runner)
+        controles += runtime
 
     # La joignabilite reelle des API : un conteneur qui tourne n'est pas un
     # service qui repond, et c'est la distinction que `doctor` apporte.
     for sid, inst in orchestrator.iter_selected(cfg):
         spec = catalog.get(sid)
-        if spec.api_family != "arr":
+        if sid in indisponibles or spec.api_family not in ("arr", "sabnzbd", "silo"):
             continue
         try:
-            with ArrClient(
-                inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version, name=sid
-            ) as client:
-                controles.append(
-                    {
-                        "name": f"API {spec.display_name}",
-                        "ok": True,
-                        "detail": f"repond, version {client.version}",
-                        "blocking": False,
-                        "partage": False,
-                    }
-                )
+            if spec.api_family == "arr":
+                with ArrClient(
+                    inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version, name=sid
+                ) as client:
+                    detail = f"repond, version {client.version}"
+            elif spec.api_family == "sabnzbd":
+                with SabnzbdClient(inst.url(cfg.host), inst.api_key or inst.password or "") as client:
+                    detail = f"repond, version {client.version}"
+            else:
+                with SiloClient(inst.url(cfg.host)) as client:
+                    # Endpoint eprouve contre la version epinglee : il prouve
+                    # que l'API applicative repond, pas seulement que le port est ouvert.
+                    _ = client.needs_setup
+                    detail = "repond"
+            controles.append(
+                {
+                    "name": f"API {spec.display_name}",
+                    "ok": True,
+                    "detail": detail,
+                    "blocking": False,
+                    "partage": False,
+                    "next_step": "Aucune action necessaire.",
+                }
+            )
         except Exception as exc:  # noqa: BLE001
             controles.append(
                 {
@@ -191,6 +322,11 @@ def doctor_payload(cfg: StackConfig, project_dir: Path) -> dict:
                     "detail": str(exc).splitlines()[0],
                     "blocking": False,
                     "partage": False,
+                    "next_step": (
+                        _silo_next_step(runner)
+                        if sid == "silo" and runner is not None
+                        else f"Verifiez que {spec.display_name} repond sur {inst.url(cfg.host)}, puis relancez le diagnostic."
+                    ),
                 }
             )
     # La fuite VPN en DERNIER, pour qu'elle se lise en bas du rapport, la ou
@@ -286,6 +422,7 @@ class _Handler(BaseHTTPRequestHandler):
     token: str
     project_dir: Path
     sessions: adminauth.Sessions
+    maintenance: Maintenance
 
     server_version = "plugarr"
     sys_version = ""
@@ -392,7 +529,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Une console qui affiche des mots de passe n'a rien a faire dans un
         # cadre : `frame-ancestors none` interdit le detournement de clic.
         self.send_header(
-            "Content-Security-Policy", "default-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+            "Content-Security-Policy", "default-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
         )
         self.send_header("Referrer-Policy", "no-referrer")
         if cookie:
@@ -412,16 +549,44 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._deny()
             return
+        # Aucun verrou global ici : chaque methode de `Maintenance` protege
+        # deja son etat, et la console doit continuer a repondre pendant une
+        # sauvegarde ou une mise a jour, qui durent des minutes.
+        self._get_authorised()
+
+    def _get_authorised(self):
         route = urlparse(self.path).path
         if route == "/":
             page = dashboard.render(self.cfg, live=True).encode("utf-8")
             self._send(HTTPStatus.OK, page, "text/html; charset=utf-8", cookie=True)
+        elif route in admin_extensions.GET_ROUTES:
+            admin_extensions.get(self, route)
         elif route == "/api/status":
-            self._json(status_payload(self.cfg, self.compose))
+            result = status_payload(self.cfg, self.compose)
+            # Une sauvegarde a froid arrete la pile : c'est son fonctionnement
+            # normal, pas une panne. Sans cette condition, chaque sauvegarde
+            # affichait six alertes « X indisponible » et laissait douze
+            # evenements mensongers dans l'historique.
+            sauvegarde_en_cours = self.maintenance.arret_pour_sauvegarde.is_set()
+            volontaires = set(self.maintenance.snapshot()['intentional_stops'])
+            for entry in result['services']:
+                volontaire = entry['id'] in volontaires or sauvegarde_en_cours
+                entry['intentional_stop'] = volontaire
+                self.maintenance.alert('services:' + entry['id'],
+                    not entry['up'] and not volontaire,
+                    entry['name'] + ' indisponible')
+            self._json(result)
         elif route == "/api/updates":
             self._json(updates_payload(self.cfg))
         elif route == "/api/doctor":
-            self._json(doctor_payload(self.cfg, self.project_dir))
+            result = doctor_payload(self.cfg, self.project_dir, self.compose)
+            self.maintenance.event('diagnostic', result['failed'] == 0)
+            for check in result['checks']:
+                check['consequence'] = 'Controle reussi.' if check['ok'] else 'Ce controle peut empecher le bon fonctionnement de l’installation.'
+                check.setdefault('next_step', 'Aucune action necessaire.' if check['ok'] else 'Verifier le detail ci-dessous, puis relancer le diagnostic. La cause exacte reste a confirmer.')
+                if 'vpn' in check['name'].lower():
+                    self.maintenance.alert('vpn:' + check['name'], not check['ok'], check['name'])
+            self._json(result)
         else:
             self._json({"error": "route inconnue"}, HTTPStatus.NOT_FOUND)
 
@@ -438,18 +603,31 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._deny()
             return
+        # Les actions qui touchent Docker ou les fichiers restent serialisees,
+        # mais sous le verrou d'OPERATION : les lectures d'etat passent.
+        with self.maintenance.operation:
+            self._post_authorised()
+
+    def _post_authorised(self):
         route = urlparse(self.path).path
-        if route not in ("/api/action", "/api/update", "/api/rotate", "/api/add"):
+        if route not in ({"/api/action", "/api/update", "/api/rotate", "/api/add", "/api/backup"} | admin_extensions.POST_ROUTES):
             self._json({"error": "route inconnue"}, HTTPStatus.NOT_FOUND)
             return
 
-        length = int(self.headers.get("Content-Length") or 0)
         try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= 16384:
+                raise ValueError('body too large')
             payload = json.loads(self.rfile.read(length) or b"{}")
-        except json.JSONDecodeError:
+            if not isinstance(payload, dict):
+                raise TypeError('object expected')
+        except (ValueError, TypeError, UnicodeDecodeError):
             self._json({"error": "corps JSON invalide"}, HTTPStatus.BAD_REQUEST)
             return
 
+        if route in admin_extensions.POST_ROUTES:
+            admin_extensions.post(self, route, payload)
+            return
         service = str(payload.get("service", ""))
         if route == "/api/add":
             # Liste fermee : seuls les services ABSENTS sont installables, et le
@@ -466,6 +644,7 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 return
             ok, message, ajoutes = orchestrator.add_service(self.cfg, self.project_dir, service)
+            self.maintenance.event('ajout service', ok, service)
             self._json(
                 {"ok": ok, "service": service, "message": message, "added": ajoutes},
                 HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -473,12 +652,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if route == "/api/backup":
-            chemin = self.project_dir / sauvegarde.nom_par_defaut(self.cfg)
             try:
-                rapport = sauvegarde.sauvegarder(self.cfg, self.project_dir, chemin)
+                rapport = self.maintenance.backup()
             except Exception as exc:  # noqa: BLE001
                 journal.LOGGER.exception("sauvegarde")
-                self._json({"ok": False, "error": str(exc)[:200]})
+                self._json({"ok": False, "error": self.maintenance.safe_error(exc)})
                 return
             self._json(
                 {
@@ -504,6 +682,7 @@ class _Handler(BaseHTTPRequestHandler):
                 orchestrator.rotate_password if quoi == "password" else orchestrator.rotate_api_key
             )
             ok, message, secret = rotation(self.cfg, self.project_dir, service)
+            self.maintenance.event('rotation identifiants', ok, service)
             # Le secret part vers la page qui vient de le demander, et nulle part
             # ailleurs : ni journal, ni sortie terminal.
             self._json(
@@ -524,12 +703,43 @@ class _Handler(BaseHTTPRequestHandler):
                     {"error": f"tag refuse: {target}"}, HTTPStatus.BAD_REQUEST
                 )
                 return
+            if self.cfg.services[service].adopted:
+                self._json({'error': 'Service adopte : mise a jour externe requise.'}, HTTPStatus.BAD_REQUEST)
+                return
+            # Silo est encore en pre-version et ses mises a jour peuvent lancer
+            # des migrations de base. Sa sauvegarde est donc obligatoire, meme
+            # si la case generale a ete decochee dans la console.
+            backup_first = service == "silo" or bool(payload.get('backup_first'))
+            if backup_first:
+                try:
+                    self.maintenance.backup()
+                except Exception as exc:  # noqa: BLE001 - keep failures contained and secrets out of responses
+                    journal.LOGGER.exception(
+                        "sauvegarde avant mise a jour de %s", service
+                    )
+                    detail = self.maintenance.safe_error(exc)
+                    self._json(
+                        {
+                            'error': (
+                                'Sauvegarde echouee. Mise a jour annulee. '
+                                f'Detail : {detail}'
+                            )
+                        },
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                    return
             ok, message = apply_update(
                 self.cfg, self.compose, self.project_dir, service,
                 str(target) if target else None,
             )
+            self.maintenance.event('mise a jour service', ok, service)
             self._json(
-                {"ok": ok, "service": service, "message": message},
+                {
+                    "ok": ok,
+                    "service": service,
+                    "message": message,
+                    "backup_first": backup_first,
+                },
                 HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
             )
             return
@@ -545,6 +755,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         ok, message = self.compose.control(action, service)
+        if ok:
+            stopped = self.maintenance.state['intentional_stops']
+            if action == 'stop' and service not in stopped:
+                stopped.append(service)
+            elif action != 'stop' and service in stopped:
+                stopped.remove(service)
+        self.maintenance.event(action, ok, service)
         self._json(
             {"ok": ok, "service": service, "action": action, "message": message[:400]},
             HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -581,10 +798,12 @@ def build_server(
             # UNE instance partagee par toutes les requetes : les sessions et le
             # compteur de tentatives n'ont aucun sens s'ils sont par connexion.
             "sessions": adminauth.Sessions(),
+            "maintenance": Maintenance(cfg, project_dir),
         },
     )
     server = _Server((host, port), handler)
-    server.daemon_threads = True
+    # Closing the console must wait for a backup/update request to finish.
+    server.daemon_threads = False
     return server
 
 
@@ -609,10 +828,14 @@ def serve(
         on_ready(url, token)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    worker = threading.Thread(target=server.RequestHandlerClass.maintenance.run, daemon=False)
+    worker.start()
     try:
         thread.join()
     except KeyboardInterrupt:
         pass
     finally:
+        server.RequestHandlerClass.maintenance.stop.set()
         server.shutdown()
         server.server_close()
+        worker.join()

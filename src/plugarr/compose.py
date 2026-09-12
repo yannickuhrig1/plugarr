@@ -17,7 +17,7 @@ import yaml
 
 from . import catalog, registre
 from .i18n import t
-from .models import Category, StackConfig
+from .models import StackConfig
 
 NETWORK_NAME = "plugarr"
 
@@ -79,9 +79,7 @@ def _flood_block(cfg: StackConfig) -> dict:
         # plus depuis Flood. Signale a l'usage : « Flood me dit impossible de se
         # connecter au client ». Meme cause que la panne de Prowlarr le meme
         # jour, et meme correction : on demande l'adresse a `internal_url`.
-        base = inst.internal_url(
-            spec, cfg.host, behind_vpn=cfg.vpn.enabled and spec.category is Category.DOWNLOAD
-        )
+        base = inst.internal_url(spec, cfg.host, behind_vpn=cfg.vpn.protects(client_id))
         url_option, user_option, pass_option = options
         # Le mot de passe passe par le .env : le compose n'a pas a le porter en
         # clair. C'etait le dernier secret a y rester apres la cle WireGuard.
@@ -117,7 +115,7 @@ def _gluetun_block(cfg: StackConfig) -> dict:
         if not cfg.enabled(sid):
             continue
         spec = catalog.get(sid)
-        if spec.category is Category.DOWNLOAD:
+        if cfg.vpn.protects(sid):
             ports.append(f"{cfg.services[sid].host_port}:{spec.internal_port}")
     environnement = cfg.vpn.environment(cfg.timezone)
 
@@ -159,21 +157,27 @@ PORT_SYNC = "port-sync.sh"
 
 
 def port_sync_clients(cfg: StackConfig) -> list[str]:
-    """Clients dont le port d'ecoute doit suivre celui que le VPN attribue.
+    """Client dont le port d'ecoute doit suivre celui que le VPN attribue.
 
     Vide si le fournisseur n'offre pas de port entrant : il n'y a alors aucun
     port a suivre. Les services adoptes sont exclus, leurs identifiants ne nous
     appartiennent pas.
+
+    Un tunnel n'attribue ici qu'UN port, et les clients partagent la meme pile
+    reseau : le poser a la fois dans qBittorrent et Transmission leur demande de
+    prendre le meme socket TCP/UDP. qBittorrent a la priorite, comme dans Flood ;
+    Transmission est choisi quand il est seul ou que qBittorrent est adopte.
+    L'autre client continue a telecharger par le tunnel, simplement sans entree
+    directe dediee.
     """
     from .vpnservers import port_forward
 
     if not cfg.vpn.enabled or not port_forward(cfg.vpn.provider):
         return []
-    return [
-        sid
-        for sid in ("qbittorrent", "transmission")
-        if cfg.enabled(sid) and not cfg.services[sid].adopted
-    ]
+    for sid in ("qbittorrent", "transmission"):
+        if cfg.enabled(sid) and not cfg.services[sid].adopted:
+            return [sid]
+    return []
 
 
 def render_port_sync(cfg: StackConfig) -> str:
@@ -446,8 +450,7 @@ def _service_block(cfg: StackConfig, service_id: str) -> dict:
     for nom, chemin in spec.named_volumes:
         block.setdefault("volumes", []).insert(0, f"{nom}:{chemin}")
 
-    torrent_client = spec.category is Category.DOWNLOAD
-    if cfg.vpn_enabled and torrent_client:
+    if cfg.vpn.protects(service_id):
         # Forme VPN : le client perd son reseau et ses ports. Gluetun les porte.
         block.pop("networks", None)
         block["network_mode"] = "service:gluetun"
@@ -481,6 +484,8 @@ def build_compose(cfg: StackConfig) -> dict:
         gaps = cfg.vpn.missing()
         if gaps:
             raise ValueError("VPN active mais incomplet : il manque " + ", ".join(gaps))
+        if not any(cfg.enabled(sid) and cfg.vpn.protects(sid) for sid in catalog.DOWNLOAD_CLIENTS):
+            raise ValueError("VPN active mais aucun client selectionne ne doit l'utiliser")
         services = {"gluetun": _gluetun_block(cfg), **services}
     doc: dict[str, Any] = {
         "name": cfg.project_name,
@@ -586,6 +591,9 @@ stack.yml.*
 docker-compose.yml
 acces-plugarr.html
 plugarr.log
+.plugarr-maintenance.json
+.plugarr-maintenance.tmp
+backups/
 """
 
 #: Combien de `stack.yml` precedents sont gardes a cote du courant.

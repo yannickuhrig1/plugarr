@@ -174,6 +174,18 @@ def test_running_state_is_reported(server):
     assert services["prowlarr"]["up"] is False
 
 
+def test_running_but_unhealthy_is_not_reported_as_up():
+    state = admin.ServiceState("silo", "running", "Up 2 minutes (unhealthy)", "unhealthy")
+
+    assert state.up is False
+
+
+def test_unhealthy_in_status_is_not_reported_as_up_when_health_is_missing():
+    state = admin.ServiceState("silo", "running", "Up 2 minutes (unhealthy)")
+
+    assert state.up is False
+
+
 # ------------------------------------------------------------------- actions
 
 
@@ -278,3 +290,87 @@ def test_a_valid_version_is_accepted_by_the_validator():
     assert updates.parse_version("4.0.19") == (4, 0, 19)
     assert updates.parse_version("v1.85.0") == (1, 85, 0)
     assert updates.parse_version("latest") is None
+
+
+def test_silo_is_backed_up_before_its_update(server, cfg, monkeypatch):
+    """Une migration Silo ne doit jamais commencer si la sauvegarde echoue."""
+    base, _ = server
+    silo = orchestrator.build_config(
+        services=["silo"], config_root=cfg.config_root, data_root=cfg.data_root
+    )
+    cfg.services.update(silo.services)
+    calls = []
+
+    def backup(_maintenance):
+        calls.append("backup")
+
+    def update(*_args):
+        calls.append("update")
+        return True, "Silo mis a jour"
+
+    monkeypatch.setattr(admin.Maintenance, "backup", backup)
+    monkeypatch.setattr(admin, "apply_update", update)
+
+    status, body, _headers = call(
+        base + "/api/update",
+        method="POST",
+        payload={"service": "silo", "target": "build-523", "backup_first": False},
+    )
+
+    assert status == 200
+    assert json.loads(body)["backup_first"] is True
+    assert calls == ["backup", "update"]
+
+
+def test_regular_update_runs_without_backup_when_not_requested(server, monkeypatch):
+    base, _ = server
+    calls = []
+    monkeypatch.setattr(
+        admin.Maintenance,
+        "backup",
+        lambda _maintenance: pytest.fail("no backup was requested"),
+    )
+    monkeypatch.setattr(
+        admin,
+        "apply_update",
+        lambda *_args: (calls.append("update") or True, "updated"),
+    )
+
+    status, body, _headers = call(
+        base + "/api/update",
+        method="POST",
+        payload={"service": "sonarr", "target": "4.0.20", "backup_first": False},
+    )
+
+    assert status == 200
+    assert json.loads(body)["ok"] is True
+    assert calls == ["update"]
+
+
+def test_update_reports_the_backup_cause_and_never_pulls_after_failure(
+    server, monkeypatch
+):
+    base, _ = server
+    monkeypatch.setattr(
+        admin.Maintenance,
+        "backup",
+        lambda _maintenance: (_ for _ in ()).throw(
+            ValueError("ZIP does not support timestamps before 1980")
+        ),
+    )
+    monkeypatch.setattr(
+        admin,
+        "apply_update",
+        lambda *_args: pytest.fail("update must not start after a failed backup"),
+    )
+
+    status, body, _headers = call(
+        base + "/api/update",
+        method="POST",
+        payload={"service": "sonarr", "target": "4.0.20", "backup_first": True},
+    )
+
+    assert status == 500
+    error = json.loads(body)["error"]
+    assert "Mise a jour annulee" in error
+    assert "timestamps before 1980" in error

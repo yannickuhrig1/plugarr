@@ -46,14 +46,35 @@ def test_une_configuration_courante_traverse_sans_rien_changer():
     assert notes == []
 
 
-def test_un_stack_sans_version_est_lu_comme_la_version_1():
+def test_un_stack_sans_version_est_lu_depuis_la_version_1():
     """Les tout premiers `stack.yml` pourraient ne pas porter le champ."""
     donnees = _brut()
     del donnees["version"]
 
     migre, _notes = migrations.migrer(donnees)
 
-    assert migre.get("version", 1) == 1
+    assert migre["version"] == migrations.VERSION_COURANTE
+
+
+def test_la_migration_garde_sabnzbd_dans_le_vpn_existant():
+    donnees = _brut(version=1)
+    donnees["services"]["sabnzbd"] = {"spec_id": "sabnzbd", "host_port": 8085}
+    donnees["vpn"] = {"enabled": True, "provider": "mullvad"}
+
+    migre, notes = migrations.migrer(donnees)
+
+    assert migre["vpn"]["protect_sabnzbd"] is True
+    assert notes == ["stack.yml migre en version 2"]
+
+
+def test_la_migration_n_active_pas_sabnzbd_sans_ancien_tunnel():
+    donnees = _brut(version=1)
+    donnees["services"]["sabnzbd"] = {"spec_id": "sabnzbd", "host_port": 8085}
+    donnees["vpn"] = {"enabled": False}
+
+    migre, _notes = migrations.migrer(donnees)
+
+    assert migre["vpn"]["protect_sabnzbd"] is False
 
 
 def test_une_version_future_est_refusee():
@@ -144,7 +165,7 @@ def test_lire_migre_avant_de_valider(tmp_path, monkeypatch):
     monkeypatch.setattr(migrations, "VERSION_COURANTE", 2)
     monkeypatch.setattr(migrations, "MIGRATIONS", {1: migration})
 
-    donnees = _brut()
+    donnees = _brut(version=1)
     del donnees["username"]
     chemin = tmp_path / "stack.yml"
     chemin.write_text(yaml.safe_dump(donnees), encoding="utf-8")

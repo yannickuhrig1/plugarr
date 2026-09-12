@@ -45,6 +45,9 @@ class Progress:
     message: str
     ok: bool = True
     done: bool = False
+    #: Evenement qui decrit le travail EN COURS. Les interfaces l'affichent
+    #: immediatement, mais ne le comptent pas encore comme une etape terminee.
+    started: bool = False
 
 
 ProgressFn = Callable[[Progress], None]
@@ -447,7 +450,15 @@ def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
             # anciens identifiants, et le service les refuse apres coup.
             for nom in volumes_nommes(cfg, sid):
                 if volume_exists(nom):
-                    remove_volume(nom)
+                    ok, detail = remove_volume(nom)
+                    if not ok:
+                        raise OSError(
+                            t(
+                                "impossible de supprimer le volume Docker {volume} : {detail}",
+                                volume=nom,
+                                detail=detail or t("cause inconnue"),
+                            )
+                        )
                     efface.append(Path(f"volume docker {nom}"))
             continue
         dossier = Path(cfg.config_path(sid)).resolve()
@@ -464,6 +475,27 @@ def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
         shutil.rmtree(dossier)
         efface.append(dossier)
     return efface
+
+
+def reset_installation_configs(
+    cfg: StackConfig, project_dir: Path, services: list[str]
+) -> list[Path]:
+    """Retire une ancienne pile avant d'en effacer l'etat demande.
+
+    Arreter les conteneurs ne suffit pas pour les volumes nommes : Docker
+    refuse de supprimer un volume encore reference par un conteneur arrete.
+    `down` retire les conteneurs et le reseau, puis `reset_configs` reste la
+    seule fonction qui touche aux dossiers/volumes explicitement listes.
+    """
+    ok, detail = Compose(project_dir, cfg.project_name).down()
+    if not ok:
+        raise OSError(
+            t(
+                "impossible de retirer l'ancienne pile Docker avant nettoyage : {detail}",
+                detail=detail or t("cause inconnue"),
+            )
+        )
+    return reset_configs(cfg, services)
 
 
 def prochaine_etape(cfg: StackConfig) -> list[str]:
@@ -512,8 +544,10 @@ def blocking_failures(checks: list[Check]) -> list[Check]:
 def seed_all(cfg: StackConfig) -> list[str]:
     """Pre-seme les configurations. Renvoie les actions effectuees.
 
-    Un fichier existant fait toujours autorite : on adopte sa cle plutot que de
-    lui imposer la notre.
+    Un fichier existant fait autorite pour ses secrets et ses choix applicatifs :
+    on adopte sa cle plutot que de lui imposer la notre. Les rares valeurs qui
+    decrivent la topologie generee, comme le port interne de SABnzbd, sont
+    alignees sur le compose pour que le service reste joignable.
     """
     actions: list[str] = []
     for sid in seeded_services(cfg):
@@ -547,14 +581,17 @@ def seed_all(cfg: StackConfig) -> list[str]:
             # lieu des deux. On la range dans le champ `password` de
             # l'instance, faute de champ dedie, et le profil de client la
             # repose ensuite dans `apiKey`.
+            hotes = [sid, f"{cfg.project_name}-{sid}", "localhost"]
+            if cfg.vpn.protects("sabnzbd"):
+                # Sous `network_mode: service:gluetun`, les autres conteneurs
+                # n'appellent plus SABnzbd par son propre nom mais par celui de
+                # Gluetun. Sans ces deux noms, son controle Host refuse l'API.
+                hotes += ["gluetun", f"{cfg.project_name}-gluetun"]
             _written, message = seed.seed_sabnzbd(
                 cfg_dir,
                 api_key=inst.password or "",
                 port=spec.internal_port,
-                # Les DEUX noms sous lesquels un autre conteneur peut l'appeler.
-                # Sans eux : « Access denied - Hostname verification failed »,
-                # message qui ne nomme ni l'appelant ni le reglage en cause.
-                hotes_autorises=[sid, f"{cfg.project_name}-{sid}", "localhost"],
+                hotes_autorises=hotes,
                 incomplet=CONTAINER_PATHS["usenet_incomplete"],
                 complet=CONTAINER_PATHS["usenet_root"],
             )
@@ -569,6 +606,38 @@ def seed_all(cfg: StackConfig) -> list[str]:
     return actions
 
 
+def _download_client_responds(
+    service_id: str, url: str, *, api_key: str = ""
+) -> bool:
+    """Le service attendu repond-il, et pas seulement quelque chose sur son port ?
+
+    Un simple GET de la racine a produit un faux positif reel : sous Gluetun,
+    `8085:8080` atteignait qBittorrent et faisait annoncer « SABnzbd pret ».
+    Son API `/api?mode=version` identifie sans ambiguite le processus qui repond.
+    Les deux clients torrent gardent pour l'instant leur sonde historique :
+    n'importe quelle reponse suffit a prouver que leur interface ecoute, et leur
+    authentification est verifiee juste apres par le cablage.
+    """
+    import httpx
+
+    try:
+        if service_id == "sabnzbd":
+            reponse = httpx.get(
+                f"{url.rstrip('/')}/api",
+                params={"mode": "version", "apikey": api_key, "output": "json"},
+                timeout=5.0,
+                follow_redirects=False,
+            )
+            if not reponse.is_success:
+                return False
+            corps = reponse.json()
+            return isinstance(corps, dict) and bool(corps.get("version"))
+        httpx.get(url, timeout=5.0, follow_redirects=False)
+    except (httpx.HTTPError, ValueError):
+        return False
+    return True
+
+
 def wait_for_download_clients(cfg: StackConfig, on_progress: ProgressFn = _noop) -> None:
     """Attend que les clients de telechargement repondent.
 
@@ -578,23 +647,33 @@ def wait_for_download_clients(cfg: StackConfig, on_progress: ProgressFn = _noop)
     identifiants alors qu'ils sont bons. Constate apres une reinstallation, ou
     le conteneur redemarre juste avant le cablage.
 
-    N'importe quelle reponse HTTP suffit : elle prouve que le service ecoute.
+    Pour les clients torrent, n'importe quelle reponse HTTP suffit : elle prouve
+    que le service ecoute. SABnzbd est identifie par sa route `mode=version`,
+    faute de quoi une autre interface sur le meme port peut passer pour lui.
     """
-    import httpx
-
     from .clients.base import wait_until
 
     for sid in catalog.DOWNLOAD_CLIENTS:
         if not cfg.enabled(sid) or cfg.services[sid].adopted:
             continue
         url = cfg.services[sid].url(cfg.host)
+        on_progress(
+            Progress(
+                "attente",
+                t(
+                    "attente de {service} : verification de son API",
+                    service=catalog.get(sid).display_name,
+                ),
+                started=True,
+            )
+        )
 
-        def probe(adresse: str = url) -> bool:
-            try:
-                httpx.get(adresse, timeout=5.0, follow_redirects=False)
-            except httpx.HTTPError:
-                return False
-            return True
+        def probe(
+            service_id: str = sid,
+            adresse: str = url,
+            api_key: str = cfg.services[sid].api_key or cfg.services[sid].password or "",
+        ) -> bool:
+            return _download_client_responds(service_id, adresse, api_key=api_key)
 
         resultat = wait_until(probe, label=sid, timeout=180.0)
         message = (
@@ -665,6 +744,16 @@ def wait_for_arrs(cfg: StackConfig, on_progress: ProgressFn = _noop) -> None:
         spec, inst = catalog.get(sid), cfg.services[sid]
         if spec.api_family != "arr":
             continue
+        on_progress(
+            Progress(
+                "attente",
+                t(
+                    "attente de {service} : verification de son API",
+                    service=spec.display_name,
+                ),
+                started=True,
+            )
+        )
         with ArrClient(
             inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version, name=sid
         ) as client:
@@ -681,6 +770,7 @@ def install(
     *,
     on_progress: ProgressFn = _noop,
     on_step: Callable[[StepResult], None] | None = None,
+    on_step_start: Callable[[str], None] | None = None,
 ) -> list[StepResult]:
     """Deroule l'installation complete et renvoie le resultat du cablage.
 
@@ -725,10 +815,43 @@ def install(
             t("Le fichier compose genere est invalide : {cause}", cause=message)
         )
 
-    on_progress(Progress("demarrage", t("docker compose up (peut prendre plusieurs minutes)")))
+    images = list(compose.build_compose(cfg)["services"])
+    noms_images = ", ".join(
+        "Gluetun" if sid == "gluetun" else catalog.get(sid).display_name for sid in images
+    )
+    on_progress(
+        Progress(
+            "images Docker",
+            t(
+                "telechargement ou verification de {nombre} images : {services}",
+                nombre=len(images),
+                services=noms_images,
+            ),
+            started=True,
+        )
+    )
+    ok, message = runner.pull_many(images)
+    if not ok:
+        raise InstallAborted(f"docker compose pull a echoue : {message}")
+    on_progress(
+        Progress(
+            "images Docker",
+            t("{nombre} images pretes", nombre=len(images)),
+        )
+    )
+
+    on_progress(
+        Progress(
+            "demarrage",
+            t("creation et demarrage des conteneurs Docker"),
+            started=True,
+        )
+    )
     ok, message = runner.up()
     if not ok:
         raise InstallAborted(f"docker compose up a echoue : {message}")
+
+    on_progress(Progress("demarrage-termine", "docker compose up : termine"))
 
     # AVANT d'attendre les clients : un client accroche a une pile reseau morte
     # ne repondra jamais, et l'attente expirerait sur un diagnostic trompeur.
@@ -739,7 +862,10 @@ def install(
 
     wirer = Wirer(cfg)
     try:
-        results = wirer.execute(on_step=on_step)
+        if on_step_start is None:
+            results = wirer.execute(on_step=on_step)
+        else:
+            results = wirer.execute(on_step=on_step, on_start=on_step_start)
     finally:
         wirer.close()
 
@@ -864,11 +990,12 @@ def planned_links(cfg: StackConfig) -> int:
     return len(Wirer(cfg).build_plan())
 
 
-#: Evenements emis par install() en dehors du pre-semis, de l'attente et du
-#: cablage : arborescence, artefacts, arret prealable, demarrage, page d'acces,
-#: fin. Un test deroule un vrai install() pour confronter ce compte aux
+#: Evenements TERMINES emis par install() en dehors du pre-semis, de l'attente
+#: et du cablage : arborescence, artefacts, arret prealable, images pretes,
+#: fin du demarrage, page d'acces et fin. Les evenements `started` ne font pas
+#: avancer la barre. Un test deroule un vrai install() pour confronter ce compte aux
 #: evenements reellement emis : il a rattrape cette valeur des son changement.
-_FIXED_EVENTS = 6
+_FIXED_EVENTS = 7
 
 
 #: Familles d'API dont la configuration se pre-seme sur le disque avant le

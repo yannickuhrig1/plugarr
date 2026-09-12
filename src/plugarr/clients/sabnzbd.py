@@ -8,7 +8,7 @@ Deux pieges releves contre la 5.1.2, et le premier fait perdre une soiree.
 
 **La liste blanche d'hotes.** SABnzbd refuse toute requete dont l'en-tete `Host`
 ne figure pas dans `host_whitelist`, et n'y met par defaut QUE l'identifiant de
-son conteneur. Sonarr appelant `http://sabnzbd:8080` recoit :
+son conteneur. Sonarr appelant `http://sabnzbd:8085` recoit :
 
     Access denied - Hostname verification failed
 

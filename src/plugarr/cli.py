@@ -39,6 +39,7 @@ from . import (
 from .clients import recyclarr as recyclarr_cfg
 from .clients.arr import ArrClient
 from .i18n import t
+from .interface import Interface
 from .layout import create_tree, default_profile, path_warning
 from .models import VPN_PROVIDERS, PlatformProfile, StackConfig, VpnConfig
 from .orchestrator import InstallAborted, Progress
@@ -102,6 +103,7 @@ def main(
         "", "--lang",
         help=t("Langue de PlugArr : fr, en. Par defaut, celle du systeme."),
     ),
+    interface: Interface = typer.Option(Interface.AUTO, "--interface"),
 ) -> None:
     """Sans sous-commande, lance l'assistant interactif."""
     # La langue AVANT tout le reste : les messages de la commande en cours
@@ -113,9 +115,9 @@ def main(
     i18n.utiliser(lang or i18n.langue_du_systeme())
     if ctx.invoked_subcommand is not None:
         return
-    from .tui.app import run_wizard
+    from .interface import launch
 
-    raise typer.Exit(run_wizard())
+    raise typer.Exit(launch(interface))
 
 
 def _annoncer_nouvelle_version() -> None:
@@ -264,7 +266,13 @@ def _traiter_config_existante(
 
 
 def _echo(progress: Progress) -> None:
-    mark = "[green]OK[/green]" if progress.ok else "[red]ECHEC[/red]"
+    mark = (
+        "[cyan]…[/cyan]"
+        if progress.started
+        else "[green]OK[/green]"
+        if progress.ok
+        else "[red]ECHEC[/red]"
+    )
     console.print(f"  {mark} {progress.phase} : {progress.message}")
 
 
@@ -280,11 +288,30 @@ def wizard(
     open_page: bool = typer.Option(
         True, "--open/--no-open", help=t("Ouvrir la page d'acces a la fin.")
     ),
+    interface: Interface = typer.Option(Interface.AUTO, "--interface"),
 ) -> None:
     """Lance l'assistant interactif plein ecran."""
-    from .tui.app import run_wizard
+    from .interface import launch
 
-    raise typer.Exit(run_wizard(project_dir, open_page=open_page))
+    raise typer.Exit(launch(interface, project_dir, open_page=open_page))
+
+
+@app.command()
+def web(
+    project_dir: Path = typer.Option(Path(".")),
+    port: int = typer.Option(0, min=0, max=65535),
+    open_page: bool = typer.Option(True, "--open/--no-open"),
+    demo: bool = typer.Option(False, "--demo"),
+) -> None:
+    """Assistant web local. --demo simule sans Docker ni installation."""
+    from .webwizard import run_web
+
+    result = run_web(project_dir, port=port, open_page=open_page, demo=demo)
+    if result == "tui":
+        from .interface import launch
+
+        result = launch(Interface.TUI, project_dir, open_page=open_page)
+    raise typer.Exit(int(result))
 
 
 @app.command(help=t("Deploie et cable la stack de bout en bout, sans interaction."))
@@ -334,6 +361,14 @@ def install(
     vpn_pass: str = typer.Option("", help=t("Mot de passe OpenVPN.")),
     vpn_key: str = typer.Option("", help=t("Cle privee WireGuard.")),
     vpn_countries: str = typer.Option("", help=t("Pays souhaites, separes par des virgules.")),
+    sabnzbd_vpn: bool = typer.Option(
+        False,
+        "--sabnzbd-vpn/--sabnzbd-direct",
+        help=t(
+            "Trajet de SABnzbd. Direct + SSL/TLS est recommande ; cette option "
+            "l'ajoute a Gluetun."
+        ),
+    ),
     recyclarr_sonarr: str = typer.Option(
         "",
         help=t("Template TRaSH pour Sonarr. Voir `plugarr templates`. Vide = defaut."),
@@ -418,6 +453,7 @@ def install(
                 openvpn_password=vpn_pass,
                 wireguard_private_key=vpn_key,
                 countries=vpn_countries,
+                protect_sabnzbd=sabnzbd_vpn,
             )
         except ValidationError as exc:
             # Un fournisseur ou un protocole inconnu remontait en
@@ -453,11 +489,21 @@ def install(
         # donc a CHAQUE reinstallation sans client de telechargement, en
         # parlant d'une option `--vpn` que personne n'avait passee — et il
         # restait muet dans le seul cas ou il sert : `--vpn` sans client.
-        if not any(cfg.enabled(sid) for sid in catalog.DOWNLOAD_CLIENTS):
+        if sabnzbd_vpn and not cfg.enabled("sabnzbd"):
+            console.print("[red]--sabnzbd-vpn demande que SABnzbd soit selectionne.[/red]")
+            raise typer.Exit(1)
+        if not any(
+            cfg.enabled(sid) and cfg.vpn.protects(sid)
+            for sid in catalog.DOWNLOAD_CLIENTS
+        ):
             console.print(
-                "[yellow]--vpn sans client de telechargement : Gluetun ne protegerait "
-                "rien.[/yellow]"
+                "[red]--vpn sans client de telechargement a proteger : choisissez un client torrent "
+                "ou ajoutez --sabnzbd-vpn.[/red]"
             )
+            raise typer.Exit(1)
+    elif sabnzbd_vpn:
+        console.print("[red]--sabnzbd-vpn demande aussi --vpn.[/red]")
+        raise typer.Exit(1)
 
     # Reprendre AVANT le recapitulatif : c'est lui qui doit montrer ce qui sera
     # reellement pose. Reprendre apres reviendrait a annoncer une chose et a en

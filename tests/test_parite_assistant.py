@@ -42,6 +42,7 @@ COUVERTES = {
     "vpn_pass": "VpnScreen",
     "vpn_key": "VpnScreen",
     "vpn_countries": "VpnScreen",
+    "sabnzbd_vpn": "VpnScreen",
     "recyclarr_sonarr": "TemplatesScreen",
     "recyclarr_radarr": "TemplatesScreen",
     "reset_config": "ExistingConfigScreen",

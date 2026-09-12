@@ -129,6 +129,33 @@ class VpnConfig(BaseModel):
     #: alimente depend du fournisseur — voir `vpnservers.filter_env`.
     countries: str = ""
 
+    #: SABnzbd parle a un serveur Usenet, pas a une nuee de pairs. Avec TLS,
+    #: ses identifiants et le contenu telecharge sont deja chiffres entre le
+    #: client et le fournisseur. Le VPN reste un choix de confidentialite
+    #: supplementaire (le FAI ne voit plus le serveur Usenet), avec en echange
+    #: un chemin plus long et une dependance a Gluetun.
+    #:
+    #: False est donc le choix recommande pour une installation NEUVE. La
+    #: migration de stack.yml pose explicitement True sur les installations
+    #: anciennes : avant que ce champ existe, activer le VPN y faisait passer
+    #: tous les clients de telechargement, SABnzbd compris. Une mise a niveau
+    #: ne doit jamais changer ce trajet en silence.
+    protect_sabnzbd: bool = False
+
+    def protects(self, service_id: str) -> bool:
+        """Ce service partage-t-il REELLEMENT la pile reseau de Gluetun ?
+
+        Les clients BitTorrent sont la raison premiere du tunnel : leur adresse
+        est visible par les pairs. SABnzbd suit le choix explicite ci-dessus.
+        Une liste fermee evite qu'un futur client soit place dans le tunnel sans
+        que ses ports et son comportement y aient ete testes.
+        """
+        if not self.enabled:
+            return False
+        if service_id in ("qbittorrent", "transmission"):
+            return True
+        return service_id == "sabnzbd" and self.protect_sabnzbd
+
     @field_validator("provider")
     @classmethod
     def _known_provider(cls, v: str) -> str:
@@ -313,7 +340,7 @@ USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,32}")
 class StackConfig(BaseModel):
     """Etat canonique versionnable (stack.yml)."""
 
-    version: int = 1
+    version: int = 2
     project_name: str = "plugarr"
     platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
 

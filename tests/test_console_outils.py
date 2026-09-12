@@ -30,6 +30,14 @@ def test_la_console_porte_les_deux_boutons():
 
     assert 'id="btn-doctor"' in page
     assert 'id="btn-maj"' in page
+    assert 'class="console-nav"' in page
+    assert 'Console locale' in page
+    assert 'id="theme"' not in page
+    assert page.index('<header>') < page.index('id="overview"') < page.index('id="services"')
+    assert "installee : " in page and "cible : " in page
+    assert "c.next_step" in page
+    assert "backup_first: s.id === 'silo'" in page
+    assert "last_backup_error" in page
 
 
 def test_la_page_d_acces_statique_n_en_porte_aucun():
@@ -68,6 +76,48 @@ def test_le_diagnostic_compte_les_echecs(monkeypatch):
     assert admin.doctor_payload(_cfg(), Path("."))["failed"] == 1
 
 
+def test_le_diagnostic_compte_sabnzbd_et_silo_hors_service(monkeypatch):
+    """Le faux vert signale : preflight reussissait alors que ces deux
+    conteneurs etaient respectivement arretes et en boucle de redemarrage."""
+    cfg = orchestrator.build_config(
+        services=["sabnzbd", "silo"], config_root="/c", data_root="/d"
+    )
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: [])
+
+    class ComposeEnPanne:
+        def ps_json(self):
+            return [
+                {"Service": "sabnzbd", "State": "exited", "Status": "Exited (1)"},
+                {"Service": "silo-postgres", "State": "running", "Status": "Up", "Health": "healthy"},
+                {"Service": "silo-redis", "State": "running", "Status": "Up", "Health": "healthy"},
+                {"Service": "silo", "State": "restarting", "Status": "Restarting (1)"},
+            ]
+
+        def logs(self, service, tail=100):
+            return "password authentication failed for user silo" if service == "silo" else ""
+
+    charge = admin.doctor_payload(cfg, Path("."), ComposeEnPanne())
+    checks = {c["name"]: c for c in charge["checks"]}
+
+    assert checks["Etat SABnzbd"]["ok"] is False
+    assert checks["Etat Silo"]["ok"] is False
+    assert "mot de passe" in checks["Etat Silo"]["next_step"]
+    assert charge["failed"] == 2
+
+
+def test_docker_injoignable_ne_peut_pas_donner_tout_est_en_ordre(monkeypatch):
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: [])
+
+    class ComposeMuet:
+        def ps_json(self):
+            raise OSError("daemon absent")
+
+    charge = admin.doctor_payload(_cfg(), Path("."), ComposeMuet())
+
+    assert charge["failed"] == 1
+    assert charge["checks"][0]["name"] == "Etat Docker"
+
+
 def test_une_api_muette_est_un_echec_lisible(monkeypatch):
     """Un conteneur qui tourne n'est pas un service qui repond. C'est toute la
     valeur ajoutee du diagnostic par rapport a la liste des conteneurs."""
@@ -89,39 +139,27 @@ def test_une_api_muette_est_un_echec_lisible(monkeypatch):
     assert "connexion refusee" in charge["checks"][0]["detail"]
 
 
-def test_aucune_chaine_javascript_ne_court_sur_deux_lignes():
-    """Le script de la console vit dans une chaine Python NON brute : un `\n`
-    ecrit simplement y devient un VRAI retour a la ligne, qui casse la chaine
-    JavaScript et emporte tout le script.
+def test_aucune_chaine_javascript_ne_court_sur_deux_lignes(tmp_path):
+    """Parse actual scripts, including block comments and URLs in the shared SVG.
 
-    Constate en vrai : `lignes.join('\n')` a donne une page entierement
-    blanche, avec pour seule trace « Uncaught SyntaxError: Invalid or
-    unexpected token » dans la console du navigateur. Aucun test Python ne
-    pouvait le voir — le HTML etait bien forme et le rendu cote Python
-    parfaitement reussi.
-
-    On compte les apostrophes de chaque ligne : une chaine qui se ferme sur la
-    ligne suivante en laisse un nombre IMPAIR derriere elle. Les commentaires
-    sont retires d'abord, sans quoi le moindre « s'arrete » francais fausserait
-    le compte — premiere version de ce test, qui ne detectait plus rien.
+    The former quote counter mistook apostrophes in comments and // in URLs
+    for invalid JavaScript. Node also catches the original raw-newline bug.
     """
     import re
+    import shutil
+    import subprocess
 
+    import pytest
+
+    if not shutil.which('node'):
+        pytest.skip('Node required for JavaScript parsing')
     page = dashboard.render(_cfg(), live=True)
-    # La page porte PLUSIEURS blocs <script>. N'examiner que le premier laissait
-    # passer tout le script vivant, celui qui portait justement le defaut.
     blocs = re.findall(r"<script>(.*?)</script>", page, re.DOTALL)
-    assert len(blocs) >= 2, "le script de la console vivante n'est pas dans la page"
-
-    fautives = []
-    for bloc in blocs:
-        for numero, ligne in enumerate(bloc.splitlines(), start=1):
-            nette = re.sub(r"//.*$", "", ligne)
-            nette = nette.replace(chr(92) + "'", "").replace(chr(92) + chr(34), "")
-            if nette.count("'") % 2 or nette.count(chr(34)) % 2:
-                fautives.append(f"ligne {numero} : {ligne.strip()[:70]}")
-
-    assert not fautives, "chaine JavaScript non fermee : " + " | ".join(fautives[:3])
+    assert len(blocs) >= 2
+    for index, bloc in enumerate(blocs):
+        path = tmp_path / f'console-{index}.js'
+        path.write_text(bloc, encoding='utf-8')
+        subprocess.run(['node', '--check', str(path)], check=True, capture_output=True)
 
 
 def test_le_diagnostic_tait_les_controles_d_avant_installation(monkeypatch):

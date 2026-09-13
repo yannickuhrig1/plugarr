@@ -95,9 +95,22 @@ Audiobookshelf et DroppedNeedle.
 
 ## Prochaine étape
 
-**Shelfarr et Shelfmark**, les deux derniers services de la liste. Leurs
-empreintes sont déjà relevées, et Audiobookshelf les débloque : ils livrent
-dans ses bibliothèques.
+**La 0.10.0 : la veille et les thèmes de qBittorrent.** Deux demandes faites à
+l'usage, étudiées plus bas, et chacune a un premier point à trancher avant
+d'écrire une ligne :
+
+- **la veille** : l'étude veut un conteneur, donc d'abord une image PlugArr
+  publiée en deux architectures. Le niveau 1 (état des services, IP publique
+  du VPN, disque, débits des clients) peut aussi vivre dans la console, sur
+  l'hôte, sans image. Voir « Une veille en continu, dans un conteneur » ;
+- **les thèmes de qBittorrent** : VueTorrent et theme.park passent par des mods
+  linuxserver qui ne sont pas épinglés comme le reste du catalogue (VueTorrent
+  relevé en `:latest`, theme.park en `:<app>`). Il faut trouver une version
+  épinglable, ou écrire pourquoi il n'y en a pas, avant de les proposer. Voir
+  « Personnalisation des interfaces ».
+
+**Shelfarr et Shelfmark** suivent : leurs empreintes sont déjà relevées, et
+Audiobookshelf les débloque, puisqu'ils livrent dans ses bibliothèques.
 
 ### Ce que la mise à jour du pack a réglé — livré en 0.6.0
 
@@ -203,7 +216,7 @@ reste une commande à lancer.
 | Renouveler une clé API, avec recâblage | ✅ |
 | Ajouter un service absent de l'installation | ✅ |
 | Démarrage automatique, sans lancer de commande | ✅ 0.1.9 |
-| Veille en continu, en conteneur, en lecture seule | ⬜ à l'étude |
+| Veille en continu, en conteneur, en lecture seule | ⬜ prévu en 0.10.0 |
 | Gluetun sur la page : état, redémarrage, mise à jour, changement de serveur | ⬜ à faire |
 | Console traduite en anglais | ⬜ à faire |
 
@@ -296,6 +309,11 @@ Demandé à l'usage : « pour monitorer PlugArr, un conteneur toujours actif, en
 temps réel », avec l'espace disque, la RAM, le CPU, le GPU et la bande passante
 sur la page.
 
+**Prévu pour la 0.10.0.** Le premier point à trancher est le périmètre : un
+conteneur exige d'abord une image publiée, alors que le niveau 1 tient sans
+elle dans la console, sur l'hôte. Le premier sert les NAS où personne n'ouvre
+de session, le second ne demande aucune image.
+
 **Surveiller n'est pas administrer, et c'est toute la différence.** Le refus
 ci-dessus porte sur l'écriture : créer, démarrer, recréer. La lecture ne demande
 aucun de ces droits, et peut donc, elle, tenir dans un conteneur. La console
@@ -375,6 +393,8 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
 
 ### Ce qu'il reste à faire
 
+- [ ] Trancher le périmètre de la 0.10.0 : veille en conteneur, qui passe par
+      l'image, ou niveau 1 d'abord dans la console, sur l'hôte.
 - [ ] Publier une image `plugarr` multi-architecture, épinglée, avant tout le
       reste.
 - [ ] Une commande `plugarr veille` servant une page en LECTURE SEULE : aucun
@@ -451,6 +471,10 @@ poser ailleurs n'aurait rien à régler.
 Demandé à l'usage : pouvoir remplacer l'interface web d'un service, ou lui poser
 un thème, sans sortir de PlugArr.
 
+**Prévu pour la 0.10.0, sur qBittorrent d'abord** : VueTorrent et un thème
+theme.park. Les autres services suivront le même mécanisme une fois celui-ci
+éprouvé.
+
 Deux mécanismes, tous deux portés par les mods linuxserver.io — donc limités aux
 images `lscr.io/...` du catalogue. Gluetun, Recyclarr, Seerr et Silo n'en sont
 pas et resteront à l'écart.
@@ -480,6 +504,20 @@ son init. Trois conséquences, aucune anodine :
 La voie honnête est probablement d'épingler le mod par tag comme le reste, de le
 proposer en option explicite plutôt que par défaut, et d'écrire dans l'assistant
 ce que ça implique. Pas de l'activer en silence pour que ce soit joli.
+
+### Ce qu'il reste à faire pour la 0.10.0
+
+- [ ] Trouver une version épinglable de chaque mod, ou écrire pourquoi il n'y
+      en a pas.
+- [ ] Mesurer ce que devient qBittorrent quand il redémarre sans accès à
+      GitHub, mod par mod.
+- [ ] Vérifier VueTorrent et theme.park ensemble sur le même qBittorrent
+      (`mod1|mod2`).
+- [ ] Poser `WebUI\AlternativeUIEnabled` et `WebUI\RootFolder` au pré-semis de
+      `qBittorrent.conf`.
+- [ ] Le proposer dans l'assistant web et le TUI, en option explicite, avec ce
+      que ça implique écrit à l'écran. Aucune option réservée à la ligne de
+      commande.
 
 ---
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from plugarr import admin, connections, orchestrator, selfupdate
+from plugarr import __version__, admin, connections, orchestrator, selfupdate
 from plugarr.maintenance import Maintenance
 from plugarr.models import PlatformProfile
 
@@ -224,7 +224,17 @@ def test_download_accepts_verified_binary(tmp_path, httpx_mock):
     assert destination.read_bytes() == binary
 
 
-@pytest.mark.parametrize('tag', ['v0.8.1', 'v0.10.0'])
+def _tags_plus_recents():
+    # Derives de la version courante : `v0.8.1` ecrit en dur a cesse d'etre
+    # « plus recent » le jour du passage en 0.9.0, et le test echouait pour
+    # une raison sans rapport avec ce qu'il verifie. Le second tag garde son
+    # role : un mineur qui gagne un chiffre doit rester plus recent, ce qu'une
+    # comparaison de chaines (« 0.10 » < « 0.9 ») contredirait.
+    majeur, mineur, correctif = selfupdate.version(__version__)
+    return [f'v{majeur}.{mineur}.{correctif + 1}', f'v{majeur}.{mineur + 1}.0', f'v{majeur}.{mineur + 10}.0']
+
+
+@pytest.mark.parametrize('tag', _tags_plus_recents())
 def test_check_uses_stable_asset_with_digest(tag, httpx_mock):
     httpx_mock.add_response(url=selfupdate.API, json={'tag_name':tag, 'assets':[{
         'name':'plugarr.exe', 'browser_download_url':f'https://github.com/{selfupdate.REPOSITORY}/releases/download/{tag}/plugarr.exe',

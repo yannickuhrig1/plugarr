@@ -153,9 +153,13 @@ your downloads folder, and run:
 .\plugarr.exe
 ```
 
+On launch, PlugArr offers the web wizard, which opens in your browser, or the
+terminal, and can remember that choice. `.\plugarr.exe --interface web` or
+`--interface tui` picks one directly.
+
 Docker Desktop is the only requirement. The executable ships its own interpreter: it runs
 without Python installed, which was verified by launching it with an emptied `PATH`.
-20 MB, roughly a second and a half to start.
+28 MB, roughly three seconds to start.
 
 Windows SmartScreen may warn you on first launch: the binary is not signed, and a code
 signing certificate costs several hundred euros a year. "More info", then "Run anyway".
@@ -349,10 +353,12 @@ password rotation all rewrite that file.
 The case comes up as soon as you go back: you try a new version, something
 displeases you, you run the old binary again.
 
-PlugArr now refuses to read a `stack.yml` newer than itself:
+PlugArr now refuses to read a `stack.yml` newer than itself. Version 0.9.0
+writes it at version 3: once you have moved to 0.9.0, an older binary therefore
+shows:
 
 ```
-stack.yml is at version 2, this version of PlugArr reads up to 1.
+stack.yml is at version 3, this version of PlugArr reads up to 2.
 Update PlugArr: going on would erase the settings it cannot read.
 ```
 
@@ -682,11 +688,10 @@ progress, what will not be done and why. Summary below.
 **The PlugArr console is available.** Run `plugarr serve` on the host to manage
 services, updates, diagnostics, backups and credentials with authenticated access.
 
-The [`v0.8.0-web-preview.1`](../../releases/tag/v0.8.0-web-preview.1)
-pre-release adds a web wizard, a dynamic connection map, targeted tests and
-repairs, scheduled maintenance, history, in-console alerts and Windows
-executable updates. It remains separate from the stable release. See
-[LOCAL_TESTING.md](LOCAL_TESTING.md).
+**Since 0.9.0**, PlugArr has a web wizard with a dynamic connection map, and the
+console gains targeted tests and repairs, scheduled maintenance, history and
+alerts. The Windows executable updates itself. With two torrent clients, the
+wizard asks which one the *arr should use first.
 
 Services still under consideration:
 

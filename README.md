@@ -156,9 +156,13 @@ terminal dans le dossier de téléchargement, et lancez :
 .\plugarr.exe
 ```
 
+Au lancement, PlugArr propose l'assistant web, qui s'ouvre dans votre navigateur,
+ou le terminal, et peut mémoriser ce choix. `.\plugarr.exe --interface web` ou
+`--interface tui` choisit directement.
+
 Seul Docker Desktop est nécessaire. L'exécutable embarque son propre interpréteur : il
 fonctionne sans Python installé, ce qui a été vérifié en le lançant avec un `PATH` vidé.
-20 Mo, environ une seconde et demie au démarrage.
+28 Mo, environ trois secondes au démarrage.
 
 Windows SmartScreen peut afficher un avertissement au premier lancement : le binaire
 n'est pas signé — une signature de code coûte plusieurs centaines d'euros par an.
@@ -358,10 +362,12 @@ tous ce fichier.
 Le cas arrive dès qu'on revient en arrière : on essaie une nouvelle version,
 quelque chose déplaît, on relance l'ancien binaire.
 
-PlugArr refuse maintenant de lire un `stack.yml` plus récent que lui :
+PlugArr refuse maintenant de lire un `stack.yml` plus récent que lui. La 0.9.0
+l'écrit en version 3 : après être passé en 0.9.0, un binaire plus ancien affiche
+donc :
 
 ```
-stack.yml est en version 2, cette version de PlugArr lit jusqu'a la 1.
+stack.yml est en version 3, cette version de PlugArr lit jusqu'a la 2.
 Mettez PlugArr a jour : continuer effacerait les reglages qu'il ne sait pas lire.
 ```
 
@@ -708,11 +714,11 @@ consulter les états, démarrer ou arrêter les services, appliquer leurs mises 
 jour, faire un diagnostic, sauvegarder, ajouter des services et renouveler les
 identifiants. Elle utilise un jeton ou un mot de passe pour l’authentification.
 
-La préversion [`v0.8.0-web-preview.1`](../../releases/tag/v0.8.0-web-preview.1)
-ajoute un assistant web, une carte dynamique des liaisons, des tests et
-réparations ciblés, une maintenance planifiée, un historique, des alertes dans
-la console et la mise à jour automatique de l’exécutable Windows. Elle reste
-séparée de la version stable. Voir [LOCAL_TESTING.md](LOCAL_TESTING.md).
+**Depuis la 0.9.0**, PlugArr a un assistant web avec une carte dynamique des
+liaisons, et la console gagne des tests et réparations ciblés, une maintenance
+planifiée, un historique et des alertes. L’exécutable Windows se met à jour
+tout seul. Avec deux clients torrent, l’assistant demande lequel les *arr
+doivent utiliser en premier.
 
 Côté services, dans l'ordre où ils seront étudiés :
 

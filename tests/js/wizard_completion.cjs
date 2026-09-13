@@ -59,16 +59,25 @@ const reportRenderer=source.slice(source.indexOf('function renderReport('),sourc
   const elements={};
   const context={
     reportData:null,
+    lang:'en',
     tr:key=>key,
     E:(tag,text)=>new Element(tag,text),
     $:id=>elements[id]??=new Element(id),
   };
-  vm.createContext(context);vm.runInContext(reportRenderer,context);
-  context.renderReport({services:[{name:'Sonarr',url:'http://plugarr.test:8989',username:'u',password:'p',api_key:'k'}],env_path:'C:/PlugArr/.env',next_steps:['Open Sonarr']});
+  // The real helper, not a copy: server texts arrive in both languages and the page picks its own.
+  const pickSource=source.match(/^const pick = .*;$/m)[0].replace('const pick','var pick');
+  vm.createContext(context);vm.runInContext(pickSource,context);vm.runInContext(reportRenderer,context);
+  context.renderReport({services:[{name:'Sonarr',url:'http://plugarr.test:8989',username:'u',password:'p',api_key:'k'}],env_path:'C:/PlugArr/.env',next_steps:['Ouvrir Sonarr'],next_steps_i18n:{fr:['Ouvrir Sonarr'],en:['Open Sonarr']}});
   const row=elements['report-services'].children[0];
   assert.equal(row.children.length,5);
   assert.equal(row.children[1].children[0].href,'http://plugarr.test:8989');
   assert.deepEqual(row.children.slice(2).map(cell=>cell.children[0].textContent),['u','p','k']);
+  assert.deepEqual(elements['next-steps'].children.map(item=>item.textContent),['Open Sonarr']);
+  context.lang='fr';context.renderReport(context.reportData);
+  assert.deepEqual(elements['next-steps'].children.map(item=>item.textContent),['Ouvrir Sonarr']);
+  // An older server without translations still shows its text.
+  context.renderReport({...context.reportData,next_steps_i18n:undefined});
+  assert.deepEqual(elements['next-steps'].children.map(item=>item.textContent),['Ouvrir Sonarr']);
 }
 console.log('Final access report layout OK');
 

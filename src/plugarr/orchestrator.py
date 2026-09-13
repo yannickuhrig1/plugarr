@@ -545,7 +545,16 @@ def reset_installation_configs(
     return reset_configs(cfg, services)
 
 
-def prochaine_etape(cfg: StackConfig) -> list[str]:
+def _traducteur(langue: str | None) -> Callable[..., str]:
+    """`t`, ou sa version figee dans une langue sans toucher a celle du processus."""
+    if langue is None:
+        return t
+    from .i18n import traduire
+
+    return lambda texte, /, **valeurs: traduire(texte, langue, **valeurs)
+
+
+def prochaine_etape(cfg: StackConfig, langue: str | None = None) -> list[str]:
     """Ce qu'il reste a faire A LA MAIN, selon ce qui est reellement installe.
 
     plugarr disait « ajoutez vos indexeurs dans Prowlarr. Ils descendront
@@ -555,8 +564,11 @@ def prochaine_etape(cfg: StackConfig) -> list[str]:
     envoie chercher un ecran qui n'est nulle part.
 
     Renvoie des lignes de texte brut : chaque interface les met en forme.
+    `langue` fixe celle du texte rendu : l'assistant web la choisit dans la
+    page, et peut demander les deux.
     """
-    arrs = [sid for sid in ("sonarr", "radarr", "lidarr") if cfg.enabled(sid)]
+    t = _traducteur(langue)
+    arrs =[sid for sid in ("sonarr", "radarr", "lidarr") if cfg.enabled(sid)]
     if cfg.enabled("prowlarr"):
         lignes = [t("Prochaine etape : ajoutez vos indexeurs dans Prowlarr.")]
         if arrs:

@@ -23,7 +23,7 @@ from textual.widgets import (
     SelectionList,
 )
 
-from .. import catalog, i18n, journal, langues, orchestrator, vpnessai, vpnservers
+from .. import catalog, downloadclients, i18n, journal, langues, orchestrator, vpnessai, vpnservers
 from ..clients import recyclarr as recyclarr_cfg
 from ..compose import GLUETUN_TAG
 from ..i18n import t
@@ -1007,6 +1007,27 @@ class VpnScreen(WizardScreen):
             id="vpn-intro",
         )
         with VerticalScroll(id="vpn"):
+            concurrents = downloadclients.concurrents(self.app.selection)
+            if concurrents:
+                choisi = (
+                    self.app.client_prefere
+                    if self.app.client_prefere in concurrents
+                    else concurrents[0]
+                )
+                yield Label("Client de telechargement prefere", classes="group-title")
+                with RadioSet(id="client-prefere"):
+                    for sid in concurrents:
+                        yield RadioButton(
+                            catalog.get(sid).display_name,
+                            value=sid == choisi,
+                            id=f"prefere-{sid}",
+                        )
+                yield Static(
+                    "[dim]Sonarr et Radarr l'utilisent en premier. Les autres restent "
+                    "declares, en secours : sans ce choix, ils alterneraient entre "
+                    "eux a chaque telechargement.[/dim]",
+                    classes="service-note",
+                )
             if "sabnzbd" in self.app.selection:
                 yield Label("Trajet de SABnzbd", classes="group-title")
                 with RadioSet(id="sab-route"):
@@ -1219,6 +1240,15 @@ class VpnScreen(WizardScreen):
         coche = self.query_one("#vpn-choix", RadioSet).pressed_button
         return coche is not None and coche.id == "vpn-oui"
 
+    def client_prefere_voulu(self) -> str:
+        concurrents = downloadclients.concurrents(self.app.selection)
+        if not concurrents:
+            return ""
+        coche = self.query_one("#client-prefere", RadioSet).pressed_button
+        if coche is None or not coche.id:
+            return concurrents[0]
+        return coche.id.removeprefix("prefere-")
+
     def sab_vpn_voulu(self) -> bool:
         if "sabnzbd" not in self.app.selection:
             return False
@@ -1275,6 +1305,7 @@ class VpnScreen(WizardScreen):
         if not self._validate():
             return
         self.app.vpn = self.config()
+        self.app.client_prefere = self.client_prefere_voulu()
         _suite_apres_vpn(self.app)
 
     @on(Button.Pressed, "#back")
@@ -1342,6 +1373,16 @@ class SummaryScreen(WizardScreen):
             f"[b]PUID:PGID[/b]      {cfg.puid}:{cfg.pgid} [dim]({t(cfg.ids_source)})[/dim]",
             f"[b]UMASK / TZ[/b]     {cfg.umask}   {cfg.timezone}",
         ]
+        concurrents = downloadclients.concurrents(cfg.services)
+        if concurrents:
+            rangs = downloadclients.priorites(cfg)
+            prefere = next(sid for sid in concurrents if rangs[sid] == 1)
+            lignes.append(
+                t(
+                    "[b]Client prefere[/b] {client}, les autres en secours",
+                    client=catalog.get(prefere).display_name,
+                )
+            )
         # Un VPN configure ajoute un conteneur que le tableau ci-dessus ne montre
         # pas : Gluetun n'est pas un service du catalogue. Sans cette ligne, le
         # recapitulatif ne dirait RIEN du choix qui vient d'etre fait, et la

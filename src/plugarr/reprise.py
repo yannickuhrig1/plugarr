@@ -186,6 +186,7 @@ _REGLAGES: tuple[tuple[str, str], ...] = (
     ("ui_language", "langue de PlugArr"),
     ("admin_password_hash", "mot de passe de la console"),
     ("recyclarr_templates", "profils de qualite"),
+    ("client_prefere", "client de telechargement prefere"),
 )
 
 

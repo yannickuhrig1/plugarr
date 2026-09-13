@@ -340,7 +340,7 @@ USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,32}")
 class StackConfig(BaseModel):
     """Etat canonique versionnable (stack.yml)."""
 
-    version: int = 2
+    version: int = 3
     project_name: str = "plugarr"
     platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
 
@@ -391,6 +391,9 @@ class StackConfig(BaseModel):
 
     #: Template TRaSH choisi par service. Vide = celui par defaut de Recyclarr.
     recyclarr_templates: dict[str, str] = Field(default_factory=dict)
+    #: Client de telechargement prefere quand plusieurs du meme protocole sont
+    #: installes. Vide = choix automatique, voir `downloadclients.priorites`.
+    client_prefere: str = ""
     #: Repertoire des artefacts, necessaire pour lancer une commande ponctuelle.
     #: Renseigne a l'execution, pas persiste : il depend d'ou l'on se trouve.
     project_dir: object | None = Field(default=None, exclude=True)

@@ -16,7 +16,7 @@ const EN = {
   backupTitle:'Back up an installation', backupHelp:'Includes the project, application settings and Docker volumes, never media.', backupSource:'Installation folder', backupDestination:'Destination archive', backupLive:'Live backup (risk of inconsistent databases)', backupRun:'Create backup',
   restoreTitle:'Restore a backup', restoreHelp:'Enter a local archive path. Its manifest is shown before anything is written.', restoreArchive:'PlugArr archive', restoreTarget:'New settings folder (optional)', restoreInspect:'Inspect archive', restoreConfirm:'I confirm restoration of this archive.', restoreRun:'Restore now',
   foldersTitle:'A place for every file.', foldersIntro:'These paths and this address refer to the computer running PlugArr.', platform:'Platform', projectName:'Docker stack name', dataRoot:'Media and downloads folder', dataHelp:'A shared folder preserves hardlinks where supported by the filesystem.', configRoot:'Application settings folder', username:'Service username', passwordHelp:'PlugArr generates the passwords.', host:'This machine’s address', hostHelp:'DNS name or IP address used in final links.', timezone:'Time zone', serviceLanguage:'Service language', projectFolder:'Project folder', containerIds:'Container IDs', pathCheck:'Test folder and hardlinks',
-  vpnTitle:'Your download connection.', vpnIntro:'Use Gluetun to route selected download clients through your VPN provider.', noTorrent:'No download client selected: this step is not needed.', enableVpn:'Enable VPN', vpnHelp:'Your VPN credentials stay on this computer.', provider:'Provider', protocol:'Protocol', wireguardKey:'WireGuard private key', wireguardAddress:'WireGuard addresses (if required by your provider)', vpnUser:'OpenVPN username', vpnPassword:'OpenVPN password', location:'VPN locations', locationSearch:'Filter locations', locationManual:'Country or region', vpnPreserved:'Leave credentials empty to keep those of the same provider and protocol.', vpnTest:'Test disposable tunnel', vpnWarning:'Without a VPN, BitTorrent traffic will use this computer’s public IP address, visible to peers.', sabRouteTitle:'SABnzbd network route', sabRouteHelp:'SABnzbd talks to a Usenet server, not peers. A VPN is optional and does not replace SSL/TLS.', sabDirect:'Direct connection + provider SSL/TLS (recommended)', sabVpn:'Also route SABnzbd through the VPN', sabTradeoff:'The VPN hides the Usenet server from your ISP, but adds a Gluetun dependency and may reduce throughput.', sabRoute:'SABnzbd route', sabDirectShort:'Direct + SSL/TLS', sabVpnShort:'Via Gluetun + SSL/TLS',
+  vpnTitle:'Your download connection.', vpnIntro:'Use Gluetun to route selected download clients through your VPN provider.', noTorrent:'No download client selected: this step is not needed.', enableVpn:'Enable VPN', vpnHelp:'Your VPN credentials stay on this computer.', provider:'Provider', protocol:'Protocol', wireguardKey:'WireGuard private key', wireguardAddress:'WireGuard addresses (if required by your provider)', vpnUser:'OpenVPN username', vpnPassword:'OpenVPN password', location:'VPN locations', locationSearch:'Filter locations', locationManual:'Country or region', vpnPreserved:'Leave credentials empty to keep those of the same provider and protocol.', vpnTest:'Test disposable tunnel', vpnWarning:'Without a VPN, BitTorrent traffic will use this computer’s public IP address, visible to peers.', sabRouteTitle:'SABnzbd network route', sabRouteHelp:'SABnzbd talks to a Usenet server, not peers. A VPN is optional and does not replace SSL/TLS.', sabDirect:'Direct connection + provider SSL/TLS (recommended)', sabVpn:'Also route SABnzbd through the VPN', sabTradeoff:'The VPN hides the Usenet server from your ISP, but adds a Gluetun dependency and may reduce throughput.', sabRoute:'SABnzbd route', sabDirectShort:'Direct + SSL/TLS', sabVpnShort:'Via Gluetun + SSL/TLS', preferredTitle:'Preferred download client', preferredHelp:'Sonarr and Radarr use it first. The others stay declared as a fallback: without this choice, they would alternate between them on every download.', preferredShort:'Preferred client',
   qualityTitle:'The quality you want.', qualityIntro:'Recyclarr applies TRaSH profiles to Sonarr and Radarr.', noQuality:'Select Recyclarr with Sonarr or Radarr to use quality profiles.', qualityDefaults:'Choose one profile per application from all available templates, or keep the default profile.', loadProfiles:'Refresh available profiles', sizeDisclaimer:'Broad estimates only, not download limits. Actual size depends on duration, source, codec, audio tracks and the release found.',
   reviewTitle:'Check before you start.', reviewIntro:'Review applications, paths and operations. Nothing starts before your confirmation.', resumeTitle:'Existing installation', resumeYes:'Resume available settings and credentials', resumeNo:'Start fresh with the entered settings', resetTitle:'Clean up old settings', resetKeep:'Keep the old settings', resetDelete:'Delete these settings and start fresh', mediaSafe:'Media files are never deleted.', recheck:'Check again', confirm:'I confirm the settings and operations shown above.',
   progressTitle:'Your stack is taking shape.', progressIntro:'Keep PlugArr open during installation. Completed steps appear below.', logs:'Detailed log', reportTitle:'Access your applications', reportHelp:'Keep this report: it contains generated URLs and credentials.', application:'Application', password:'Password', indexerTitle:'Add indexers to Prowlarr', indexerSearch:'Search for an indexer', search:'Search', openAdmin:'Open administration', accessPage:'Open access page', downloadAccess:'Download access file', finish:'Finish and close', adminLink:'Open administration in a new tab', retry:'Review settings and try again', remember:'Use the web interface next time', back:'Back', next:'Continue',
@@ -39,7 +39,7 @@ const FR = {
   resumeOrigin:'Installation précédente', resumedSettings:'Réglages repris', resumedServices:'Identifiants repris', freshInstall:'Nouvelle configuration sélectionnée.', resetCandidates:'Configurations existantes concernées', resetEnabled:'Ces configurations seront supprimées juste avant l’installation.', resetDisabled:'Ces configurations seront conservées.',
   puid:'PUID', pgid:'PGID', umask:'UMASK', address:'Adresse', projectPath:'Dossier du projet', envFile:'Fichier .env',
   reportLoading:'Chargement du rapport final…', indexersAvailable:'définitions d’indexeurs disponibles', configured:'Configurés', noneConfigured:'Aucun indexeur configuré pour le moment.', noIndexerResult:'Aucun indexeur correspondant.', addIndexer:'Ajouter cet indexeur', addingIndexer:'Ajout de l’indexeur…', indexerAdded:'Indexeur ajouté.', mirrors:'Miroirs connus', accessOpening:'Préparation de la page d’accès…', accessDownloading:'Préparation du fichier d’accès…', accessDownloaded:'Fichier d’accès téléchargé.', popupBlocked:'Le navigateur a bloqué le nouvel onglet. Autorisez les fenêtres pop-up puis réessayez.', adminWaiting:'Ouverture de l’administration…', adminOpened:'L’administration est ouverte dans un autre onglet. Vous pouvez conserver ce récapitulatif.', adminBlocked:'Utilisez le lien ci-dessous pour ouvrir l’administration dans un nouvel onglet.', closed:'Assistant fermé. Vous pouvez fermer cet onglet.',
-  sabRoute:'Trajet SABnzbd', sabDirectShort:'Direct + SSL/TLS', sabVpnShort:'Via Gluetun + SSL/TLS',
+  sabRoute:'Trajet SABnzbd', sabDirectShort:'Direct + SSL/TLS', sabVpnShort:'Via Gluetun + SSL/TLS', preferredShort:'Client préféré',
 };
 
 document.querySelectorAll('[data-i18n]').forEach(element => {
@@ -316,6 +316,9 @@ function readFields() {
   form.ui_language = lang;
   form.vpn = readVpnFields();
   if (!effective.includes('sabnzbd')) form.vpn.protect_sabnzbd = false;
+  form.client_prefere = competingClients().length
+    ? (document.querySelector('input[name="preferred-client"]:checked')?.value || '')
+    : '';
   if (!effective.some(service => bootstrap.download_clients.includes(service))) form.vpn.enabled = false;
   form.recyclarr_templates = {};
   if (effective.includes('recyclarr')) {
@@ -401,6 +404,36 @@ function updatePlaces(reset = false) {
   updatePlaceSummary();
 }
 
+// Clients qui se disputent un meme protocole : c'est la seule situation ou
+// les *arr alterneraient entre eux. La regle vit cote Python
+// (`downloadclients.concurrents`) ; seul le regroupement est refait ici, sur
+// les donnees fournies par le serveur.
+function competingClients() {
+  const groups = {};
+  for (const service of bootstrap.download_order || []) {
+    if (effective.includes(service)) (groups[bootstrap.client_protocols[service]] ??= []).push(service);
+  }
+  return Object.values(groups).filter(group => group.length > 1).flat();
+}
+
+function renderPreferred() {
+  const competing = competingClients();
+  $('preferred-client').hidden = competing.length === 0;
+  if (!competing.length) return;
+  if (!competing.includes(form.client_prefere)) form.client_prefere = competing[0];
+  $('preferred-options').replaceChildren(...competing.map(service => {
+    const input = E('input');
+    input.type = 'radio';
+    input.name = 'preferred-client';
+    input.value = service;
+    input.checked = service === form.client_prefere;
+    input.addEventListener('change', () => { form.client_prefere = service; scheduleGraph(); });
+    const label = E('label');
+    label.append(input, E('span', bootstrap.catalog.find(entry => entry.id === service)?.name || service));
+    return label;
+  }));
+}
+
 function updateConditional() {
   const hasDownload = effective.some(service => bootstrap.download_clients.includes(service));
   const hasTorrent = effective.some(service => bootstrap.torrent_clients.includes(service));
@@ -408,6 +441,7 @@ function updateConditional() {
   $('no-torrent').hidden = hasDownload;
   $('vpn-controls').hidden = !hasDownload;
   $('sab-route').hidden = !hasSabnzbd;
+  renderPreferred();
   $('vpn-fields').hidden = !$('vpn-enabled').checked;
   $('vpn-warning').hidden = !hasTorrent || $('vpn-enabled').checked;
   $('wireguard-fields').hidden = $('vpn-type').value !== 'wireguard';
@@ -439,6 +473,7 @@ function renderReview() {
   for (const [label, value] of [
     [tr('projectName'), plan.project_name], [tr('projectPath'), plan.project_dir], [tr('address'), plan.host], [tr('vpn'), tr(plan.vpn ? 'vpnOn' : 'vpnOff')],
     ...(plan.sabnzbd_route ? [[tr('sabRoute'), tr(plan.sabnzbd_route === 'vpn' ? 'sabVpnShort' : 'sabDirectShort')]] : []),
+    ...(plan.client_prefere ? [[tr('preferredShort'), bootstrap.catalog.find(entry => entry.id === plan.client_prefere)?.name || plan.client_prefere]] : []),
     [tr('dataRoot'), plan.data_root], [tr('configRoot'), plan.config_root], [`${tr('puid')}:${tr('pgid')}`, `${plan.puid}:${plan.pgid}`], [`${tr('umask')} / TZ`, `${plan.umask} · ${plan.timezone}`],
   ]) grid.append(summaryBox(label, value));
   target.append(grid, E('p', `${plan.planned_links} ${tr('plannedLinks')}`, 'metric-line'));

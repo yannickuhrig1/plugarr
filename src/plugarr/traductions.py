@@ -133,6 +133,29 @@ EN: dict[str, str] = {
         "clear.[/dim]"
     ),
     "Trajet de SABnzbd": "SABnzbd route",
+    "Client de telechargement prefere": "Preferred download client",
+    "[dim]Sonarr et Radarr l'utilisent en premier. Les autres restent declares, en secours : "
+    "sans ce choix, ils alterneraient entre eux a chaque telechargement.[/dim]": (
+        "[dim]Sonarr and Radarr use it first. The others stay declared as a fallback: "
+        "without this choice, they would alternate between them on every download.[/dim]"
+    ),
+    "[b]Client prefere[/b] {client}, les autres en secours": (
+        "[b]Preferred client[/b] {client}, the others as fallback"
+    ),
+    "client de telechargement prefere": "preferred download client",
+    "Client de telechargement prefere quand plusieurs du meme type sont installes. "
+    "Les autres restent declares, en secours.": (
+        "Preferred download client when several of the same type are installed. "
+        "The others stay declared as a fallback."
+    ),
+    "[red]--client-prefere doit designer un client de telechargement en concurrence dans "
+    "la selection. Choix possibles : {choix}[/red]": (
+        "[red]--client-prefere must name a download client competing with another in the "
+        "selection. Possible choices: {choix}[/red]"
+    ),
+    "aucun, un seul client par type": "none, only one client per type",
+    ", priorite {rang}": ", priority {rang}",
+    "priorites realignees : {clients}": "priorities realigned: {clients}",
     "Connexion directe + SSL/TLS (recommande)": "Direct connection + SSL/TLS (recommended)",
     "Faire aussi passer SABnzbd par le VPN": "Also route SABnzbd through the VPN",
     "[dim]Le VPN masque le serveur Usenet a votre FAI, mais ajoute une dependance a "

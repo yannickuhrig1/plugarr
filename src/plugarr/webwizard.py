@@ -32,6 +32,7 @@ from . import (
     admin,
     catalog,
     dashboard,
+    downloadclients,
     i18n,
     journal,
     migrations,
@@ -80,6 +81,7 @@ class WizardInput(BaseModel):
     recyclarr_templates: dict[str, str] = Field(default_factory=dict)
     reprendre: bool = True
     reset_config: bool = False
+    client_prefere: str = ""
 
 
 class WizardState:
@@ -182,6 +184,11 @@ class WizardState:
             "existing_project_dir": str(self.previous_project_dir) if self.previous_project_dir else "",
             "download_clients": list(catalog.DOWNLOAD_CLIENTS),
             "torrent_clients": list(catalog.TORRENT_CLIENTS),
+            "download_order": list(downloadclients.ORDRE_AUTO),
+            "client_protocols": {
+                sid: downloadclients.profile_for(sid).protocol
+                for sid in catalog.DOWNLOAD_CLIENTS
+            },
             "project_dir": str(self.launch_project_dir),
             "icons": icons,
             "can_tui": not self.demo and sys.stdin.isatty() and sys.stdout.isatty(),
@@ -227,6 +234,7 @@ class WizardState:
                 "ui_language": cfg.ui_language if cfg else i18n.langue(),
                 "vpn": vpn,
                 "recyclarr_templates": cfg.recyclarr_templates if cfg else {},
+                "client_prefere": cfg.client_prefere if cfg else "",
                 "reprendre": cfg is not None,
                 "reset_config": False,
             },
@@ -341,6 +349,12 @@ class WizardState:
         if cfg.vpn.protect_sabnzbd and not cfg.enabled("sabnzbd"):
             raise ValueError("Le trajet VPN de SABnzbd demande que SABnzbd soit selectionne.")
         cfg.ui_language = form.ui_language
+        if form.client_prefere:
+            if form.client_prefere not in downloadclients.concurrents(cfg.services):
+                raise ValueError(
+                    "Client de telechargement prefere invalide pour la selection."
+                )
+            cfg.client_prefere = form.client_prefere
         cfg.recyclarr_templates = form.recyclarr_templates
         if form.recyclarr_templates:
             if self.demo:
@@ -368,6 +382,7 @@ class WizardState:
                     "language",
                     "ui_language",
                     "recyclarr_templates",
+                    *(("client_prefere",) if form.client_prefere else ()),
                     *(("vpn",) if cfg.vpn.enabled else ()),
                 },
             )
@@ -927,6 +942,14 @@ class WizardState:
                     "vpn" if cfg.vpn.protects("sabnzbd") else "direct"
                 ) if cfg.enabled("sabnzbd") else None,
                 "recyclarr_templates": cfg.recyclarr_templates,
+                "client_prefere": next(
+                    (
+                        sid
+                        for sid in downloadclients.concurrents(cfg.services)
+                        if downloadclients.priorites(cfg)[sid] == 1
+                    ),
+                    "",
+                ),
                 "resume": {
                     "enabled": bool(self.reprise),
                     "settings": list(getattr(self.reprise, "reglages", [])),

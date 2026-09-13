@@ -23,7 +23,7 @@ from .clients.base import WiringError
 from .clients.jellyfin import JellyfinClient
 from .clients.qbittorrent import QBittorrentClient
 from .clients.qui import QuiClient
-from .downloadclients import profile_for
+from .downloadclients import priorites, profile_for
 from .i18n import t
 from .layout import BIBLIOTHEQUES, CONTAINER_PATHS
 from .models import StackConfig
@@ -413,7 +413,11 @@ class Wirer:
             name=dl_spec.display_name,
             implementation=profile.implementation,
             values=values,
-            extra={"enable": True, "protocol": profile.protocol, "priority": 1},
+            extra={
+                "enable": True,
+                "protocol": profile.protocol,
+                "priority": priorites(self.cfg).get(dl_id, 1),
+            },
         )
         warnings = (
             [f"champs absents du gabarit {arr_id}, ignores: {', '.join(skipped)}"]
@@ -440,6 +444,7 @@ class Wirer:
             if modifies:
                 etat = t("identifiants mis a jour ({champs})", champs=", ".join(modifies))
 
+        etat += self._aligner_priorites(client, dl_id)
         result = StepResult(
             f"{arr_id}: client de telechargement {dl_spec.display_name}",
             ok=client.find_by_name("downloadclient", dl_spec.display_name) is not None,
@@ -454,6 +459,54 @@ class Wirer:
             result,
             on_auth_failure=lambda: self._unban_download_client(dl_id),
         )
+
+    def _aligner_priorites(self, client, dl_id: str) -> str:
+        """Corrige l'alternance entre clients du meme protocole. Renvoie un suffixe.
+
+        Deux regles, et la seconde est la plus importante :
+
+        - un choix EXPLICITE (assistant ou `--client-prefere`) s'applique a tous
+          nos clients deja declares : l'utilisateur vient de le demander ;
+        - sans choix, on ne corrige QUE l'etat fautif, tous nos clients a 1, qui
+          est celui que PlugArr posait lui-meme et qui produit le round-robin.
+          Toute autre repartition vient d'un reglage manuel dans Sonarr ou
+          Radarr, et n'est jamais ecrasee.
+
+        Appele a chaque etape de client, ce qui rend l'ordre du plan
+        indifferent : le premier client declare attend le second, et le second
+        realigne les deux.
+        """
+        cibles = priorites(self.cfg)
+        protocole = profile_for(dl_id).protocol
+        noms = {
+            catalog.get(sid).display_name: sid
+            for sid in cibles
+            if profile_for(sid).protocol == protocole
+        }
+        if len(noms) < 2:
+            return ""
+        entrees = [e for e in client.get("downloadclient") or [] if e.get("name") in noms]
+        explicite = self.cfg.client_prefere in noms.values()
+        fautif = len(entrees) > 1 and all(e.get("priority") == 1 for e in entrees)
+        realignes = []
+        if explicite or fautif:
+            for entree in entrees:
+                voulue = cibles[noms[entree["name"]]]
+                if entree.get("priority") != voulue:
+                    entree["priority"] = voulue
+                    client.put(f"downloadclient/{entree['id']}", entree)
+                    realignes.append(entree["name"])
+        propre = next(
+            (e for e in entrees if e.get("name") == catalog.get(dl_id).display_name), None
+        )
+        suffixe = (
+            t(", priorite {rang}", rang=propre.get("priority")) if propre is not None else ""
+        )
+        if realignes:
+            suffixe += " ; " + t(
+                "priorites realignees : {clients}", clients=", ".join(realignes)
+            )
+        return suffixe
 
     def step_qbittorrent_categories(self) -> StepResult:
         """Cree les categories qBittorrent avec leur chemin de sauvegarde."""
@@ -613,7 +666,11 @@ class Wirer:
                 username=dl.username or "",
                 password=dl.password or "",
             ),
-            extra={"enable": True, "protocol": profile.protocol, "priority": 1},
+            extra={
+                "enable": True,
+                "protocol": profile.protocol,
+                "priority": priorites(self.cfg).get(dl_id, 1),
+            },
         )
         warnings = [f"champs ignores: {', '.join(skipped)}"] if skipped else []
 
@@ -633,6 +690,7 @@ class Wirer:
             if modifies:
                 etat = t("identifiants mis a jour ({champs})", champs=", ".join(modifies))
 
+        etat += self._aligner_priorites(prowlarr, dl_id)
         result = StepResult(
             f"prowlarr: client de telechargement {dl_spec.display_name}",
             ok=prowlarr.find_by_name("downloadclient", dl_spec.display_name) is not None,

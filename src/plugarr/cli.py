@@ -393,6 +393,14 @@ def install(
             "Sans l'option, la question est posee."
         ),
     ),
+    client_prefere: str = typer.Option(
+        "",
+        "--client-prefere",
+        help=t(
+            "Client de telechargement prefere quand plusieurs du meme type sont "
+            "installes. Les autres restent declares, en secours."
+        ),
+    ),
 ) -> None:
     """Deploie et cable la stack de bout en bout, sans interaction."""
     selection = [s.strip() for s in services.split(",") if s.strip()]
@@ -505,6 +513,21 @@ def install(
         console.print("[red]--sabnzbd-vpn demande aussi --vpn.[/red]")
         raise typer.Exit(1)
 
+    if client_prefere:
+        from . import downloadclients
+
+        possibles = downloadclients.concurrents(cfg.services)
+        if client_prefere not in possibles:
+            console.print(
+                t(
+                    "[red]--client-prefere doit designer un client de telechargement "
+                    "en concurrence dans la selection. Choix possibles : {choix}[/red]",
+                    choix=", ".join(possibles) or t("aucun, un seul client par type"),
+                )
+            )
+            raise typer.Exit(1)
+        cfg.client_prefere = client_prefere
+
     # Reprendre AVANT le recapitulatif : c'est lui qui doit montrer ce qui sera
     # reellement pose. Reprendre apres reviendrait a annoncer une chose et a en
     # ecrire une autre.
@@ -545,6 +568,7 @@ def install(
                     ("language", language is not None),
                     ("vpn", vpn),
                     ("recyclarr_templates", bool(chosen)),
+                    ("client_prefere", bool(client_prefere)),
                 )
                 if donne
             }

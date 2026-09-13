@@ -45,7 +45,7 @@ from .models import StackConfig
 #: Ajouter un champ neuf avec une valeur par defaut ne demande PAS de
 #: migration — pydantic l'absorbe, et c'est le cas courant. Ce qui en demande
 #: une : un champ qui change de sens, de type, ou qui disparait.
-VERSION_COURANTE = 2
+VERSION_COURANTE = 3
 
 #: `version depuis` -> transformation du dictionnaire brut. Chaque fonction
 #: recoit le contenu du fichier tel qu'il a ete lu et rend la forme attendue
@@ -70,8 +70,20 @@ def _vpn_sabnzbd_explicite(donnees: dict[str, Any]) -> dict[str, Any]:
     return donnees
 
 
+def _client_prefere_introduit(donnees: dict[str, Any]) -> dict[str, Any]:
+    """Aucune transformation : `client_prefere` a une valeur par defaut.
+
+    La version avance quand meme. Sans cela, une PlugArr plus ancienne lirait
+    ce fichier, ignorerait le champ qu'elle ne connait pas, et le reecrirait
+    sans lui : le choix du client prefere disparaitrait en silence. Avec la
+    version 3, elle refuse et demande une mise a jour.
+    """
+    return donnees
+
+
 MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
     1: _vpn_sabnzbd_explicite,
+    2: _client_prefere_introduit,
 }
 
 

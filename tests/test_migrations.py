@@ -64,7 +64,9 @@ def test_la_migration_garde_sabnzbd_dans_le_vpn_existant():
     migre, notes = migrations.migrer(donnees)
 
     assert migre["vpn"]["protect_sabnzbd"] is True
-    assert notes == ["stack.yml migre en version 2"]
+    # Un fichier en version 1 traverse TOUTES les migrations suivantes : la
+    # note de la version 2 doit y figurer, pas etre la seule.
+    assert "stack.yml migre en version 2" in notes
 
 
 def test_la_migration_n_active_pas_sabnzbd_sans_ancien_tunnel():

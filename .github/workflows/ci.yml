@@ -58,6 +58,26 @@ jobs:
             exit 1
           fi
 
+      - name: Deux clients torrent ne sont plus en alternance
+        # Tous les clients etaient declares a la meme priorite, et Sonarr alterne
+        # alors entre eux : « Round-Robin is used for clients of the same type
+        # that have the same priority ». Les tests unitaires le verifient avec un
+        # faux *arr ; ici on relit ce que le vrai Sonarr a enregistre, apres le
+        # second passage de cablage.
+        run: |
+          set -a; . "$RUNNER_TEMP/stack/.env"; set +a
+          curl -sf -H "X-Api-Key: $SONARR_API_KEY" http://localhost:8989/api/v3/downloadclient \
+            -o "$RUNNER_TEMP/downloadclients.json"
+          python - "$RUNNER_TEMP/downloadclients.json" <<'EOF'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as fichier:
+              clients = {c["name"]: c.get("priority") for c in json.load(fichier)}
+          print("priorites relues dans Sonarr :", clients)
+          attendu = {"qBittorrent": 1, "Transmission": 2}
+          if {nom: clients.get(nom) for nom in attendu} != attendu:
+              sys.exit(f"ECHEC : priorites {clients}, attendu {attendu}")
+          EOF
+
       # Prowlarr embarque plus de 600 definitions d'indexeurs, dont la forme change
       # a chaque version. Cet audit echoue si une nouvelle definition expose un
       # champ d'identifiant que l'heuristique ne saurait pas reconnaitre.

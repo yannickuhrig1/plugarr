@@ -129,3 +129,50 @@ def profile_for(service_id: str) -> DownloadClientProfile:
                 liste=known,
             )
         ) from None
+
+
+#: Ordre retenu quand plusieurs clients du MEME protocole sont installes et que
+#: personne n'a choisi. qBittorrent d'abord : c'est deja la regle du port
+#: entrant (`compose.port_sync_clients`) et celle de Flood.
+ORDRE_AUTO = ("qbittorrent", "transmission", "sabnzbd")
+
+
+def _par_protocole(presents) -> dict[str, list[str]]:
+    groupes: dict[str, list[str]] = {}
+    for sid in ORDRE_AUTO:
+        if sid in presents:
+            groupes.setdefault(PROFILES[sid].protocol, []).append(sid)
+    return groupes
+
+
+def concurrents(services) -> list[str]:
+    """Clients qui partagent leur protocole avec au moins un autre de la selection.
+
+    C'est la seule situation ou demander un client prefere a un sens : SABnzbd a
+    cote de qBittorrent ne se dispute rien, les *arr choisissent d'abord par
+    protocole.
+    """
+    groupes = _par_protocole(set(services))
+    return [sid for groupe in groupes.values() if len(groupe) > 1 for sid in groupe]
+
+
+def priorites(cfg) -> dict[str, int]:
+    """Priorite a poser, dans les *arr et Prowlarr, pour chaque client installe.
+
+    Tous etaient declares a `priority: 1`. Or la documentation de Sonarr est
+    explicite : « Round-Robin is used for clients of the same type
+    (torrent/usenet) that have the same priority ». Deux clients torrent
+    installes, et les episodes partaient ALTERNATIVEMENT dans l'un et dans
+    l'autre, sans que personne l'ait demande ni que rien ne le dise.
+
+    Le client prefere passe a 1, les autres descendent. Ils restent declares et
+    fonctionnels : le secours est preserve, rien n'est efface.
+    """
+    presents = {sid for sid in ORDRE_AUTO if cfg.enabled(sid)}
+    rangs: dict[str, int] = {}
+    for groupe in _par_protocole(presents).values():
+        if cfg.client_prefere in groupe:
+            groupe = [cfg.client_prefere, *(s for s in groupe if s != cfg.client_prefere)]
+        for rang, sid in enumerate(groupe, start=1):
+            rangs[sid] = rang
+    return rangs

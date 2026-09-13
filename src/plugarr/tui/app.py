@@ -66,6 +66,8 @@ class PlugArrApp(App):
         #: navigateur tourne sur la machine qui heberge la stack.
         self.host: str = "localhost"
         self.vpn: VpnConfig = VpnConfig()
+        #: Client prefere entre clients du meme protocole ; vide = automatique.
+        self.client_prefere: str = ""
         self.platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
         #: Template TRaSH choisi par service. Vide = celui par defaut.
         self.recyclarr_templates: dict[str, str] = {}
@@ -128,6 +130,11 @@ class PlugArrApp(App):
         cfg.ui_language = self.ui_language
         cfg.recyclarr_templates = dict(self.recyclarr_templates)
         cfg.vpn = self.vpn
+        from ..downloadclients import concurrents
+
+        cfg.client_prefere = (
+            self.client_prefere if self.client_prefere in concurrents(cfg.services) else ""
+        )
 
         # Une installation deja presente : on reprend ce qu'elle portait plutot
         # que de l'effacer. Le VPN est le cas grave — sans cela il disparait en
@@ -151,9 +158,12 @@ class PlugArrApp(App):
                 self.reprise = reprise.appliquer(
                     cfg,
                     trouvee.cfg,
-                    imposes={"vpn", "language", "ui_language", "recyclarr_templates"}
-                    if self.vpn.enabled
-                    else {"language", "ui_language", "recyclarr_templates"},
+                    imposes=(
+                        {"vpn", "language", "ui_language", "recyclarr_templates"}
+                        if self.vpn.enabled
+                        else {"language", "ui_language", "recyclarr_templates"}
+                    )
+                    | ({"client_prefere"} if cfg.client_prefere else set()),
                 )
                 # Ecrire ici les artefacts d'une pile installee ailleurs
                 # donnerait DEUX repertoires de projet portant le meme nom de

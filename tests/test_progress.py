@@ -163,3 +163,51 @@ async def test_la_barre_du_tui_ne_depasse_jamais_son_total(tmp_path, monkeypatch
         screen._complete()
 
         assert bar.progress == 5, "une barre figee avant la fin se lit comme un echec"
+
+
+def test_une_coupure_du_registre_ne_fait_plus_echouer_l_installation(monkeypatch, tmp_path):
+    """Releve sur un runner GitHub : « read: connection reset by peer » chez
+    lscr.io, en plein telechargement des images. Sans nouvelle tentative, UNE
+    coupure faisait echouer toute l'installation. `pull` est idempotent, donc
+    reessayer ne coute que l'attente."""
+    import subprocess
+
+    from plugarr import runner
+
+    reponses = [
+        subprocess.CompletedProcess([], 1, "", "read: connection reset by peer"),
+        subprocess.CompletedProcess([], 0, "", "sonarr Pulled"),
+    ]
+    appels = []
+    monkeypatch.setattr(runner, "_run", lambda *a, **k: (appels.append(a), reponses.pop(0))[1])
+    monkeypatch.setattr(runner.time, "sleep", lambda _s: None)
+
+    ok, _message = runner.Compose(tmp_path, "essai").pull_many(["sonarr"])
+
+    assert ok, "une coupure isolee a fait echouer le telechargement"
+    assert len(appels) == 2
+
+
+def test_une_erreur_definitive_du_registre_finit_par_etre_rapportee(monkeypatch, tmp_path):
+    """Reessayer ne doit pas masquer une vraie erreur : un tag inconnu echoue a
+    chaque tentative, et son message doit remonter tel quel."""
+    import subprocess
+
+    from plugarr import runner
+
+    appels = []
+    monkeypatch.setattr(
+        runner,
+        "_run",
+        lambda *a, **k: (
+            appels.append(a),
+            subprocess.CompletedProcess([], 1, "", "manifest unknown"),
+        )[1],
+    )
+    monkeypatch.setattr(runner.time, "sleep", lambda _s: None)
+
+    ok, message = runner.Compose(tmp_path, "essai").pull_many(["sonarr"])
+
+    assert not ok
+    assert "manifest unknown" in message
+    assert len(appels) == runner.PULL_TENTATIVES

@@ -8,6 +8,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,12 @@ class Check:
 #: 8 minutes, et l'ecran d'accueil de l'assistant serait reste muet tout ce temps.
 #: Un diagnostic doit repondre vite, quitte a repondre « je ne sais pas ».
 PROBE_TIMEOUT = 20
+
+
+#: Tentatives de `docker compose pull`, et attente de base entre deux (en
+#: secondes, multipliee par le rang de la tentative).
+PULL_TENTATIVES = 3
+PULL_ATTENTE = 5
 
 
 def _run(args: list[str], cwd: Path | None = None, timeout: int = 600) -> subprocess.CompletedProcess:
@@ -436,8 +443,20 @@ class Compose:
         opaque. Une commande separee permet aux interfaces d'annoncer la phase
         exacte sans ralentir le telechargement par un `pull` sequentiel.
         """
-        proc = _run(self._cmd("pull", *services), cwd=self.dir, timeout=timeout)
-        return proc.returncode == 0, (proc.stderr or proc.stdout).strip()
+        # Un registre coupe parfois la connexion en plein telechargement :
+        # « read: connection reset by peer » chez lscr.io, releve sur un runner
+        # GitHub. Sans nouvelle tentative, UNE coupure faisait echouer toute
+        # l'installation. `pull` est idempotent — les couches deja recuperees ne
+        # se retelechargent pas — donc reessayer ne coute que le temps d'attente,
+        # et une erreur definitive (tag inconnu) echoue simplement trois fois.
+        tentatives = PULL_TENTATIVES
+        for tentative in range(1, tentatives + 1):
+            proc = _run(self._cmd("pull", *services), cwd=self.dir, timeout=timeout)
+            if proc.returncode == 0:
+                return True, (proc.stderr or proc.stdout).strip()
+            if tentative < tentatives:
+                time.sleep(PULL_ATTENTE * tentative)
+        return False, (proc.stderr or proc.stdout).strip()
 
     def recreate(self, service: str, timeout: int = 600) -> tuple[bool, str]:
         """Recree UN service avec son image a jour.

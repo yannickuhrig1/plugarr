@@ -5,7 +5,7 @@
 Où en est PlugArr, ce qui vient ensuite, et pourquoi. Tenue à jour à chaque
 séance de travail.
 
-**Dernière mise à jour : 12 septembre 2026** — version publiée : **0.8.0**
+**Dernière mise à jour : 13 septembre 2026** — version publiée : **0.8.0**
 
 ---
 
@@ -151,6 +151,9 @@ supprime le démarrage automatique livré en 0.1.9. Ce qui protège aujourd'hui 
 | **Port entrant du VPN** | ✅ livré en 0.8.0 | Quatre fournisseurs sur vingt-cinq le permettent, et PlugArr l'active alors sans rien demander : sans lui, le client télécharge très bien mais ne partage qu'à moitié. Trois pièges traités, aucun supposé — l'assistant n'offre que les lieux qui en offrent un (Gluetun refuse de **démarrer** sinon : chez PIA, ce sont les 55 régions des États-Unis qui sont écartées), un script suit le port quand le fournisseur en change (Proton est passé de 45270 à 48406 entre deux journées, sans que rien ne le dise), et le contrôle **relit** la valeur chez le client. Verdict séparé de celui de la protection : un port désynchronisé coûte du partage, pas de l'exposition. |
 | **Essayer la configuration VPN** | ✅ livré en 0.8.0 | Un Gluetun jetable monté avec exactement ce qui a été saisi, avant de bâtir la stack. Il n'accepte qu'**une preuve de sortie** : une clé bien formée mais fausse « s'établit » sans qu'un paquet ne passe, et Gluetun rend alors une adresse publique vide. Jamais bloquant, mais trois refus sont certains et nommés — lieu sans serveur, clé illisible, identifiants OpenVPN rejetés. |
 | **Mode OpenVPN éprouvé** | ✅ livré en 0.8.0 | Jusque-là, seul WireGuard avait été essayé en vrai. Vérifié le 2026-09-09 contre un compte ProtonVPN réel : tunnel en 14 s, port entrant obtenu. Trois défauts trouvés à cette occasion — `AUTH_FAILED` n'était pas reconnu, l'attente de 45 s était mesurée sur WireGuard alors qu'OpenVPN patiente 60 s fermes sur un serveur muet, et le message d'expiration parlait d'une « clé » dans un mode où l'on saisit un identifiant. |
+| **Choisir le client de téléchargement** | ✅ prêt, à publier | Deux clients torrent installés, et les *arr **alternaient** entre eux : tous étaient déclarés à `priority: 1`, et Sonarr applique alors un round-robin. Le client préféré passe à 1, les autres descendent et restent en secours ; qBittorrent par défaut, comme pour le port entrant. Question posée dans l'assistant web, le TUI et par `--client-prefere`, seulement quand elle a un sens. Une installation existante n'est corrigée que dans l'état fautif, jamais par-dessus un réglage manuel. Vérifié en CI sur un vrai Sonarr après le second passage de câblage : qBittorrent à 1, Transmission à 2. `stack.yml` passe en version 3, pour qu'une version plus ancienne refuse le fichier au lieu d'effacer ce choix. |
+| **Ports en double dans la pile** | ✅ prêt, à publier | Le préflight sondait l'**hôte**, et ne voyait donc pas deux services de PlugArr sur le même port : tous deux « libres », puis `docker compose up` échouait pour la pile entière. Reproduit avec une pile Silo puis Jellyfin ajouté par l'assistant web, qui publiait 8096 deux fois. La cause est corrigée, et un contrôle bloquant compare désormais le plan à lui-même. |
+| **Téléchargement des images** | ✅ prêt, à publier | Trois tentatives au lieu d'une. Relevé en CI : une coupure du registre (`read: connection reset by peer` chez lscr.io) faisait échouer toute l'installation. `pull` est idempotent, et une erreur définitive remonte toujours avec son message. |
 
 ---
 
@@ -198,6 +201,7 @@ reste une commande à lancer.
 | Renouveler une clé API, avec recâblage | ✅ |
 | Ajouter un service absent de l'installation | ✅ |
 | Démarrage automatique, sans lancer de commande | ✅ 0.1.9 |
+| Veille en continu, en conteneur, en lecture seule | ⬜ à l'étude |
 | Gluetun sur la page : état, redémarrage, mise à jour, changement de serveur | ⬜ à faire |
 | Console traduite en anglais | ⬜ à faire |
 
@@ -272,7 +276,9 @@ console doit créer, démarrer et recréer des conteneurs — soit
 crée peut monter la racine de l'hôte et tourner en root : un proxy de socket qui
 autorise ces deux appels n'enferme rien, et sans eux la console ne sert plus à
 rien. L'y enfermer reviendrait donc à exposer sur le réseau un service aux
-pleins pouvoirs, sans rien gagner.
+pleins pouvoirs, sans rien gagner. Cela vaut pour l'ÉCRITURE ; la lecture,
+elle, tient sans risque dans un conteneur — voir « Une veille en continu, dans
+un conteneur » plus bas.
 
 Elle tourne donc sur l'hôte, sous le compte de l'utilisateur, sur `127.0.0.1`,
 et démarre toute seule avec `plugarr autostart`. Le confort recherché est le
@@ -282,34 +288,150 @@ dans `stack.yml`, sessions expirables, tentatives limitées.
 
 ---
 
+## Une veille en continu, dans un conteneur
+
+Demandé à l'usage : « pour monitorer PlugArr, un conteneur toujours actif, en
+temps réel », avec l'espace disque, la RAM, le CPU, le GPU et la bande passante
+sur la page.
+
+**Surveiller n'est pas administrer, et c'est toute la différence.** Le refus
+ci-dessus porte sur l'écriture : créer, démarrer, recréer. La lecture ne demande
+aucun de ces droits, et peut donc, elle, tenir dans un conteneur. La console
+garde ses boutons sur l'hôte ; la veille serait un second service, en lecture
+seule, incapable d'arrêter quoi que ce soit.
+
+**Ce que le conteneur apporte vraiment.** Pas « toujours actif » : `plugarr
+autostart` lance déjà la console à chaque ouverture de session, et la page se
+rafraîchit toutes les 5 secondes (`dashboard.py`, `setInterval(rafraichir,
+5000)`). Le gain est ailleurs, et il est réel : `mecanisme()` ne connaît que
+Windows et systemd utilisateur, et renvoie « aucun » partout ailleurs. Sur un NAS
+où personne n'ouvre de session — Unraid, Synology, un BSD — il n'y a aujourd'hui
+rien du tout. Un conteneur en `restart: unless-stopped` survit au redémarrage
+sans session, et se consulte depuis un téléphone.
+
+### Les mesures demandées, une par une
+
+Relevés du 12 septembre 2026, sur Docker Desktop 29.7.2 (Windows, moteur Linux).
+Linux natif est le cas normal et reste à remesurer sur le banc.
+
+- **L'espace disque : oui, et exact.** `df` sur un montage lié rend les chiffres
+  du disque hôte, pas ceux de l'image : `C:\ 952,2G, 326,7G disponibles` vu
+  depuis le conteneur, contre 326,7 Go libres rapportés par Windows au même
+  instant. Il faut monter en lecture seule chaque racine surveillée ; PlugArr les
+  connaît déjà (`layout.py` : torrents, usenet, médiathèque, configuration).
+  Plusieurs disques veulent plusieurs montages, rien ne se devine de l'intérieur.
+- **La RAM : le chiffre serait faux sous Windows.** `/proc/meminfo` n'est pas
+  cloisonné, donc un conteneur y lit les valeurs de l'hôte — sur Linux. Sur
+  Docker Desktop, cet hôte est la machine virtuelle WSL2 : 15,2 Gio mesurés dans
+  le conteneur contre 31,1 Gio sur la machine, soit la moitié. À afficher sur
+  Linux, à taire ou à annoncer comme tel ailleurs.
+- **Le CPU : le nombre est juste, le taux ne l'est qu'à moitié.** `nproc` rend 24
+  dans le conteneur, exactement les 24 processeurs logiques de la machine. Mais
+  l'occupation lue dans `/proc/stat` est celle de la VM sous Docker Desktop :
+  elle ignore ce que Windows fait en dehors.
+- **Par service, sans socket : possible, à un détail près.** En montant
+  `/sys/fs/cgroup` en lecture seule, un conteneur non privilégié lit
+  `docker/<id>/memory.current` et `cpu.stat` de TOUS les conteneurs — vérifié.
+  Ce que le cgroup ne donne pas, c'est le nom : il n'y a que des identifiants, et
+  les relier aux services demande soit le socket, soit un fichier de
+  correspondance écrit par l'hôte, qui vieillit à chaque recréation. C'est
+  l'argument le plus solide en faveur du niveau 2 : `docker stats` rend le nom
+  d'emblée.
+- **La bande passante : pas là où on la cherche.** `/proc/net/dev`, lui, EST
+  cloisonné par espace réseau. En réseau bridge, le conteneur ne voit que `lo` et
+  son propre `eth0` — vérifié. En `network_mode: host` il voit l'`eth0` de l'hôte
+  et tous les `veth`, donc le total machine ; mais il sort alors du réseau du
+  stack, et un `veth` ne dit pas à quel conteneur il appartient : même problème
+  de correspondance. La bande passante utile ici est ailleurs — les clients la
+  publient eux-mêmes, et PlugArr leur parle déjà. Routes à confirmer contre une
+  instance réelle avant d'y croire : `/api/v2/transfer/info` chez qBittorrent,
+  `session-stats` chez Transmission, la file chez SABnzbd.
+- **Le GPU : trois implémentations, aucune portable, et rien à mesurer
+  aujourd'hui.** NVIDIA exige `nvidia-container-toolkit` sur l'hôte et une
+  réservation de périphérique, puis NVML dans le conteneur. AMD est le moins
+  cher : `gpu_busy_percent` dans sysfs, un fichier à lire. Intel est le plus dur,
+  l'occupation passant par le PMU `i915`, donc `CAP_PERFMON` ; sysfs ne donne que
+  la fréquence. Sous Docker Desktop, rien. Surtout : **PlugArr ne configure aucun
+  accès GPU** — `compose.py` n'expose que `/dev/net/tun`, pour Gluetun. Mesurer un
+  matériel que le stack n'utilise pas, ce serait poser la jauge avant le moteur.
+  Le transcodage matériel de Jellyfin vient d'abord, sa mesure ensuite.
+
+### Le coût d'entrée, qui n'est pas dans la page
+
+**Il n'existe aucune image PlugArr.** Le paquet s'installe par
+`pipx install git+https://…`, il n'est pas sur PyPI, et `packaging/` ne produit
+qu'un exécutable PyInstaller. Une veille en conteneur veut donc d'abord une image
+publiée, construite par la CI, en deux architectures — `amd64` et `arm64`, sans
+quoi les NAS ARM restent dehors — et épinglée comme tout le reste. C'est le
+premier poste de dépense, avant la moindre ligne de veille.
+
+L'autre voie est de n'écrire aucune veille : entrer au catalogue un outil qui
+existe et le câbler, ce qui est le métier de PlugArr. À vérifier avant de s'y
+engager : Uptime Kuma n'expose pas d'API REST documentée pour créer des sondes,
+donc le câblage passerait par socket.io ou par l'écriture directe de son SQLite,
+deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
+
+### Ce qu'il reste à faire
+
+- [ ] Publier une image `plugarr` multi-architecture, épinglée, avant tout le
+      reste.
+- [ ] Une commande `plugarr veille` servant une page en LECTURE SEULE : aucun
+      bouton d'action, réemploi de `status_payload` et des clients existants.
+- [ ] Niveau 1, sans socket : état des services par leurs propres API, IP
+      publique par le serveur de contrôle de Gluetun — déjà interrogé par
+      `vpncheck` —, disque par montages en lecture seule, débits par les clients
+      de téléchargement.
+- [ ] Niveau 2, socket en lecture seule derrière un proxy (POST refusé), en
+      option explicite : CPU et RAM par conteneur, boucles de redémarrage, kills
+      OOM, journaux. Son coût s'écrit à l'écran, pas dans un fichier :
+      `GET /containers/{id}/json` rend les variables d'environnement RÉSOLUES —
+      vérifié — donc la clé privée WireGuard, les clés API et les mots de passe
+      que `.env` est censé garder.
+- [ ] N'exposer la veille qu'authentifiée. Le mot de passe existe déjà
+      (`adminauth`) : c'est le même modèle, pas un second.
+- [ ] L'entrer dans l'assistant, avec le choix des racines à surveiller. Aucune
+      option réservée à la ligne de commande.
+- [ ] Trancher le rafraîchissement : 5 secondes comme la console, ou un flux SSE.
+      Le seul vrai temps réel côté Docker reste `/events`, et il exige le socket.
+- [ ] Tout remesurer sur Linux natif : les relevés ci-dessus viennent de Docker
+      Desktop.
+
+---
+
 ## Choisir le client de téléchargement
 
 Demandé à l'usage : « lorsqu'on met plusieurs logiciels de téléchargement,
 demander vers lequel on crée le lien ».
 
-Aujourd'hui PlugArr ne demande rien, et ce n'est pas neutre. Le plan de câblage
-déclare **chaque** client dans **chaque** *arr, tous avec `priority: 1`. Or la
+PlugArr ne demandait rien, et ce n'était pas neutre. Le plan de câblage
+déclarait **chaque** client dans **chaque** *arr, tous avec `priority: 1`. Or la
 documentation de Sonarr est explicite : « Round-Robin is used for clients of the
 same type (torrent/usenet) that have the same priority ». Deux clients torrent
-installés, et les épisodes partent donc **alternativement** dans l'un et dans
-l'autre. Personne ne l'a demandé, et rien ne le dit.
+installés, et les épisodes partaient donc **alternativement** dans l'un et dans
+l'autre. Personne ne l'avait demandé, et rien ne le disait.
 
 Le cas se présente précisément quand quelqu'un installe qBittorrent pour son
 interface `qui` ou Flood tout en gardant Transmission, ou l'inverse : il a un
 client principal en tête, et PlugArr en fabrique deux à égalité.
 
-Ce qu'il reste à faire :
+**Livré, prêt pour la prochaine version.** Vérifié en CI sur un vrai Sonarr,
+après le second passage de câblage : qBittorrent à 1, Transmission à 2.
 
-- [ ] Demander le client **préféré** dans l'assistant, seulement quand plusieurs
+Où en est chaque point :
+
+- [x] Demander le client **préféré** dans l'assistant, seulement quand plusieurs
       clients du même protocole sont cochés. Une question qui ne se pose que
       lorsqu'elle a un sens.
-- [ ] Le traduire en priorités plutôt qu'en suppressions : le client choisi passe
+- [x] Le traduire en priorités plutôt qu'en suppressions : le client choisi passe
       à `priority: 1`, les autres descendent. Ils restent déclarés et
       fonctionnels, ce qui préserve le repli et n'efface rien d'une installation
       existante.
 - [ ] Poser la même question pour l'Usenet dès que Deluge ou un second client
       Usenet entrera : le round-robin ne joue qu'entre clients de même protocole,
-      donc SABnzbd à côté de qBittorrent ne pose pas ce problème.
+      donc SABnzbd à côté de qBittorrent ne pose pas ce problème. La règle
+      regroupe déjà par protocole : il suffira d'inscrire le nouveau client dans
+      `downloadclients.ORDRE_AUTO`. Reste ouvert tant qu'aucun second client
+      Usenet n'existe pour le vérifier.
 - [ ] Étudier l'affectation **par indexeur**, que Prowlarr et les *arr offrent en
       option avancée (« Download Client - Select and specify which download
       client is used for grabs from this indexer »). C'est plus fin que le choix

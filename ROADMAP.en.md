@@ -5,7 +5,7 @@
 Where PlugArr stands, what comes next, and why. Kept up to date after every
 working session.
 
-**Last updated: 12 September 2026** — published version: **0.8.0**
+**Last updated: 13 September 2026** — published version: **0.8.0**
 
 ---
 
@@ -149,6 +149,9 @@ startup shipped in 0.1.9. What protects you today: `chmod 600`, a generated
 | **VPN incoming port** | ✅ shipped in 0.8.0 | Four providers out of twenty-five allow it, and PlugArr then turns it on without asking: without it the client downloads perfectly well but only shares halfway. Three traps handled, none assumed — the wizard only offers locations that provide one (Gluetun refuses to **start** otherwise: at PIA it is the 55 US regions that are left out), a script follows the port when the provider changes it (Proton went from 45270 to 48406 between two days, with nothing saying so), and the check **reads the value back** from the client. Verdict kept separate from the protection one: a desynchronised port costs sharing, not exposure. |
 | **Try the VPN configuration** | ✅ shipped in 0.8.0 | A throwaway Gluetun brought up with exactly what was entered, before building the stack. It accepts only **proof of exit**: a well-formed but wrong key "establishes" itself without a single packet going through, and Gluetun then returns an empty public address. Never blocking, but three refusals are certain and named — location with no server, unreadable key, rejected OpenVPN credentials. |
 | **OpenVPN mode proven** | ✅ shipped in 0.8.0 | Until then only WireGuard had been tried for real. Verified on 2026-09-09 against a real ProtonVPN account: tunnel in 14 s, incoming port obtained. Three defects found on that occasion — `AUTH_FAILED` was not recognised, the 45 s wait had been measured on WireGuard while OpenVPN waits a firm 60 s on a silent server, and the timeout message spoke of a "key" in a mode where you enter a username. |
+| **Choosing the download client** | ✅ ready, to be released | Two torrent clients installed, and the *arr **alternated** between them: all were declared at `priority: 1`, and Sonarr then applies round-robin. The preferred client goes to 1, the others move down and stay as fallback; qBittorrent by default, as for the incoming port. Asked in the web wizard, the TUI and through `--client-prefere`, only when it means something. An existing installation is only corrected in the faulty state, never over a manual setting. Verified in CI against a real Sonarr after the second wiring pass: qBittorrent at 1, Transmission at 2. `stack.yml` moves to version 3, so that an older version refuses the file instead of erasing this choice. |
+| **Duplicate ports within the stack** | ✅ ready, to be released | The preflight probed the **host**, and therefore could not see two PlugArr services on the same port: both "free", then `docker compose up` failed for the whole stack. Reproduced with a Silo stack then Jellyfin added through the web wizard, which published 8096 twice. The cause is fixed, and a blocking check now compares the plan with itself. |
+| **Image download** | ✅ ready, to be released | Three attempts instead of one. Recorded in CI: a registry drop (`read: connection reset by peer` at lscr.io) failed the whole installation. `pull` is idempotent, and a definitive error still surfaces with its message. |
 
 ---
 
@@ -200,6 +203,7 @@ a command you have to launch.
 | Rotate an API key, with re-wiring | ✅ |
 | Add a service missing from the installation | ✅ |
 | Automatic startup, without launching a command | ✅ 0.1.9 |
+| Continuous watch, in a read-only container | ⬜ under study |
 | Gluetun on the page: status, restart, update, server change | ⬜ to do |
 | Console translated into English | ⬜ to do |
 
@@ -271,7 +275,8 @@ has to create, start and recreate containers, which means `POST
 can mount the host's root and run as root: a socket proxy that allows those two
 calls locks nothing away, and without them the console is useless. Locking it
 inside one would therefore mean exposing an all-powerful service on the network
-for nothing in return.
+for nothing in return. That holds for WRITING; reading fits inside a
+container at no risk — see "Continuous watch, in a container" below.
 
 So it runs on the host, under the user's account, on `127.0.0.1`, and starts on
 its own with `plugarr autostart`. The convenience sought is the same. And because
@@ -281,33 +286,144 @@ rate-limited attempts.
 
 ---
 
+## Continuous watch, in a container
+
+Requested in use: "to monitor PlugArr, a container that is always up, in real
+time", with disk space, RAM, CPU, GPU and bandwidth on the page.
+
+**Watching is not administering, and that is the whole difference.** The refusal
+above is about writing: create, start, recreate. Reading needs none of those
+rights, and can therefore live in a container. The console keeps its buttons on
+the host; the watch would be a second service, read-only, unable to stop
+anything.
+
+**What the container actually buys.** Not "always up": `plugarr autostart`
+already launches the console at every login, and the page refreshes every 5
+seconds (`dashboard.py`, `setInterval(rafraichir, 5000)`). The gain lies
+elsewhere, and it is real: `mecanisme()` only knows Windows and user systemd, and
+returns "none" everywhere else. On a NAS where nobody logs in — Unraid, Synology,
+a BSD — there is nothing at all today. A container with `restart: unless-stopped`
+survives a reboot with no session, and can be consulted from a phone.
+
+### The requested measurements, one by one
+
+Measured on 12 September 2026, on Docker Desktop 29.7.2 (Windows, Linux engine).
+Native Linux is the normal case and still has to be measured again on the bench.
+
+- **Disk space: yes, and exact.** `df` on a bind mount returns the host disk's
+  figures, not the image's: `C:\ 952.2G, 326.7G available` seen from inside the
+  container, against 326.7 GB free reported by Windows at the same moment. Each
+  watched root has to be mounted read-only; PlugArr already knows them
+  (`layout.py`: torrents, usenet, media library, configuration). Several disks
+  want several mounts, nothing can be guessed from the inside.
+- **RAM: the figure would be wrong on Windows.** `/proc/meminfo` is not
+  namespaced, so a container reads the host's values there — on Linux. On Docker
+  Desktop that host is the WSL2 virtual machine: 15.2 GiB measured in the
+  container against 31.1 GiB on the machine, half of it. To be shown on Linux, to
+  be omitted or labelled as such elsewhere.
+- **CPU: the count is right, the load only half so.** `nproc` returns 24 in the
+  container, exactly the machine's 24 logical processors. But the usage read from
+  `/proc/stat` is the VM's under Docker Desktop: it ignores whatever Windows does
+  outside.
+- **Per service, without the socket: possible, with one catch.** Mounting
+  `/sys/fs/cgroup` read-only lets an unprivileged container read
+  `docker/<id>/memory.current` and `cpu.stat` for EVERY container — verified.
+  What the cgroup does not give is the name: there are only identifiers, and
+  tying them to services needs either the socket or a mapping file written by the
+  host, which goes stale on every recreation. That is the strongest argument for
+  level 2: `docker stats` returns the name outright.
+- **Bandwidth: not where you look for it.** `/proc/net/dev`, by contrast, IS
+  namespaced per network namespace. On a bridge network the container only sees
+  `lo` and its own `eth0` — verified. With `network_mode: host` it sees the host's
+  `eth0` and every `veth`, hence the machine total; but it then leaves the stack's
+  network, and a `veth` does not say which container it belongs to: the same
+  mapping problem. The useful bandwidth here is elsewhere — the clients publish it
+  themselves, and PlugArr already talks to them. Routes to confirm against a real
+  instance before believing them: `/api/v2/transfer/info` on qBittorrent,
+  `session-stats` on Transmission, the queue on SABnzbd.
+- **GPU: three implementations, none portable, and nothing to measure today.**
+  NVIDIA requires `nvidia-container-toolkit` on the host and a device
+  reservation, then NVML inside the container. AMD is the cheapest:
+  `gpu_busy_percent` in sysfs, one file to read. Intel is the hardest, usage
+  going through the `i915` PMU, hence `CAP_PERFMON`; sysfs only gives the
+  frequency. Under Docker Desktop, nothing. Above all: **PlugArr configures no
+  GPU access at all** — `compose.py` only exposes `/dev/net/tun`, for Gluetun.
+  Measuring hardware the stack does not use would be fitting the gauge before the
+  engine. Jellyfin's hardware transcoding comes first, its measurement after.
+
+### The entry cost, which is not on the page
+
+**There is no PlugArr image.** The package installs through
+`pipx install git+https://…`, it is not on PyPI, and `packaging/` only produces a
+PyInstaller executable. A watch in a container therefore wants a published image
+first, built by CI, in two architectures — `amd64` and `arm64`, without which ARM
+NAS boxes stay outside — and pinned like everything else. That is the first line
+of spending, before a single line of watching.
+
+The other road is to write no watch at all: put an existing tool in the catalogue
+and wire it, which is PlugArr's job. To verify before committing: Uptime Kuma
+exposes no documented REST API for creating monitors, so the wiring would go
+through socket.io or through writing its SQLite directly, two fragile roads.
+Dozzle reads logs and asks for the socket.
+
+### What remains to be done
+
+- [ ] Publish a multi-architecture, pinned `plugarr` image, before anything else.
+- [ ] A `plugarr veille` command serving a READ-ONLY page: no action buttons,
+      reusing `status_payload` and the existing clients.
+- [ ] Level 1, no socket: service status through their own APIs, public IP
+      through Gluetun's control server — already queried by `vpncheck` —, disk
+      through read-only mounts, throughput through the download clients.
+- [ ] Level 2, read-only socket behind a proxy (POST refused), as an explicit
+      option: CPU and RAM per container, restart loops, OOM kills, logs. Its cost
+      belongs on the screen, not in a file: `GET /containers/{id}/json` returns
+      the RESOLVED environment variables — verified — hence the WireGuard private
+      key, the API keys and the passwords `.env` is meant to keep.
+- [ ] Expose the watch only behind authentication. The password already exists
+      (`adminauth`): same model, not a second one.
+- [ ] Put it in the wizard, with the choice of which roots to watch. No option
+      reserved for the command line.
+- [ ] Settle the refresh: 5 seconds like the console, or an SSE stream. The only
+      true real time on the Docker side remains `/events`, and it requires the
+      socket.
+- [ ] Measure it all again on native Linux: the figures above come from Docker
+      Desktop.
+
+---
+
 ## Choosing the download client
 
 Requested in use: "when you install several download clients, ask which one the
 link is created towards".
 
-Today PlugArr asks nothing, and that is not neutral. The wiring plan declares
+PlugArr asked nothing, and that was not neutral. The wiring plan declared
 **every** client in **every** *arr, all with `priority: 1`. Sonarr's own
 documentation is explicit: "Round-Robin is used for clients of the same type
 (torrent/usenet) that have the same priority". Install two torrent clients and
-episodes therefore land **alternately** in one and the other. Nobody asked for
-that, and nothing says it is happening.
+episodes therefore landed **alternately** in one and the other. Nobody had asked
+for that, and nothing said it was happening.
 
 The case arises precisely when someone installs qBittorrent for its `qui` or
 Flood interface while keeping Transmission, or the other way round: they have a
 main client in mind, and PlugArr builds two of them as equals.
 
-What remains to be done:
+**Delivered, ready for the next version.** Verified in CI against a real Sonarr,
+after the second wiring pass: qBittorrent at 1, Transmission at 2.
 
-- [ ] Ask for the **preferred** client in the wizard, only when several clients
+Where each point stands:
+
+- [x] Ask for the **preferred** client in the wizard, only when several clients
       of the same protocol are selected. A question that is only asked when it
       means something.
-- [ ] Express it as priorities rather than as removals: the chosen client goes to
+- [x] Express it as priorities rather than as removals: the chosen client goes to
       `priority: 1`, the others move down. They stay declared and working, which
       keeps the fallback and erases nothing from an existing installation.
 - [ ] Ask the same question for Usenet as soon as a second Usenet client appears:
       round-robin only applies between clients of the same protocol, so SABnzbd
-      next to qBittorrent does not raise this problem.
+      next to qBittorrent does not raise this problem. The rule already groups
+      by protocol: the new client will only need to be listed in
+      `downloadclients.ORDRE_AUTO`. Stays open until a second Usenet client
+      exists to verify it.
 - [ ] Study **per-indexer** assignment, which Prowlarr and the *arr offer as an
       advanced option ("Download Client - Select and specify which download
       client is used for grabs from this indexer"). It is finer than a global

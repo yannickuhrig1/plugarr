@@ -95,9 +95,21 @@ DroppedNeedle.
 
 ## Next up
 
-**Shelfarr and Shelfmark**, the last two services on the list. Their digests are
-already recorded, and Audiobookshelf unblocks them: they deliver into its
-libraries.
+**0.10.0: the watch and qBittorrent themes.** Two requests made in use, studied
+below, and each has a first point to settle before writing a line:
+
+- **the watch**: the study wants a container, hence first a PlugArr image
+  published for two architectures. Level 1 (service status, the VPN's public
+  IP, disk, client throughput) can also live in the console, on the host, with
+  no image. See "Continuous watch, in a container";
+- **qBittorrent themes**: VueTorrent and theme.park go through linuxserver mods
+  that are not pinned like the rest of the catalogue (VueTorrent recorded at
+  `:latest`, theme.park at `:<app>`). A pinnable version has to be found, or
+  the reason there is none written down, before offering them. See
+  "Customising the interfaces".
+
+**Shelfarr and Shelfmark** follow: their digests are already recorded, and
+Audiobookshelf unblocks them, since they deliver into its libraries.
 
 ### What the pack update settled — shipped in 0.6.0
 
@@ -205,7 +217,7 @@ a command you have to launch.
 | Rotate an API key, with re-wiring | ✅ |
 | Add a service missing from the installation | ✅ |
 | Automatic startup, without launching a command | ✅ 0.1.9 |
-| Continuous watch, in a read-only container | ⬜ under study |
+| Continuous watch, in a read-only container | ⬜ planned for 0.10.0 |
 | Gluetun on the page: status, restart, update, server change | ⬜ to do |
 | Console translated into English | ⬜ to do |
 
@@ -293,6 +305,11 @@ rate-limited attempts.
 Requested in use: "to monitor PlugArr, a container that is always up, in real
 time", with disk space, RAM, CPU, GPU and bandwidth on the page.
 
+**Planned for 0.10.0.** The first point to settle is the scope: a container
+first requires a published image, whereas level 1 fits in the console, on the
+host, without one. The former serves NAS boxes where nobody logs in, the
+latter needs no image.
+
 **Watching is not administering, and that is the whole difference.** The refusal
 above is about writing: create, start, recreate. Reading needs none of those
 rights, and can therefore live in a container. The console keeps its buttons on
@@ -370,6 +387,8 @@ Dozzle reads logs and asks for the socket.
 
 ### What remains to be done
 
+- [ ] Settle the scope for 0.10.0: a watch in a container, which goes through
+      the image, or level 1 first in the console, on the host.
 - [ ] Publish a multi-architecture, pinned `plugarr` image, before anything else.
 - [ ] A `plugarr veille` command serving a READ-ONLY page: no action buttons,
       reusing `status_payload` and the existing clients.
@@ -443,6 +462,10 @@ putting it anywhere else would have nothing to settle.
 Requested in use: being able to replace a service's web interface, or give it a
 theme, without leaving PlugArr.
 
+**Planned for 0.10.0, on qBittorrent first**: VueTorrent and a theme.park
+theme. The other services will follow the same mechanism once this one is
+proven.
+
 Two mechanisms, both carried by linuxserver.io mods — therefore limited to the
 catalogue's `lscr.io/...` images. Gluetun, Recyclarr, Seerr and Silo are not
 among them and will stay out.
@@ -472,6 +495,18 @@ init. Three consequences, none of them harmless:
 The honest route is probably to pin the mod by tag like everything else, to offer
 it as an explicit option rather than a default, and to write in the wizard what
 it implies. Not to enable it silently because it looks nicer.
+
+### What remains to be done for 0.10.0
+
+- [ ] Find a pinnable version of each mod, or write down why there is none.
+- [ ] Measure what qBittorrent does when it restarts without access to GitHub,
+      mod by mod.
+- [ ] Check VueTorrent and theme.park together on the same qBittorrent
+      (`mod1|mod2`).
+- [ ] Set `WebUI\AlternativeUIEnabled` and `WebUI\RootFolder` when pre-seeding
+      `qBittorrent.conf`.
+- [ ] Offer it in the web wizard and the TUI, as an explicit option, with what it
+      implies written on screen. No option reserved for the command line.
 
 ---
 

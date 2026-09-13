@@ -463,6 +463,56 @@ def test_demo_post_install_indexers_report_and_access_page(server):
     assert added["ok"] and public["name"] in added["configured"]
 
 
+def test_server_texts_follow_the_language_chosen_in_the_page(server):
+    """La langue de l'assistant web se choisit DANS la page, et change a tout moment.
+
+    Le serveur traduisait avec la langue du processus : en passant la page en
+    anglais, les notes du catalogue, les etapes de la demonstration et le
+    rapport final restaient en francais. Constate en capturant l'assistant pour
+    Discord le 13 septembre 2026. Le serveur envoie donc chaque texte dans les
+    deux langues, sans jamais basculer celle du processus : une installation
+    tourne dans un autre fil pendant ce temps.
+    """
+    from plugarr import i18n
+    from plugarr.traductions import EN
+
+    srv, client = server
+    before = i18n.langue()
+    note = "Pivot du cablage : alimente les autres en indexeurs."
+
+    prowlarr = next(
+        s for s in client.get("/api/bootstrap").json()["catalog"] if s["id"] == "prowlarr"
+    )
+    assert prowlarr["notes_i18n"] == {"fr": note, "en": EN[note]}
+
+    form = fields(srv.state)
+    form.update(services=["prowlarr", "sonarr"])
+    plan = client.post("/api/validate", json=form).json()
+    assert client.post(
+        "/api/install", json={"plan_id": plan["plan_id"], "confirm": True}
+    ).status_code == 200
+    srv.state.worker.join(timeout=5)
+
+    events = client.get("/api/progress").json()["events"]
+    results = [e for e in events if e["step_id"] and not e["started"]]
+    assert results
+    assert {e["message_i18n"]["en"] for e in results} == {
+        "Demonstration: simulated result, no real test."
+    }
+    assert {e["message_i18n"]["fr"] for e in results} == {
+        "Demonstration : resultat simule, aucun test reel."
+    }
+    phases = {e["phase_i18n"]["en"] for e in events if not e["step_id"]}
+    assert "Simulated wiring" in phases
+
+    report = client.get("/api/report").json()
+    assert report["next_steps_i18n"]["fr"][0] == (
+        "Prochaine etape : ajoutez vos indexeurs dans Prowlarr."
+    )
+    assert report["next_steps_i18n"]["en"][0] == "Next step: add your indexers in Prowlarr."
+    assert i18n.langue() == before
+
+
 def test_web_assets_cover_every_tui_stage():
     html = (webwizard.ASSETS / "wizard.html").read_text(encoding="utf-8")
     javascript = (webwizard.ASSETS / "wizard.js").read_text(encoding="utf-8")

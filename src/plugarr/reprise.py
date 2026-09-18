@@ -218,6 +218,13 @@ def appliquer(
         neuve.vpn = ancienne.vpn.model_copy(deep=True)
         reprise.reglages.append(t("VPN ({fournisseur})", fournisseur=ancienne.vpn.provider))
 
+    # Conserver le choix distant, seulement pour les services encore installes.
+    if "remote_access" not in imposes:
+        neuve.remote_access = ancienne.remote_access.model_copy(deep=True)
+        neuve.remote_access.services = [s for s in neuve.remote_access.services if neuve.enabled(s)]
+        if neuve.remote_access.mode == "https" and not neuve.remote_access.services:
+            neuve.remote_access.mode = "local"
+
     # Les identifiants, service par service. C'est ce qui evite d'annoncer un
     # mot de passe que le service refusera.
     for sid, instance in neuve.services.items():

@@ -85,6 +85,8 @@ const GRAPH_LABELS = {
 };
 
 const tr = key => (lang === 'en' ? EN : FR)[key] || FR[key] || key;
+Object.assign(EN, globalThis.PlugArrRemote?.english || {});
+FR.remote = 'Accès à distance'; EN.remote = 'Remote access';
 let token = new URLSearchParams(location.hash.slice(1)).get('token');
 try {
   if (token) sessionStorage.setItem('plugarr-wizard-token', token);
@@ -150,7 +152,7 @@ function scheduleGraph() {
 
 function setBusy(value) {
   busy = value;
-  $('next').disabled = value || (step === 0 && !startupReady) || (step === 4 && (!plan?.plan_id || !$('confirm').checked));
+  $('next').disabled = value || (step === 0 && !startupReady) || (step === 5 && (!plan?.plan_id || !$('confirm').checked));
   $('back').disabled = value;
   $('recheck').disabled = value;
 }
@@ -178,18 +180,19 @@ function translate() {
 
 function renderSteps() {
   $('steps').replaceChildren();
-  ['services','folders','vpn','quality','review','installation'].forEach((key, index) => {
+  ['services','folders','vpn','quality','remote','review','installation'].forEach((key, index) => {
     const item = E('li', undefined, index === step ? 'current' : index < step ? 'completed' : '');
     if (index === step) item.setAttribute('aria-current', 'step');
     item.append(E('span', index < step ? '✓' : String(index + 1).padStart(2, '0'), 'step-number'), E('span', tr(key), 'step-label'));
     $('steps').append(item);
   });
+  document.querySelectorAll('.step-panel .eyebrow').forEach((el, index) => { el.textContent = `${lang === 'fr' ? 'ÉTAPE' : 'STEP'} ${String(index + 1).padStart(2,'0')} / 07`; });
 }
 
 function updateButtons() {
-  $('back').hidden = step === 0 || step === 5;
-  $('footer').hidden = step === 5;
-  $('next').textContent = step === 4 ? tr(bootstrap.demo ? 'simulate' : 'install') : tr('next');
+  $('back').hidden = step === 0 || step === 6;
+  $('footer').hidden = step === 6;
+  $('next').textContent = step === 5 ? tr(bootstrap.demo ? 'simulate' : 'install') : tr('next');
   $('remember').closest('label').hidden = bootstrap.demo;
   setBusy(busy);
 }
@@ -203,8 +206,10 @@ function showStep(index) {
   updateButtons();
   const panel = document.querySelector(`.step-panel[data-step="${index}"]`);
   panel.insertBefore($('wiring-graph'), panel.children[3] || null);
+  $('wiring-graph').hidden = index === 4;
   if (index < 4) scheduleGraph();
   if (index === 3 && !templatesLoaded && !$('quality-controls').hidden) loadTemplates();
+  if (index === 4) globalThis.PlugArrRemote?.refresh(effective);
   document.querySelector(`.step-panel[data-step="${index}"] h1`)?.focus({preventScroll:true});
 }
 
@@ -312,6 +317,7 @@ function readVpnFields() {
 }
 
 function readFields() {
+  form.remote_access = globalThis.PlugArrRemote?.read(effective) || {mode:'local',domain:'',services:[]};
   for (const id of ['platform','project_name','data_root','config_root','username','host','timezone','language']) form[id] = $(id).value;
   form.ui_language = lang;
   form.vpn = readVpnFields();
@@ -470,6 +476,7 @@ function renderReview() {
   const target = $('review');
   target.replaceChildren();
   const grid = E('div', undefined, 'summary-grid');
+  grid.append(summaryBox(tr('remote'), plan.remote_access?.mode === 'https' ? `HTTPS · ${plan.remote_access.domain}` : plan.remote_access?.mode === 'tailscale' ? 'Tailscale' : 'Local'));
   for (const [label, value] of [
     [tr('projectName'), plan.project_name], [tr('projectPath'), plan.project_dir], [tr('address'), plan.host], [tr('vpn'), tr(plan.vpn ? 'vpnOn' : 'vpnOff')],
     ...(plan.sabnzbd_route ? [[tr('sabRoute'), tr(plan.sabnzbd_route === 'vpn' ? 'sabVpnShort' : 'sabDirectShort')]] : []),
@@ -629,6 +636,7 @@ async function testVpn() {
 
 function renderReport(report) {
   reportData = report;
+  globalThis.PlugArrRemote?.report(report);
   const rows = report.services.map(service => {
     const row = E('tr');
     row.append(E('th', service.name));
@@ -866,14 +874,15 @@ $('wizard').addEventListener('submit', async event => {
     if (step === 1) {
       for (const input of document.querySelectorAll('[data-step="1"] input, [data-step="1"] select')) if (!input.reportValidity()) return;
     }
-    if (step < 4) {
-      readFields(); showStep(step + 1); if (step === 4) await validate(); return;
+    if (step < 5) {
+      if (step === 4 && globalThis.PlugArrRemote && !globalThis.PlugArrRemote.valid()) return;
+      readFields(); showStep(step + 1); if (step === 5) await validate(); return;
     }
-    if (step === 4 && plan?.plan_id && $('confirm').checked) {
+    if (step === 5 && plan?.plan_id && $('confirm').checked) {
       setBusy(true);
       if ($('remember').checked && !bootstrap.demo) await api('/api/preference', {interface:'web'});
       await api('/api/install', {plan_id:plan.plan_id, confirm:true});
-      installed = true; showStep(5); poll();
+      installed = true; showStep(6); poll();
     }
   } catch (failure) { error(failure.message); }
   finally { setBusy(false); }
@@ -936,6 +945,7 @@ async function boot() {
     if (!token) throw new Error(tr('sessionMissing'));
     bootstrap = await api('/api/bootstrap');
     form = structuredClone(bootstrap.form);
+    globalThis.PlugArrRemote?.init(bootstrap, form, api, renderReport, () => lang);
     lang = form.ui_language;
     $('ui-language').value = lang;
     $('version').textContent = `v${bootstrap.version}`;
@@ -952,7 +962,7 @@ async function boot() {
     const progress = await api('/api/progress');
     if (progress.status !== 'idle') {
       startupReady = true;
-      showStep(5);
+      showStep(6);
       if (!renderProgress(progress)) poll();
     } else await checkStartup();
   } catch (failure) {

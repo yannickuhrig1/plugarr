@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from pydantic import BaseModel, Field, field_validator
 
 from .i18n import t
+from .remote_models import RemoteAccessConfig
 
 
 class Category(str, Enum):
@@ -388,6 +389,7 @@ class StackConfig(BaseModel):
     services: dict[str, ServiceInstance] = Field(default_factory=dict)
 
     vpn: VpnConfig = Field(default_factory=VpnConfig)
+    remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
 
     #: Template TRaSH choisi par service. Vide = celui par defaut de Recyclarr.
     recyclarr_templates: dict[str, str] = Field(default_factory=dict)

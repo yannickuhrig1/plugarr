@@ -593,6 +593,7 @@ acces-plugarr.html
 plugarr.log
 .plugarr-maintenance.json
 .plugarr-maintenance.tmp
+.plugarr-remote/
 backups/
 """
 

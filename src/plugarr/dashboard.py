@@ -343,7 +343,7 @@ def _paths(cfg: StackConfig) -> str:
     return rows
 
 
-def render(cfg: StackConfig, *, failed: int = 0, live: bool = False) -> str:
+def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_report=None, demo=False) -> str:
     """Rend la page.
 
     `live=False` produit le fichier statique ecrit apres l'installation.
@@ -453,7 +453,8 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False) -> str:
     if live:
         from .console_ui import enhance
         return enhance(page)
-    return page
+    from .mobile_access import append_to
+    return append_to(page, cfg, host, remote=remote_report, demo=demo)
 
 
 def write(cfg: StackConfig, target_dir: Path, *, failed: int = 0) -> Path:
@@ -547,6 +548,9 @@ _TEMPLATE = """<!doctype html>
   button.copy:hover {{ color: var(--text); }}
   table {{ width: 100%; border-collapse: collapse; background: var(--panel);
            border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }}
+  @media (max-width: 700px) {{
+    table {{ display: block; max-width: 100%; overflow-x: auto; }}
+  }}
   th, td {{ text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--line);
             font-size: .88rem; }}
   th {{ color: var(--muted); font-weight: 600; font-size: .78rem;

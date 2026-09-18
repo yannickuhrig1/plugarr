@@ -38,6 +38,7 @@ from . import (
     migrations,
     orchestrator,
     reprise,
+    remote_access,
     sauvegarde,
     vpnessai,
     vpnservers,
@@ -57,6 +58,7 @@ from .layout import (
     resolve_ids,
 )
 from .models import VPN_PROVIDERS, PlatformProfile, VpnConfig
+from .remote_models import RemoteAccessConfig
 from .runner import Check, check_docker
 
 ASSETS = Path(__file__).parent / "web"
@@ -82,6 +84,7 @@ class WizardInput(BaseModel):
     reprendre: bool = True
     reset_config: bool = False
     client_prefere: str = ""
+    remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
 
 
 class WizardState:
@@ -89,6 +92,8 @@ class WizardState:
         self.launch_project_dir = project_dir.resolve()
         self.project_dir = self.launch_project_dir
         self.demo = demo
+        self.remote_result = None
+        self.remote_worker = None
         self.lock = threading.RLock()
         self.changed = threading.Condition(self.lock)
         self.revision = 0
@@ -235,6 +240,7 @@ class WizardState:
                 "vpn": vpn,
                 "recyclarr_templates": cfg.recyclarr_templates if cfg else {},
                 "client_prefere": cfg.client_prefere if cfg else "",
+                "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
                 "reprendre": cfg is not None,
                 "reset_config": False,
             },
@@ -404,6 +410,9 @@ class WizardState:
             orchestrator.resolve_port_conflicts(cfg)
             if self.previous_project_dir is not None:
                 self.project_dir = self.previous_project_dir
+        cfg.remote_access = form.remote_access.model_copy(deep=True)
+        if any(not cfg.enabled(sid) for sid in cfg.remote_access.services):
+            raise ValueError("L’accès distant doit concerner des applications sélectionnées.")
         cfg.project_dir = self.project_dir
         return cfg
 
@@ -795,6 +804,8 @@ class WizardState:
                     "id": sid,
                     "name": catalog.get(sid).display_name,
                     "url": inst.url(self.cfg.host) if inst.has_web_ui else "",
+                    "remote_url": (self.remote_result or {}).get("urls", {}).get(sid, ""),
+                    "local_url": inst.url("192.0.2.50" if self.demo else dashboard.resolve_host(self.cfg)[0]) if inst.has_web_ui else "",
                     "username": inst.username or "-",
                     "password": inst.password or "-",
                     "api_key": inst.api_key or "-",
@@ -805,14 +816,44 @@ class WizardState:
             "env_path": str(self.project_dir / ".env"),
             "can_indexers": self.cfg.enabled("prowlarr"),
             "demo": self.demo,
+            "remote": self.remote_result or remote_access.summary(self.cfg, demo=self.demo),
+            "remote_managed": False if self.demo else (self.project_dir / ".plugarr-remote" / "compose.yml").is_file(),
         }
+
+    def remote_action(self, payload):
+        self._require_completed()
+        if payload.get("action") not in ("activate", "inspect", "deactivate"):
+            raise ValueError("Action distante inconnue.")
+        with self.lock:
+            if self.remote_worker and self.remote_worker.is_alive():
+                raise ValueError("Une opération d’accès distant est déjà en cours.")
+            if payload["action"] in ("activate", "deactivate") and payload.get("confirm") is not True:
+                raise ValueError("Confirmez l’activation de l’accès distant.")
+            self.remote_result = {**remote_access.summary(self.cfg, demo=self.demo), "status": "running", "message": "Configuration de l’accès distant en cours…"}
+            def work():
+                try:
+                    operation = {"activate": remote_access.activate, "inspect": remote_access.inspect, "deactivate": remote_access.deactivate}[payload["action"]]
+                    result = operation(self.cfg, self.project_dir, demo=self.demo)
+                    if not self.demo:
+                        path = self.project_dir / dashboard.FILENAME
+                        path.write_text(dashboard.render(self.cfg, remote_report=result), encoding="utf-8")
+                        path.chmod(0o600)
+                except Exception as exc:
+                    # Exception details can contain a sensitive authorization URL.
+                    message = str(exc) if isinstance(exc, ValueError) else "Vérification distante impossible. Vérifiez Docker, le réseau et les identifiants des applications."
+                    result = {**remote_access.summary(self.cfg, demo=self.demo), "status": "error", "message": self.redact(message)}
+                with self.lock:
+                    self.remote_result = result
+            self.remote_worker = threading.Thread(target=work, daemon=False)
+            self.remote_worker.start()
+        return {"status": "running"}
 
     def access_page(self):
         self._require_completed()
         cfg = self.cfg.model_copy(deep=True)
         if self.demo and cfg.host == "localhost":
             cfg.host = "192.0.2.10"
-        return dashboard.render(cfg, live=False).encode("utf-8")
+        return dashboard.render(cfg, live=False, remote_report=self.remote_result, demo=self.demo).encode("utf-8")
 
     def close_resources(self):
         if self.indexer_client is not None:
@@ -930,6 +971,7 @@ class WizardState:
                 "project_name": cfg.project_name,
                 "project_dir": str(self.project_dir),
                 "host": cfg.host,
+                "remote_access": cfg.remote_access.model_dump(),
                 "puid": cfg.puid,
                 "pgid": cfg.pgid,
                 "ids_source": i18n.t(cfg.ids_source),
@@ -1207,6 +1249,7 @@ class WizardHandler(BaseHTTPRequestHandler):
             "/wizard-parity.css": ("wizard-parity.css", "text/css; charset=utf-8"),
             "/wizard.js": ("wizard.js", "text/javascript; charset=utf-8"),
             "/graph.js": ("graph.js", "text/javascript; charset=utf-8"),
+            "/remote.js": ("remote.js", "text/javascript; charset=utf-8"),
             "/graph.css": ("graph.css", "text/css; charset=utf-8"),
         }
         if not self.allowed(authenticated=route not in assets):
@@ -1336,6 +1379,8 @@ class WizardHandler(BaseHTTPRequestHandler):
                 result = state.validate(body)
             elif route == "/api/install":
                 result = state.start(body)
+            elif route == "/api/remote":
+                result = state.remote_action(body)
             elif route == "/api/preference":
                 if state.demo:
                     raise ValueError("Les preferences ne sont pas modifiees en demonstration.")
@@ -1361,6 +1406,7 @@ class WizardHandler(BaseHTTPRequestHandler):
                     state.active_step = None
                     state.deployed = False
                     state.cfg = None
+                    state.remote_result = None
                     state.reprise = None
                     state.reset_candidates = []
                     state.reset_requested = False
@@ -1373,7 +1419,7 @@ class WizardHandler(BaseHTTPRequestHandler):
                 result = state.open_admin()
             elif route == "/api/close":
                 with state.lock:
-                    if state.status == "running":
+                    if state.status == "running" or (state.remote_worker and state.remote_worker.is_alive()):
                         raise ValueError("Attendez la fin de l'installation avant de fermer.")
                     state.result = 0
                 self.respond({"ok": True})
@@ -1448,6 +1494,8 @@ def run_web(project_dir: Path, *, port=0, open_page=True, demo=False):
             server.state.changed.notify_all()
         if server.state.worker:
             server.state.worker.join()
+        if server.state.remote_worker:
+            server.state.remote_worker.join()
         if server.state.admin_server:
             server.state.admin_server.shutdown()
             server.state.admin_server.server_close()

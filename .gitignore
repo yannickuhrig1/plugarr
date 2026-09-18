@@ -45,3 +45,4 @@ backups/
 .venv-check/
 # Etat genere contenant les identifiants de la pile.
 stack.yml
+.plugarr-remote/

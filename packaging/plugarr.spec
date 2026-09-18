@@ -50,6 +50,7 @@ a = Analysis(
         (str(SRC / "plugarr" / "web" / "wizard-profile.css"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "wizard-parity.css"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "wizard.js"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "remote.js"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "graph.js"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "admin-graph.js"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "graph.css"), "plugarr/web"),

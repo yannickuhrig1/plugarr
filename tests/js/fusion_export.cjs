@@ -71,13 +71,14 @@ const sauvegarde=R.zipStored([['com.kevinforeman.nzb360_preferences.xml',R.javaP
   await assert.rejects(()=>R.inspectNzb360Backup(R.zipStored([['autre.txt',new Uint8Array([1])]])));
   assert.equal(base.activeProfile,'*','profil Default par defaut');
 
-  // Emplacement torrent unique, deuxieme profil actif. servers.xml reprend la
-  // structure relevee (HashMap -> HashSet {"000Default*","001test"}) : illisible
-  // par readJavaPreferences, il doit etre recopie tel quel.
+  // Emplacement torrent unique, deuxieme profil actif. servers.xml reprend les
+  // octets releves (HashMap -> HashSet {"000Default*","001test"}), recopies
+  // tels quels par la fusion dans Default.
   const profils=Uint8Array.from(Buffer.from(
     'aced0005737200116a6176612e7574696c2e486173684d61700507dac1c31660d103000246000a6c6f6164466163746f724900097468726573686f6c6478703f40000000000001770800000002000000'
     +'0174000773657276657273737200116a6176612e7574696c2e48617368536574ba44859596b8b7340300007870770c000000103f4000000000000274000b30303044656661756c742a740007303031746573747878','hex'));
-  assert.throws(()=>R.readJavaPreferences(profils));
+  assert.deepEqual(entries(R.readJavaPreferences(profils)),{servers:{t:'set',v:['000Default*','001test']}},'HashSet lu');
+  assert.deepEqual([...R.javaPreferences(Object.fromEntries(R.readJavaPreferences(profils))).slice(-43)],[...profils.slice(-43)],'HashSet reecrit comme Java');
   const avecTransmission=R.zipStored([
     ['com.kevinforeman.nzb360_preferences.xml',R.javaPreferences({...utilisateur,torrent_client_preference:'transmission',
       torrent_server_enabled_preference:true,torrent_server_primary_connectionstring_preference:'http://192.0.2.9:9091'})],
@@ -100,6 +101,30 @@ const sauvegarde=R.zipStored([['com.kevinforeman.nzb360_preferences.xml',R.javaP
   assert.deepEqual([...remplaceTorrent.replaced],['qbittorrent']);
   const prefsQb=(await R.inspectNzb360Backup(remplaceTorrent.bytes)).preferences;
   assert.equal(prefsQb.get('torrent_client_preference'),'qbittorrent');assert.equal(prefsQb.get('torrent_username'),'essai');
+
+  // Profil separe « PlugArr » : rien n'est remplace dans les profils existants.
+  const profil=R.mergeNzb360Profile(base2,avecLidarr,'local');
+  assert.deepEqual(plain(profil.profile),{id:'002',name:'PlugArr',updated:false,others:['Default','test']});
+  assert.deepEqual([...profil.added],['sonarr','radarr','qbittorrent','lidarr']);
+  const fichiersProfil=await R.readZipFiles(profil.bytes);
+  for(const [nom,contenu] of origine)if(nom!=='servers.xml')
+    assert.deepEqual([...fichiersProfil.find(([n])=>n===nom)[1]],[...contenu],`${nom} recopie tel quel`);
+  assert.deepEqual(entries(R.readJavaPreferences(fichiersProfil.find(([n])=>n==='servers.xml')[1])),
+    {servers:{t:'set',v:['000Default*','001test','002PlugArr']}});
+  const reglagesProfil=R.readJavaPreferences(fichiersProfil.find(([n])=>n==='002.xml')[1]);
+  assert.equal(reglagesProfil.get('lidarr_apikey_preference'),'CLE-LIDARR');assert.equal(reglagesProfil.get('torrent_client_preference'),'qbittorrent');
+  assert.equal(reglagesProfil.has('version'),false,'un profil ne porte que ses services');
+  const encore2=R.mergeNzb360Profile(await R.inspectNzb360Backup(profil.bytes),data,'local');
+  assert.deepEqual(plain(encore2.profile),{id:'002',name:'PlugArr',updated:true,others:['Default','test']},'mis a jour, pas duplique');
+  // Sauvegarde sans profil : Default est ajoute a la liste, PlugArr prend 001.
+  const sansProfil=R.mergeNzb360Profile(base,data,'local');
+  assert.deepEqual(plain(sansProfil.profile),{id:'001',name:'PlugArr',updated:false,others:['Default']});
+  assert.deepEqual(entries(R.readJavaPreferences((await R.readZipFiles(sansProfil.bytes)).find(([n])=>n==='servers.xml')[1])),
+    {servers:{t:'set',v:['000Default*','001PlugArr']}});
+  // Liste de profils incomprise : refusee plutot que reecrite.
+  const bizarre=await R.inspectNzb360Backup(R.zipStored([['com.kevinforeman.nzb360_preferences.xml',R.javaPreferences(utilisateur)],
+    ['servers.xml',R.javaPreferences({servers:'pas un ensemble'})]]));
+  assert.throws(()=>R.mergeNzb360Profile(bizarre,data,'local'));
 
   // -- qbRemote : fusion -------------------------------------------------------------
   const serveurs=[{id:4,name:'Seedbox',host:'seedbox.example.test',password:'MDP-UTILISATEUR'},{id:5,name:'Maison',host:'192.0.2.9'}];
@@ -125,7 +150,7 @@ const sauvegarde=R.zipStored([['com.kevinforeman.nzb360_preferences.xml',R.javaP
   const enClair=R.zipStored([['servers.json',new TextEncoder().encode(JSON.stringify(serveurs))]]);
   const depuisClair=await R.mergeQbRemote(enClair,'nouveau',data,'local');
   assert.deepEqual(Object.keys(readAesZip(depuisClair.bytes,'nouveau')),['manifest.json','servers.json']);
-  console.log('fusion : flux Java de reference, nzb360 (garde, ajoute, remplace, emplacement torrent, profils) et qbRemote (chiffre, en clair, mise a jour) OK');
+  console.log('fusion : flux Java de reference, nzb360 (garde, ajoute, remplace, emplacement torrent, profils, profil PlugArr separe) et qbRemote (chiffre, en clair, mise a jour) OK');
 })().catch(error=>{console.error(error);process.exit(1);});
 
 // Dechiffreur WinZip AES independant de remote.js (node:crypto).

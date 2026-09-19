@@ -193,3 +193,29 @@ def test_merge_with_user_backups_keeps_everything_else():
     subprocess.run(["node", "tests/js/fusion_export.cjs"],
                    cwd=Path(__file__).resolve().parent.parent,
                    check=True, capture_output=True, text=True)
+
+
+def test_nzb360_export_is_read_back_by_a_real_jvm(tmp_path):
+    """L'export nzb360 (services, bascule Wi-Fi, profil PlugArr separe) relu par
+    `ObjectInputStream` dans une JVM independante, donnees fictives. Sans Java,
+    seule la partie Node tourne."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    if not shutil.which("node"):
+        pytest.skip("Node requis pour l'export nzb360")
+    racine = Path(__file__).resolve().parent.parent
+    sortie = subprocess.run(["node", "tests/js/nzb360_export.cjs"], cwd=racine,
+                            check=True, capture_output=True, text=True).stdout
+    dossier = sortie.strip().splitlines()[-1]
+    try:
+        if not (shutil.which("javac") and shutil.which("java")):
+            pytest.skip("JDK absent : relecture Java non faite")
+        subprocess.run(["javac", "-encoding", "UTF-8", "-d", str(tmp_path), "tests/Nzb360ExportCheck.java"],
+                       cwd=racine, check=True, capture_output=True, text=True)
+        verdict = subprocess.run(["java", "-cp", str(tmp_path), "Nzb360ExportCheck", dossier],
+                                 cwd=racine, check=True, capture_output=True, text=True).stdout
+        assert "JVM:" in verdict
+    finally:
+        shutil.rmtree(dossier, ignore_errors=True)

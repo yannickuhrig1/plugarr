@@ -44,5 +44,15 @@ const qbFirst=build({services:[...services,...extra]},'local');assert.equal(qbFi
 fs.writeFileSync(path.join(root,'qb-first.zip'),qbFirst.bytes);
 assert.equal(build({services:[{...extra[0],api_key:'-'}]},'local').count,0);
 assert.equal(build({services:[{...extra[2],password:''}]},'local').count,0);
-console.log(root);
+// Separate PlugArr profile next to an existing one (servers.xml HashSet, 002.xml).
+(async()=>{
+  const context2={URL,Date,TextEncoder,TextDecoder,Blob,Response,CompressionStream,DecompressionStream,Math,JSON,Map,Set,BigInt,DataView,Uint8Array,ArrayBuffer,Error,Object,Number,String,Array};
+  vm.createContext(context2);vm.runInContext(fs.readFileSync('src/plugarr/web/remote.js','utf8'),context2);
+  const R=context2.PlugArrRemote;
+  const base=await R.inspectNzb360Backup(R.zipStored([['com.kevinforeman.nzb360_preferences.xml',R.javaPreferences({version:'24.4.1'})],
+    ['nzb360prefs.xml',R.javaPreferences({version:'24.4.1'})],['servers.xml',R.javaPreferences({servers:{t:'set',v:['000Default*','001test']}})],
+    ['001.xml',R.javaPreferences({})]]));
+  fs.writeFileSync(path.join(root,'profile.zip'),R.mergeNzb360Profile(base,{services:[services[0],...extra]},'local').bytes);
+  console.log(root);
+})().catch(e=>{console.error(e);process.exit(1);});
 console.log('nzb360 export: mappings, network isolation, missing credentials, oversized fields and secret exclusions, Lidarr, Seerr and Transmission OK');

@@ -136,6 +136,10 @@ globalThis.PlugArrRemote = (() => {
       const nzbBaseLabel=el('label',text('Partir de ma sauvegarde nzb360 (facultatif) : ses réglages sont gardés, PlugArr y ajoute ses applications','Start from my nzb360 backup (optional): its settings are kept, PlugArr adds its applications'));
       const nzbBaseInput=el('input');nzbBaseInput.type='file';nzbBaseInput.id='nzb-export-base';nzbBaseInput.accept='.zip,application/zip';
       nzbBaseInput.addEventListener('change',loadNzbBase);nzbBaseLabel.append(nzbBaseInput);nzbBox.append(nzbBaseLabel);
+      const nzbTargetLabel=el('label',text('Où ajouter les applications PlugArr','Where to add the PlugArr services'));nzbTargetLabel.id='nzb-export-target-label';nzbTargetLabel.hidden=true;
+      const nzbTarget=el('select');nzbTarget.id='nzb-export-target';
+      for(const [value,fr,en] of [['profile','Dans un profil séparé « PlugArr » (rien n’est remplacé)','In a separate "PlugArr" profile (nothing is replaced)'],['default','Dans mon profil Default, service par service','In my Default profile, service by service']]){const o=el('option',text(fr,en));o.value=value;nzbTarget.append(o);}
+      nzbTarget.addEventListener('change',()=>{check.checked=false;renderNzbExport();});nzbTargetLabel.append(nzbTarget);nzbBox.append(nzbTargetLabel);
       const nzbConflicts=el('div');nzbConflicts.id='nzb-export-conflicts';nzbBox.append(nzbConflicts);
       const nzbNotice=el('p');nzbNotice.id='nzb-export-notice';nzbNotice.className='notice';nzbBox.append(nzbNotice);
       const consent=el('label');consent.className='inline-choice';const check=el('input');check.type='checkbox';check.id='nzb-export-confirm';
@@ -254,6 +258,15 @@ globalThis.PlugArrRemote = (() => {
         else if(value.t==='J'){view.setBigInt64(0,BigInt(value.v));out.push(...new Uint8Array(view.buffer));}
         else if(value.t==='F'){view.setFloat32(0,value.v);out.push(...new Uint8Array(view.buffer,0,4));}
         else{view.setFloat64(0,value.v);out.push(...new Uint8Array(view.buffer));}
+      }else if(value&&typeof value==='object'&&value.t==='set'){
+        // java.util.HashSet of strings: nzb360's list of server profiles
+        // (servers.xml). UID read in a 24.4.1 backup with two profiles.
+        if(!Array.isArray(value.v)||!value.v.every(v=>typeof v==='string'))throw new Error('Unsupported set');
+        let setCapacity=16;while(setCapacity*0.75<value.v.length)setCapacity*=2;
+        out.push(0x73);desc('java.util.HashSet','ba44859596b8b734',3,[]);
+        out.push(0x77,12);be(setCapacity,4);out.push(0x3f,0x40,0,0);be(value.v.length,4);
+        for(const item of value.v){out.push(0x74);utf(item);}
+        out.push(0x78);
       }else throw new Error('Unsupported preference type');
     }
     out.push(0x78);return Uint8Array.from(out);
@@ -318,6 +331,9 @@ globalThis.PlugArrRemote = (() => {
         if(objects.length%2)throw new Error('Bad map');
         value=new Map();
         for(let k=0;k<objects.length;k+=2){if(typeof objects[k]!=='string')throw new Error('Bad key');value.set(objects[k],objects[k+1]);}
+      }else if(d.name==='java.util.HashSet'){
+        if(!objects.every(o=>typeof o==='string'))throw new Error('Unsupported set');
+        value={t:'set',v:objects};
       }else if(d.name==='java.lang.Boolean')value=values.value;
       else{
         const t=Object.keys(JAVA_NUMBERS).find(k=>JAVA_NUMBERS[k][0]===d.name);
@@ -459,6 +475,37 @@ globalThis.PlugArrRemote = (() => {
     try{const app=files.find(([name])=>name==='nzb360prefs.xml');const value=app&&readJavaPreferences(app[1]).get('lastActiveProfile');if(typeof value==='string'&&value)activeProfile=value;}catch{}
     return {files,preferences,configured,activeProfile};
   }
+  // Separate "PlugArr" profile, next to the user's own: nothing is replaced.
+  // Format read in a 24.4.1 backup with a second profile: servers.xml maps
+  // "servers" to a HashSet of "<3 digits><name>" ("000Default*", "001test"),
+  // and profile 001 keeps its settings, same key names, in 001.xml. The
+  // Default profile stays in the main preferences file.
+  const NZB360_PROFILE=/^(\d{3})(.*)$/;
+  function nzbProfiles(base){
+    const file=base.files.find(([name])=>name==='servers.xml');
+    const map=file?readJavaPreferences(file[1]):new Map();
+    const set=map.get('servers');
+    if(set!==undefined&&!(set&&set.t==='set'))throw new Error('Unsupported servers.xml');
+    const entries=(set?set.v:[]).map(entry=>{const m=NZB360_PROFILE.exec(entry);if(!m)throw new Error('Unknown profile entry');return {entry,id:m[1],name:m[2].replace(/\*$/,''),main:m[2].endsWith('*')};});
+    return {map,entries};
+  }
+  function mergeNzb360Profile(base,data,network='local',ssid='',name='PlugArr'){
+    const {groups,omitted,switching}=nzb360Groups(data,network,ssid);
+    const {map,entries}=nzbProfiles(base);
+    // No profile yet: nzb360 lists Default itself once a second one exists.
+    if(!entries.length)entries.push({entry:'000Default*',id:'000',name:'Default',main:true});
+    const existing=entries.find(e=>!e.main&&e.name===name);
+    const id=existing?existing.id:String(Math.max(0,...entries.map(e=>Number(e.id)))+1).padStart(3,'0');
+    if(Number(id)>999)throw new Error('Too many profiles');
+    if(!existing)entries.push({entry:id+name,id,name,main:false});
+    map.set('servers',{t:'set',v:entries.map(e=>e.entry)});
+    const settings={};for(const group of Object.values(groups))Object.assign(settings,group);
+    const written=new Map([['servers.xml',javaPreferences(Object.fromEntries(map))],[`${id}.xml`,javaPreferences(settings)]]);
+    const files=base.files.map(([file,content])=>[file,written.get(file)??content]);
+    for(const [file,content] of written)if(!files.some(([f])=>f===file))files.push([file,content]);
+    return {bytes:zipStored(files),added:Object.keys(groups),omitted,switching:switching.size,
+      profile:{id,name,updated:Boolean(existing),others:entries.filter(e=>e.id!==id).map(e=>e.name)}};
+  }
   // Name shown for an occupied slot: the torrent slot names its client.
   function nzbSlotName(base,slot){
     if(slot!=='torrent')return NZB360_NAMES[slot];
@@ -486,6 +533,8 @@ globalThis.PlugArrRemote = (() => {
       if(!remote)$('nzb-export-network').value='local';
       const distant=$('nzb-export-network').value==='remote';
       $('nzb-export-ssid-label').hidden=!distant;
+      $('nzb-export-target-label').hidden=!nzbBase;
+      $('nzb-export-conflicts').hidden=Boolean(nzbBase)&&$('nzb-export-target').value==='profile';
       const result=nzbResult($('nzb-export-network').value,distant?$('nzb-export-ssid').value.trim():'');
       $('nzb-export-download').disabled=!result.count||!$('nzb-export-confirm').checked;
       if($('nzb-export-phone'))$('nzb-export-phone').disabled=$('nzb-export-download').disabled;
@@ -505,6 +554,13 @@ globalThis.PlugArrRemote = (() => {
   // Fresh export, or merge into the loaded backup: same notice, same button.
   function nzbResult(network,ssid){
     if(!nzbBase)return buildNzb360Export(current,network,ssid);
+    if($('nzb-export-target').value==='profile'){
+      const result=mergeNzb360Profile(nzbBase,current,network,ssid);
+      const {id,name,updated,others}=result.profile,names=result.added.map(sid=>NZB360_NAMES[sid]).join(', ');
+      return {...result,count:result.added.length,
+        merge:text(`Profil « ${name} » ${updated?'mis à jour':'ajouté'} (n° ${id}) à côté de vos profils ${others.join(', ')}, avec ${names}. Rien n’est remplacé dans vos profils. Dans nzb360, choisissez « ${name} » en bas du menu.`,
+          `"${name}" profile ${updated?'updated':'added'} (no. ${id}) next to your profiles ${others.join(', ')}, with ${names}. Nothing is replaced in your profiles. In nzb360, pick "${name}" at the bottom of the menu.`)};
+    }
     const result=mergeNzb360(nzbBase,current,network,ssid,nzbReplace());
     // added/replaced name PlugArr's services, kept names the user's slots.
     const names=list=>list.map(id=>NZB360_NAMES[id]).join(', ')||text('aucune','none');
@@ -521,6 +577,10 @@ globalThis.PlugArrRemote = (() => {
       try{
         if(file.size>1048576)throw new Error('Too large');
         nzbBase=await inspectNzb360Backup(new Uint8Array(await file.arrayBuffer()));
+        // A profile list this page cannot read: merge into Default only.
+        let profiles=true;try{nzbProfiles(nzbBase);}catch{profiles=false;}
+        const option=$('nzb-export-target').querySelector('option[value="profile"]');option.disabled=!profiles;
+        $('nzb-export-target').value=profiles?'profile':'default';
         if(nzbBase.configured.length)$('nzb-export-conflicts').append(el('p',text('Déjà présents dans votre sauvegarde, gardés tels quels sauf si vous cochez :','Already in your backup, kept as they are unless ticked:')));
         for(const service of nzbBase.configured){
           const label=el('label'),box=el('input');label.className='inline-choice';box.type='checkbox';box.dataset.replace=service.id;
@@ -888,5 +948,5 @@ globalThis.PlugArrRemote = (() => {
     $('mobile-copy-status').textContent='';
   }
   return {english,init,refresh,read,valid,report,mountMobile,buildArrControlExport,buildNzb360Export,buildQbRemoteServer,buildQbRemoteExport,
-    javaPreferences,readJavaPreferences,zipStored,zipAes,readZipFiles,inspectNzb360Backup,mergeNzb360,mergeQbRemote,ZipPasswordError,qrMatrix};
+    javaPreferences,readJavaPreferences,zipStored,zipAes,readZipFiles,inspectNzb360Backup,mergeNzb360,mergeQbRemote,ZipPasswordError,qrMatrix,mergeNzb360Profile};
 })();

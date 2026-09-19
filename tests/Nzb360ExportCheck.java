@@ -4,13 +4,14 @@ import java.util.*;
 import java.util.zip.*;
 
 class Nzb360ExportCheck {
+    static boolean prefsEquals(Map<?, ?> m, String k, Object v) { return v.equals(m.get(k)); }
     static void check(boolean condition) { if (!condition) throw new AssertionError("Export validation failed"); }
     static Map<?, ?> read(ZipFile zip, String name) throws Exception {
         try (ObjectInputStream in = new ObjectInputStream(zip.getInputStream(zip.getEntry(name)))) {
             in.setObjectInputFilter(info -> {
                 if (info.depth() > 10 || info.references() > 1000 || info.streamBytes() > 100000) return ObjectInputFilter.Status.REJECTED;
                 Class<?> c = info.serialClass();
-                if (c == null || c == HashMap.class || c == Boolean.class || c == String.class || c == Map.Entry[].class) return ObjectInputFilter.Status.ALLOWED;
+                if (c == null || c == HashMap.class || c == HashSet.class || c == Boolean.class || c == String.class || c == Map.Entry[].class) return ObjectInputFilter.Status.ALLOWED;
                 return ObjectInputFilter.Status.REJECTED;
             });
             Map<?, ?> result = (Map<?, ?>) in.readObject();
@@ -80,6 +81,16 @@ class Nzb360ExportCheck {
             check(prefs.get("torrent_client_preference").equals("qbittorrent"));
             check(prefs.get("torrent_username").equals("test-user"));
         }
-        System.out.println("JVM: all three ZIP entries deserialize correctly; credentials, booleans, Unicode, network mapping, SABnzbd, Lidarr, Seerr, Transmission and Wi-Fi switch OK");
+        // Separate PlugArr profile: the profile list is a java.util.HashSet.
+        try (ZipFile zip = new ZipFile(new File(args[0], "profile.zip"))) {
+            Map<?, ?> servers = read(zip, "servers.xml");
+            check(servers.get("servers") instanceof HashSet);
+            check(servers.get("servers").equals(Set.of("000Default*", "001test", "002PlugArr")));
+            check(read(zip, "001.xml").isEmpty());
+            Map<?, ?> profile = read(zip, "002.xml");
+            check(prefsEquals(profile, "lidarr_apikey_preference", "TEST-LIDARR-KEY"));
+            check(!profile.containsKey("version"));
+        }
+        System.out.println("JVM: all three ZIP entries deserialize correctly; credentials, booleans, Unicode, network mapping, SABnzbd, Lidarr, Seerr, Transmission, PlugArr profile and Wi-Fi switch OK");
     }
 }

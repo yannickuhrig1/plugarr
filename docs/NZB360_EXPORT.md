@@ -112,10 +112,30 @@ torrent : la case de remplacement nomme le client de la sauvegarde.
   Joda, propriétés de serveur). Trop fragile à produire, PlugArr ne l'écrit pas.
 - La restauration ne supprime pas un indexeur absent de la sauvegarde.
 
-La fusion n'écrit que le profil Default et recopie `servers.xml`, les `NNN.xml`
-et les indexeurs à l'octet près. Si la sauvegarde est sur un autre profil,
-l'assistant le signale. Piste suivante : écrire un profil « PlugArr » à part
-(`002.xml` et une entrée dans le `HashSet`), ce qui demande d'écrire ce type Java.
+### Profil séparé « PlugArr »
+
+En fusion, le choix par défaut est désormais « Dans un profil séparé
+« PlugArr » » : rien n'est remplacé dans les profils de l'utilisateur. PlugArr
+ajoute `NNN` + `PlugArr` au `HashSet` de `servers.xml` (numéro suivant, entrée
+`000Default*` ajoutée si la sauvegarde n'avait encore aucun profil, comme nzb360
+le fait lui-même) et écrit `NNN.xml` avec les seules clés de ses services. Un
+profil PlugArr existant est mis à jour, pas dupliqué. Le profil actif ne change
+pas : l'utilisateur choisit « PlugArr » en bas du menu. L'autre choix, « Dans mon
+profil Default », garde la fusion service par service ; il est seul proposé si
+la liste des profils n'est pas lisible. Un `HashSet` réécrit par PlugArr donne
+les mêmes octets que celui de nzb360 ; une JVM le relit (`HashSet` de chaînes).
+
+Validé sur le téléphone le 19 septembre 2026, sur deux vraies sauvegardes :
+
+- avec deux profils (Default, test) : profil 002 « PlugArr » ajouté, Default et
+  test intacts, les six applications du banc dans PlugArr (Radarr 6.3.0 lu) ;
+- sans profil : Default reste proposé, PlugArr prend le 001.
+
+**La restauration ne supprime pas un fichier de profil** absent de la sauvegarde
+(comme pour les indexeurs) : remettre l'ancienne sauvegarde laisse `002.xml`
+orphelin, hors de la liste. Pour l'effacer, restaurer l'ancienne sauvegarde avec
+un `002.xml` vide (celui d'un profil fraîchement créé), ce qui a été fait après
+l'essai.
 
 ## Envoi au téléphone par QR code
 

@@ -1,9 +1,9 @@
 """Authenticated maintenance routes; called under the console operation lock."""
 from http import HTTPStatus
 
-from . import connections, selfupdate, wizard_graph
+from . import connections, selfupdate, veille, wizard_graph
 
-GET_ROUTES = {'/api/maintenance', '/api/connections', '/api/self-update'}
+GET_ROUTES = {'/api/maintenance', '/api/connections', '/api/self-update', '/api/veille'}
 POST_ROUTES = {'/api/maintenance', '/api/connections/test', '/api/connections/repair', '/api/self-update'}
 
 
@@ -13,6 +13,8 @@ def get(handler, route):
     elif route == '/api/connections':
         saved = handler.maintenance.snapshot()['connections']
         handler._json(wizard_graph.administration(handler.cfg, saved))
+    elif route == '/api/veille':
+        handler._json(veille.payload(handler.cfg))
     else:
         try:
             handler._json(selfupdate.check())

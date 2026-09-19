@@ -17,6 +17,7 @@ STYLE = '''<style>
 .console-panel .actions{display:flex;gap:8px;flex-wrap:wrap}.console-panel li{margin:10px 0}.console-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
 .card details{margin-top:12px}.card summary{cursor:pointer;min-height:44px;padding:10px 0;color:var(--muted)}
 .check-card{border-left:3px solid var(--brand-orange);padding:14px;margin:12px 0;background:var(--bg)}
+.veille-disque{margin:12px 0}.veille-disque meter{width:100%;height:14px}.veille-disque small{display:block;color:var(--muted)}.metric small{display:block;color:var(--muted);margin-top:4px}
 [data-theme=brand],[data-theme=dark]{color-scheme:dark;--bg:#0c1116;--panel:#151d26;--text:#f2f5f8;--muted:#9ba9b7;--line:#2a3744;--warn-bg:#2a2018;--warn-line:#ff9e45;--info-bg:#241c30;--info-line:#ad64e5}
 [data-theme=light]{color-scheme:light;--bg:#f5f7fa;--panel:#fff;--text:#18232e;--muted:#536372;--line:#ced8e1;--warn-bg:#fff1e4;--warn-line:#a4510b;--info-bg:#f5ecff;--info-line:#7e3daf}
 @media(max-width:650px){.summary-grid{grid-template-columns:1fr}.console-panel{padding:16px}.console-nav{gap:12px}table{display:block;overflow-x:auto}.wrap{padding:16px}#graph{min-height:230px}}
@@ -64,9 +65,14 @@ table{border-radius:12px;background:var(--panel)}th{font-size:.75rem}.note{line-
 </style>'''
 
 MARKUP = '''<nav class="console-nav" aria-label="Console"><a class="brand" href="#overview">Plug<span>Arr</span></a><p class="console-kicker">ADMINISTRATION</p>
-<a href="#overview">Vue d’ensemble</a><a href="#services">Services</a><a href="#connections">Connexions</a><a href="#maintenance">Maintenance</a><a href="#preferences">Paramètres</a><p class="console-local">Console locale · les identifiants restent sur cette machine.</p></nav>'''
+<a href="#overview">Vue d’ensemble</a><a href="#veille">Veille</a><a href="#services">Services</a><a href="#connections">Connexions</a><a href="#maintenance">Maintenance</a><a href="#preferences">Paramètres</a><p class="console-local">Console locale · les identifiants restent sur cette machine.</p></nav>'''
 
 OVERVIEW = '''<section id="overview" class="console-panel"><h2>Votre installation, en un regard</h2><div class="summary-grid"><div class="metric">Services en marche<strong id="metric-services">Non vérifiés</strong></div><div class="metric">Liaisons vérifiées<strong id="metric-connections">Non vérifiées</strong></div><div class="metric">Dernière sauvegarde<strong id="metric-backup">Aucune enregistrée</strong></div></div><div id="alerts" aria-live="polite"></div></section>'''
+
+#: Veille en lecture seule (voir `veille.py`). Aucun bouton : surveiller n'est
+#: pas administrer, et ce panneau doit pouvoir un jour vivre seul dans un
+#: conteneur sans droits.
+VEILLE = '''<section class="console-panel" id="veille"><h2>Veille</h2><p>Lecture seule, rafraîchie toutes les 5 secondes tant que cette page est affichée.</p><h3>Débits</h3><div id="veille-debits" class="summary-grid"></div><h3>Sortie du VPN</h3><p id="veille-vpn">Lecture…</p><h3>Disques</h3><div id="veille-disques"></div><p id="veille-etat" class="note" role="status"></p></section>'''
 
 PANELS = connection_map.MARKUP + '''
 <section class="console-panel" id="maintenance"><h2>Maintenance</h2><p>Une mise à jour de service nécessite sa recréation. La sauvegarde arrête temporairement les conteneurs pendant la copie.</p><label><input type="checkbox" id="backup-first" checked>Sauvegarder avant la mise à jour d’un service</label><div id="legacy-tools"></div><div id="guided-doctor"></div><h3>PlugArr lui-même</h3><div class="actions"><button id="check-self">Rechercher sur GitHub</button><button id="install-self" hidden>Préparer la mise à jour de l’exécutable</button></div><p id="self-status" aria-live="polite"></p><pre id="release-notes"></pre><h3>Historique des interventions</h3><p>Les 300 dernières interventions de cette console, sans identifiants.</p><ul id="history"></ul></section>
@@ -89,7 +95,16 @@ $('schedule-form').onsubmit=async e=>{e.preventDefault();try{await api('maintena
 const graph=()=>window.PlugArrMap.load(api,refresh);
 $('check-self').onclick=async()=>{const button=$('check-self');button.disabled=true;$('self-status').textContent='Recherche…';try{const d=await api('self-update');$('self-status').textContent='Installée : '+d.current+' · GitHub : '+d.latest+(d.available?' · Mise à jour disponible.':' · À jour.');$('release-notes').textContent=d.notes;$('install-self').hidden=!(d.available&&d.verified_asset)}catch(e){$('self-status').textContent=e.message}finally{button.disabled=false}};
 $('install-self').onclick=async()=>{const b=$('install-self');b.disabled=true;try{const d=await api('self-update',{});$('self-status').textContent=d.message}catch(e){$('self-status').textContent=e.message}finally{b.disabled=false}};
-refresh();graph();setInterval(refresh,15000);api('status').catch(()=>{});
+const nb=(x,d)=>x.toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const debit=o=>o==null?'non mesuré':o<1024?o+' o/s':o<1048576?nb(o/1024,0)+' Ko/s':nb(o/1048576,1)+' Mo/s';
+const taille=o=>o>=1099511627776?nb(o/1099511627776,2)+' To':nb(o/1073741824,1)+' Go';
+const el=(tag,text)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e};
+async function veille(){if(document.hidden)return;try{const d=await api('veille');
+$('veille-debits').replaceChildren(...(d.debits.length?d.debits.map(c=>{const m=el('div');m.className='metric';m.append(c.name,el('strong',c.ok?'↓ '+debit(c.down)+(c.up==null?'':' · ↑ '+debit(c.up)):'Injoignable'),el('small',c.detail));return m}):[el('p','Aucun client de téléchargement installé.')]));
+const v=d.vpn;$('veille-vpn').textContent=v==null?'Aucun VPN configuré : les téléchargements sortent par votre propre adresse.':v.ok?v.ip+' · '+[v.ville,v.pays].filter(Boolean).join(', ')+(v.operateur?' · '+v.operateur:''):'Non vérifiée : '+v.detail;
+$('veille-disques').replaceChildren(...d.disques.map(g=>{const b=el('div');b.className='veille-disque';const meter=el('meter');meter.min=0;meter.max=100;meter.low=80;meter.high=90;meter.optimum=0;meter.value=g.utilise_pct;const noms=g.dossiers.length>4?g.dossiers.slice(0,4).join(', ')+' et '+(g.dossiers.length-4)+' autres':g.dossiers.join(', ');b.append(el('strong',taille(g.libre)+' libres sur '+taille(g.total)+' ('+nb(g.utilise_pct,1)+' % utilisés)'),meter,el('small',g.chemin+' · '+noms));return b}));
+$('veille-etat').textContent='Relevé à '+new Date().toLocaleTimeString()}catch(e){$('veille-etat').textContent='Veille indisponible : '+e.message}}
+refresh();graph();veille();setInterval(refresh,15000);setInterval(veille,5000);document.addEventListener('visibilitychange',veille);api('status').catch(()=>{});
 })();
 </script>'''
 
@@ -98,7 +113,7 @@ def enhance(page):
     page = page.replace('<html ', '<html data-theme="brand" ', 1)
     page = page.replace('</head>', STYLE + ADMIN_REDESIGN + connection_map.STYLE + '</head>')
     page = page.replace('<div class="wrap">', '<div class="wrap">' + MARKUP, 1)
-    page = page.replace('</header>', '</header>' + OVERVIEW, 1)
+    page = page.replace('</header>', '</header>' + OVERVIEW + VEILLE, 1)
     page = page.replace('  <h2>Services</h2>', '  <h2 id="services">Services</h2>')
     page = page.replace('  <footer>', PANELS + '  <footer>')
     return page.replace('</body>', connection_map.script() + SCRIPT + '</body>')

@@ -98,9 +98,9 @@ DroppedNeedle.
 **0.10.0: the watch and qBittorrent themes.** Two requests made in use, studied
 below, and each has a first point to settle before writing a line:
 
-- **the watch**: the study wants a container, hence first a PlugArr image
-  published for two architectures. Level 1 (service status, the VPN's public
-  IP, disk, client throughput) can also live in the console, on the host, with
+- **the watch**: settled, the console first. Its "Watch" panel is ready
+  (disks, throughput, VPN exit); the container will come later, with the
+  image. For the record: level 1 can live in the console, on the host, with
   no image. See "Continuous watch, in a container";
 - **qBittorrent themes**: VueTorrent is ready, pinned and offered in the
   wizard. theme.park is set aside for 0.10.0: measured, it does not survive a
@@ -168,6 +168,7 @@ startup shipped in 0.1.9. What protects you today: `chmod 600`, a generated
 | **Setting up the phone from a file** | ✅ ready for 0.10.0 | Backups to restore in **nzb360** 24.4.1 (Sonarr, Radarr, Lidarr, Seerr, qBittorrent or Transmission, SABnzbd) and **qbRemote** 1.8.0 (AES-256 encrypted). One file for home and away: the app switches to the local address on the home Wi-Fi. Formats read from real backups, then every service validated on a real Android phone, including nzb360's switching toggle, without which the local address is never used. |
 | **Keeping the phone's settings** | ✅ ready for 0.10.0 | Restoring replaces everything. PlugArr therefore starts from the user's backup and only adds its services: a PlugArr server added to qbRemote; in nzb360, a **separate "PlugArr" profile** that replaces nothing. Validated on the phone with real backups: other servers, Tautulli and profiles intact. |
 | **Sending to the phone by QR code** | ✅ ready for 0.10.0 | A one-time link, ten minutes at most, on the server's private address. Validated by scanning with the phone camera. On Windows, the firewall asks for permission the first time, and the wizard says so. |
+| **Watch in the console** | ✅ ready for 0.10.0 | Read-only panel, refreshed every 5 s: free space per disk (a disk shared by several folders is counted once), qBittorrent, Transmission and SABnzbd throughput through their own APIs, VPN exit read from Gluetun's control server. Throughput checked on the test bench with a real download (the Debian image): the figures follow qBittorrent's. The VPN exit has not yet been read on a real tunnel. |
 | **VueTorrent for qBittorrent** | ✅ ready for 0.10.0 | Optional in the web wizard, the TUI and `--qbittorrent-ui`. Mod pinned by tag and digest, `/modcache` cache as a volume: VueTorrent survives restarts without Internet. Tried on the test bench both ways: VueTorrent served and wiring intact, then back to the original interface. |
 | **Seerr starts and connects** | ✅ ready for 0.10.0 | First real installation: Seerr restarted in a loop (`EACCES`). Its image ignores PUID/PGID: it now runs as PUID:PGID and is given its folder. Its API key, which it creates itself, is read during wiring for the phone apps. |
 
@@ -221,7 +222,8 @@ a command you have to launch.
 | Rotate an API key, with re-wiring | ✅ |
 | Add a service missing from the installation | ✅ |
 | Automatic startup, without launching a command | ✅ 0.1.9 |
-| Continuous watch, in a read-only container | ⬜ planned for 0.10.0 |
+| Watch in the console: disks, throughput, VPN exit | ✅ 0.10.0 |
+| Continuous watch, in a read-only container | ⬜ after the console |
 | Gluetun on the page: status, restart, update, server change | ⬜ to do |
 | Console translated into English | ⬜ to do |
 
@@ -391,14 +393,16 @@ Dozzle reads logs and asks for the socket.
 
 ### What remains to be done
 
-- [ ] Settle the scope for 0.10.0: a watch in a container, which goes through
-      the image, or level 1 first in the console, on the host.
+- [x] Settle the scope for 0.10.0: level 1 first, in the console, on the
+      host. The container follows, with the image.
 - [ ] Publish a multi-architecture, pinned `plugarr` image, before anything else.
 - [ ] A `plugarr veille` command serving a READ-ONLY page: no action buttons,
       reusing `status_payload` and the existing clients.
-- [ ] Level 1, no socket: service status through their own APIs, public IP
-      through Gluetun's control server — already queried by `vpncheck` —, disk
-      through read-only mounts, throughput through the download clients.
+- [x] Level 1, no socket, in the console (`veille.py`, `/api/veille`):
+      service status (already there), VPN exit through Gluetun's control
+      server, free space per disk, throughput through the download clients.
+      Still to do: read the VPN exit on a real tunnel, and mount the roots
+      read-only once the watch moves into a container.
 - [ ] Level 2, read-only socket behind a proxy (POST refused), as an explicit
       option: CPU and RAM per container, restart loops, OOM kills, logs. Its cost
       belongs on the screen, not in a file: `GET /containers/{id}/json` returns

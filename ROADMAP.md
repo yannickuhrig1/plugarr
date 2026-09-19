@@ -99,9 +99,9 @@ Audiobookshelf et DroppedNeedle.
 l'usage, étudiées plus bas, et chacune a un premier point à trancher avant
 d'écrire une ligne :
 
-- **la veille** : l'étude veut un conteneur, donc d'abord une image PlugArr
-  publiée en deux architectures. Le niveau 1 (état des services, IP publique
-  du VPN, disque, débits des clients) peut aussi vivre dans la console, sur
+- **la veille** : tranché, la console d'abord. Son panneau « Veille » est prêt
+  (disques, débits, sortie du VPN) ; le conteneur viendra ensuite, avec
+  l'image. Pour mémoire : le niveau 1 peut vivre dans la console, sur
   l'hôte, sans image. Voir « Une veille en continu, dans un conteneur » ;
 - **les thèmes de qBittorrent** : VueTorrent est prêt, épinglé et proposé dans
   l'assistant. theme.park est écarté pour la 0.10.0 : mesuré, il ne survit pas
@@ -171,6 +171,7 @@ supprime le démarrage automatique livré en 0.1.9. Ce qui protège aujourd'hui 
 | **Configurer le téléphone par fichier** | ✅ prêt pour la 0.10.0 | Sauvegardes à restaurer dans **nzb360** 24.4.1 (Sonarr, Radarr, Lidarr, Seerr, qBittorrent ou Transmission, SABnzbd) et **qbRemote** 1.8.0 (chiffrée AES-256). Un seul fichier pour la maison et l'extérieur : l'appli bascule sur l'adresse locale sur le Wi-Fi de la maison. Formats relevés dans de vraies sauvegardes, puis chaque service validé sur un vrai téléphone Android, dont l'interrupteur de bascule de nzb360 sans lequel l'adresse locale ne sert jamais. |
 | **Garder les réglages du téléphone** | ✅ prêt pour la 0.10.0 | La restauration remplace tout. PlugArr part donc de la sauvegarde de l'utilisateur et n'y ajoute que ses services : serveur PlugArr ajouté à qbRemote ; dans nzb360, un **profil « PlugArr » séparé**, sans rien remplacer. Validé sur le téléphone avec de vraies sauvegardes : autres serveurs, Tautulli et profils intacts. |
 | **Envoi au téléphone par QR code** | ✅ prêt pour la 0.10.0 | Un lien à usage unique, dix minutes au plus, sur l'adresse privée du serveur. Validé en scannant avec l'appareil photo du téléphone. Sous Windows, le pare-feu demande une autorisation à la première ouverture, et l'assistant le signale. |
+| **Veille dans la console** | ✅ prêt pour la 0.10.0 | Panneau en lecture seule, rafraîchi toutes les 5 s : place libre par disque (un disque partagé par plusieurs dossiers n'est compté qu'une fois), débits de qBittorrent, Transmission et SABnzbd par leurs propres API, sortie du VPN lue au serveur de contrôle de Gluetun. Débits vérifiés sur le banc avec un vrai téléchargement (l'image Debian) : les chiffres suivent ceux de qBittorrent. La sortie du VPN n'a pas encore été relevée sur un vrai tunnel. |
 | **VueTorrent pour qBittorrent** | ✅ prêt pour la 0.10.0 | En option dans l'assistant web, le TUI et `--qbittorrent-ui`. Mod épinglé par tag et condensat, cache `/modcache` en volume : VueTorrent survit aux redémarrages sans Internet. Essayé sur le banc dans les deux sens : VueTorrent servi et câblage intact, puis retour à l'interface d'origine. |
 | **Seerr démarre et se connecte** | ✅ prêt pour la 0.10.0 | Première installation réelle : Seerr redémarrait en boucle (`EACCES`). Son image ignore PUID/PGID : il tourne maintenant sous PUID:PGID et reçoit son dossier. Sa clé API, qu'il crée lui-même, est lue au câblage pour les applications du téléphone. |
 
@@ -220,7 +221,8 @@ reste une commande à lancer.
 | Renouveler une clé API, avec recâblage | ✅ |
 | Ajouter un service absent de l'installation | ✅ |
 | Démarrage automatique, sans lancer de commande | ✅ 0.1.9 |
-| Veille en continu, en conteneur, en lecture seule | ⬜ prévu en 0.10.0 |
+| Veille dans la console : disques, débits, sortie du VPN | ✅ 0.10.0 |
+| Veille en continu, en conteneur, en lecture seule | ⬜ après la console |
 | Gluetun sur la page : état, redémarrage, mise à jour, changement de serveur | ⬜ à faire |
 | Console traduite en anglais | ⬜ à faire |
 
@@ -397,16 +399,18 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
 
 ### Ce qu'il reste à faire
 
-- [ ] Trancher le périmètre de la 0.10.0 : veille en conteneur, qui passe par
-      l'image, ou niveau 1 d'abord dans la console, sur l'hôte.
+- [x] Trancher le périmètre de la 0.10.0 : le niveau 1 d'abord, dans la
+      console, sur l'hôte. Le conteneur suit, avec l'image.
 - [ ] Publier une image `plugarr` multi-architecture, épinglée, avant tout le
       reste.
 - [ ] Une commande `plugarr veille` servant une page en LECTURE SEULE : aucun
       bouton d'action, réemploi de `status_payload` et des clients existants.
-- [ ] Niveau 1, sans socket : état des services par leurs propres API, IP
-      publique par le serveur de contrôle de Gluetun — déjà interrogé par
-      `vpncheck` —, disque par montages en lecture seule, débits par les clients
-      de téléchargement.
+- [x] Niveau 1, sans socket, dans la console (`veille.py`, `/api/veille`) :
+      état des services (déjà là), sortie du VPN par le serveur de contrôle de
+      Gluetun, place libre par disque, débits par les clients de
+      téléchargement. Reste à relever la sortie du VPN sur un vrai tunnel, et à
+      monter les racines en lecture seule le jour où la veille passera en
+      conteneur.
 - [ ] Niveau 2, socket en lecture seule derrière un proxy (POST refusé), en
       option explicite : CPU et RAM par conteneur, boucles de redémarrage, kills
       OOM, journaux. Son coût s'écrit à l'écran, pas dans un fichier :

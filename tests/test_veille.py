@@ -60,6 +60,8 @@ class _Faux(BaseHTTPRequestHandler):
             else:
                 self._json(200, {"queue": {"kbpersec": "100.50", "status": "Downloading",
                                            "noofslots": 2}})
+        else:
+            self._json(404, {})
 
 
 @pytest.fixture
@@ -215,3 +217,14 @@ def test_la_console_porte_le_panneau_de_veille_sans_bouton():
     panneau = page[debut:page.index("</section>", debut)]
     assert "<button" not in panneau, "la veille ne doit rien pouvoir changer"
     assert "api('veille')" in page
+
+
+def test_un_service_qui_repond_est_en_marche_meme_en_404(tmp_path, faux_clients):
+    """Toute reponse HTTP sous 500 prouve que le service tourne."""
+    cfg = _cfg(tmp_path, port=faux_clients)
+    cfg.services["sonarr"].host_port = 1  # rien n'ecoute
+
+    lignes = {e["id"]: e for e in veille.etats(cfg)}
+
+    assert lignes["qbittorrent"]["up"] is True
+    assert lignes["sonarr"]["up"] is False

@@ -12,6 +12,14 @@ ou la donnee existe deja :
 
 Un service qui ne repond pas donne une ligne en erreur, jamais une page en
 erreur : c'est une veille, elle doit rester lisible quand quelque chose tombe.
+
+Deux emplacements, un seul code :
+
+- sur l'HOTE (la console) : les services par leur port publie, Gluetun par
+  `docker exec` ;
+- dans un CONTENEUR de la pile (`interne=True`, `plugarr veille --interne`) :
+  les services par leur nom sur le reseau compose, Gluetun par HTTP. Aucun
+  socket Docker, donc aucun droit sur les conteneurs.
 """
 
 from __future__ import annotations
@@ -44,6 +52,10 @@ DUREE_CACHE_VPN = 60.0
 DUREE_CACHE_ECHEC_VPN = 10.0
 
 CONTROLE_GLUETUN = "http://127.0.0.1:8000/v1/publicip/ip"
+#: Le meme serveur de controle, vu d'un AUTRE conteneur du reseau compose.
+#: Mesure le 2026-09-19 (Gluetun v3.41.3) : repond 200 sans authentification,
+#: mais Gluetun previent a chaque appel que la route deviendra protegee.
+CONTROLE_GLUETUN_INTERNE = "http://gluetun:8000/v1/publicip/ip"
 
 _cache_vpn: dict[str, tuple[float, dict]] = {}
 _verrou_vpn = threading.Lock()
@@ -155,30 +167,76 @@ def _sabnzbd(inst, base: str) -> dict:
 _LECTEURS = {"qbittorrent": _qbittorrent, "transmission": _transmission, "sabnzbd": _sabnzbd}
 
 
-def _debit(cfg: StackConfig, sid: str) -> dict:
+def _adresse(cfg: StackConfig, sid: str, interne: bool) -> str:
+    inst = cfg.services[sid]
+    if interne:
+        return inst.internal_url(catalog.get(sid), cfg.host, behind_vpn=cfg.vpn.protects(sid))
+    return inst.url(cfg.host)
+
+
+def _debit(cfg: StackConfig, sid: str, interne: bool = False) -> dict:
     inst = cfg.services[sid]
     ligne = {"id": sid, "name": catalog.get(sid).display_name}
     try:
-        return {**ligne, "ok": True, **_LECTEURS[sid](inst, inst.url(cfg.host))}
+        return {**ligne, "ok": True, **_LECTEURS[sid](inst, _adresse(cfg, sid, interne))}
     except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
         # Jamais l'exception elle-meme : son texte peut porter l'URL appelee,
         # et celle de SABnzbd contient la cle API.
         return {**ligne, "ok": False, "down": None, "up": None, "detail": type(exc).__name__}
 
 
-def debits(cfg: StackConfig) -> list[dict]:
+def debits(cfg: StackConfig, *, interne: bool = False) -> list[dict]:
     presents = [sid for sid in _LECTEURS if cfg.enabled(sid)]
     if not presents:
         return []
     with ThreadPoolExecutor(max_workers=len(presents)) as pool:
-        return list(pool.map(lambda sid: _debit(cfg, sid), presents))
+        return list(pool.map(lambda sid: _debit(cfg, sid, interne), presents))
+
+
+# ------------------------------------------------------------------ services
+
+
+def _etat(cfg: StackConfig, sid: str, interne: bool) -> dict:
+    """Le service repond-il a HTTP ? Toute reponse sous 500 compte : une page
+    de connexion (401, 302) prouve que le service tourne."""
+    ligne = {"id": sid, "name": catalog.get(sid).display_name}
+    try:
+        with httpx.Client(timeout=DELAI, follow_redirects=False) as http:
+            code = http.get(_adresse(cfg, sid, interne)).status_code
+    except httpx.HTTPError as exc:
+        return {**ligne, "up": False, "detail": type(exc).__name__}
+    return {**ligne, "up": code < 500, "detail": f"HTTP {code}"}
+
+
+def etats(cfg: StackConfig, *, interne: bool = False) -> list[dict]:
+    """Etat de chaque service a interface, par sa propre adresse.
+
+    La console lit l'etat Docker ; un conteneur sans socket ne le peut pas.
+    Repondre a HTTP est la preuve qui reste, et c'est celle qui compte.
+    """
+    presents = [
+        sid
+        for sid in catalog.STARTUP_ORDER
+        if cfg.enabled(sid) and cfg.services[sid].has_web_ui and catalog.get(sid).internal_port
+    ]
+    if not presents:
+        return []
+    with ThreadPoolExecutor(max_workers=min(len(presents), 8)) as pool:
+        return list(pool.map(lambda sid: _etat(cfg, sid, interne), presents))
 
 
 # ----------------------------------------------------------------------- VPN
 
 
-def _lire_sortie_vpn(conteneur: str) -> dict:
-    ok, sortie = exec_in(conteneur, ["wget", "-qO-", "--timeout=5", CONTROLE_GLUETUN])
+def _lire_sortie_vpn(conteneur: str, interne: bool = False) -> dict:
+    if interne:
+        try:
+            reponse = httpx.get(CONTROLE_GLUETUN_INTERNE, timeout=DELAI)
+            ok, sortie = reponse.status_code == 200, reponse.text.strip()
+        except httpx.HTTPError:
+            ok, sortie = False, ""
+    else:
+        ok, sortie = exec_in(conteneur, ["wget", "-qO-", "--timeout=5", CONTROLE_GLUETUN])
     if not ok or not sortie:
         return {"ok": False, "detail": "serveur de controle de Gluetun injoignable"}
     try:
@@ -196,33 +254,39 @@ def _lire_sortie_vpn(conteneur: str) -> dict:
     }
 
 
-def vpn(cfg: StackConfig) -> dict | None:
+def vpn(cfg: StackConfig, *, interne: bool = False) -> dict | None:
     """Sortie du tunnel, ou None sans VPN. Mise en cache une minute."""
     if not cfg.vpn_enabled:
         return None
     conteneur = f"{cfg.project_name}-gluetun"
+    cle = f"{conteneur}:{interne}"
     with _verrou_vpn:
-        lu = _cache_vpn.get(conteneur)
+        lu = _cache_vpn.get(cle)
         if lu:
             duree = DUREE_CACHE_VPN if lu[1]["ok"] else DUREE_CACHE_ECHEC_VPN
             if time.monotonic() - lu[0] < duree:
                 return lu[1]
-    sortie = _lire_sortie_vpn(conteneur)
+    sortie = _lire_sortie_vpn(conteneur, interne)
     with _verrou_vpn:
-        _cache_vpn[conteneur] = (time.monotonic(), sortie)
+        _cache_vpn[cle] = (time.monotonic(), sortie)
     return sortie
 
 
 # ------------------------------------------------------------------ ensemble
 
 
-def payload(cfg: StackConfig) -> dict:
-    with ThreadPoolExecutor(max_workers=3) as pool:
+def payload(cfg: StackConfig, *, interne: bool = False, avec_etats: bool = False) -> dict:
+    """`avec_etats` : la console a deja l'etat Docker, la veille seule non."""
+    with ThreadPoolExecutor(max_workers=4) as pool:
         f_disques = pool.submit(disques, cfg)
-        f_debits = pool.submit(debits, cfg)
-        f_vpn = pool.submit(vpn, cfg)
-        return {
+        f_debits = pool.submit(debits, cfg, interne=interne)
+        f_vpn = pool.submit(vpn, cfg, interne=interne)
+        f_etats = pool.submit(etats, cfg, interne=interne) if avec_etats else None
+        donnees = {
             "disques": f_disques.result(),
             "debits": f_debits.result(),
             "vpn": f_vpn.result(),
         }
+        if f_etats is not None:
+            donnees["services"] = f_etats.result()
+        return donnees

@@ -1072,6 +1072,54 @@ def serve(
     console.print("Serveur arrete.")
 
 
+@app.command(help=t("Veille en lecture seule : services, debits, sortie du VPN, disques."))
+def veille(
+    project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack.yml.")),
+    host: str = typer.Option("127.0.0.1", help=t("Adresse d'ecoute.")),
+    port: int = typer.Option(7374, help=t("Port d'ecoute.")),
+    interne: bool = typer.Option(
+        False,
+        "--interne/--hote",
+        help=t(
+            "--interne dans un conteneur de la pile : services joints par leur "
+            "nom sur le reseau Docker, sans socket Docker."
+        ),
+    ),
+) -> None:
+    """Sert une page de veille qui ne peut rien modifier.
+
+    Hors de 127.0.0.1, elle exige le mot de passe de la console : sans lui,
+    elle refuse de demarrer.
+    """
+    from . import veille_serveur
+
+    cfg = _load_config(project_dir)
+    try:
+        serveur, jeton = veille_serveur.construire(cfg, hote=host, port=port, interne=interne)
+    except veille_serveur.VeilleRefusee as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except OSError as exc:
+        console.print(
+            t(
+                "[red]Impossible d'ecouter sur {hote}:{port} : {erreur}[/red]",
+                hote=host,
+                port=port,
+                erreur=exc,
+            )
+        )
+        raise typer.Exit(1) from exc
+    adresse = host if host not in ("0.0.0.0", "::") else "127.0.0.1"
+    suffixe = f"/?t={jeton}" if jeton else "/"
+    console.print(t("Veille : {url}", url=f"http://{adresse}:{serveur.server_port}{suffixe}"))
+    try:
+        serveur.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        serveur.server_close()
+
+
 @app.command("admin-password", help=t("Pose le mot de passe de la page d'administration."))
 def admin_password(
     project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack.yml.")),

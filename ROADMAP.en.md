@@ -401,8 +401,14 @@ Dozzle reads logs and asks for the socket.
       first. Published to `ghcr.io/yannickuhrig1/plugarr` on the first version
       tag, never as `latest`. Tried on the test bench: 262 MB, starts, reports
       its version.
-- [ ] A `plugarr veille` command serving a READ-ONLY page: no action buttons,
-      reusing `status_payload` and the existing clients.
+- [x] A `plugarr veille` command serving a READ-ONLY page
+      (`veille_serveur.py`): no route that changes anything, the only button is
+      "Log out". `--interne` inside a container of the stack: services by name
+      on the Docker network, Gluetun over HTTP, **no Docker socket**. Service
+      status is read at each service's own address (any response below 500
+      proves it runs). Tried on the test bench in the image, `plugarr_plugarr`
+      network, roots mounted read-only: 9 services, 3 throughputs and the disk
+      read.
 - [x] Level 1, no socket, in the console (`veille.py`, `/api/veille`):
       service status (already there), VPN exit through Gluetun's control
       server, free space per disk, throughput through the download clients.
@@ -413,8 +419,16 @@ Dozzle reads logs and asks for the socket.
       belongs on the screen, not in a file: `GET /containers/{id}/json` returns
       the RESOLVED environment variables — verified — hence the WireGuard private
       key, the API keys and the passwords `.env` is meant to keep.
-- [ ] Expose the watch only behind authentication. The password already exists
-      (`adminauth`): same model, not a second one.
+- [x] Expose the watch only behind authentication: same password as the
+      console (`adminauth`), same limited sessions. Without a password it
+      refuses to listen anywhere but 127.0.0.1 (checked in the container).
+- [ ] Set up an authentication file for Gluetun's control server. Measured on
+      v3.41.3: `GET /v1/publicip/ip` still answers without authentication from
+      another container, but Gluetun warns on every call that the route will
+      become protected. The watch AND the leak check of `plugarr doctor` depend
+      on it: to settle before upgrading Gluetun.
+- [ ] Add the watch to the compose file (`user: PUID:PGID`, `stack.yml` and
+      roots read-only, the stack's network) once the image is published.
 - [ ] Put it in the wizard, with the choice of which roots to watch. No option
       reserved for the command line.
 - [ ] Settle the refresh: 5 seconds like the console, or an SSE stream. The only

@@ -166,6 +166,20 @@ EN: dict[str, str] = {
         "[red]--qbittorrent-ui vuetorrent requires qBittorrent in the selection.[/red]"
     ),
     "interface de qBittorrent inconnue : {valeur}": "unknown qBittorrent interface: {valeur}",
+    "Veille en lecture seule : services, debits, sortie du VPN, disques.": (
+        "Read-only watch: services, throughput, VPN exit, disks."
+    ),
+    "--interne dans un conteneur de la pile : services joints par leur "
+    "nom sur le reseau Docker, sans socket Docker.": (
+        "--interne inside a container of the stack: services reached by their "
+        "name on the Docker network, without the Docker socket."
+    ),
+    "Veille : {url}": "Watch: {url}",
+    "La veille ecoute sur le reseau mais aucun mot de passe n'est pose. "
+    "Lancez d'abord `plugarr admin-password` sur l'hote.": (
+        "The watch listens on the network but no password is set. "
+        "Run `plugarr admin-password` on the host first."
+    ),
     "interface de qBittorrent": "qBittorrent interface",
     "Interface web de qBittorrent": "qBittorrent web interface",
     "Interface d'origine": "Original interface",

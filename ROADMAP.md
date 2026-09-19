@@ -407,8 +407,14 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       poussée, essai de démarrage avant tout. Publication sur
       `ghcr.io/yannickuhrig1/plugarr` au premier tag de version, jamais en
       `latest`. Essayée sur le banc : 262 Mo, démarre, rapporte sa version.
-- [ ] Une commande `plugarr veille` servant une page en LECTURE SEULE : aucun
-      bouton d'action, réemploi de `status_payload` et des clients existants.
+- [x] Une commande `plugarr veille` servant une page en LECTURE SEULE
+      (`veille_serveur.py`) : aucune route qui modifie quoi que ce soit, seul
+      bouton « Se déconnecter ». `--interne` dans un conteneur de la pile : les
+      services par leur nom sur le réseau Docker, Gluetun par HTTP, **sans
+      socket Docker**. L'état des services se lit par leur propre adresse
+      (toute réponse sous 500 prouve qu'il tourne). Essayée sur le banc dans
+      l'image, réseau `plugarr_plugarr`, racines montées en lecture seule : 9
+      services, 3 débits et le disque relevés.
 - [x] Niveau 1, sans socket, dans la console (`veille.py`, `/api/veille`) :
       état des services (déjà là), sortie du VPN par le serveur de contrôle de
       Gluetun, place libre par disque, débits par les clients de
@@ -421,8 +427,16 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       `GET /containers/{id}/json` rend les variables d'environnement RÉSOLUES —
       vérifié — donc la clé privée WireGuard, les clés API et les mots de passe
       que `.env` est censé garder.
-- [ ] N'exposer la veille qu'authentifiée. Le mot de passe existe déjà
-      (`adminauth`) : c'est le même modèle, pas un second.
+- [x] N'exposer la veille qu'authentifiée : même mot de passe que la console
+      (`adminauth`), mêmes sessions limitées. Sans mot de passe, elle refuse
+      d'écouter ailleurs que sur 127.0.0.1 (vérifié dans le conteneur).
+- [ ] Poser un fichier d'authentification pour le serveur de contrôle de
+      Gluetun. Mesuré sur v3.41.3 : `GET /v1/publicip/ip` répond encore sans
+      authentification depuis un autre conteneur, mais Gluetun prévient à chaque
+      appel que la route deviendra protégée. La veille ET le contrôle de fuite
+      de `plugarr doctor` en dépendent : à régler avant de monter Gluetun.
+- [ ] Ajouter la veille au compose (`user: PUID:PGID`, `stack.yml` et racines
+      en lecture seule, réseau de la pile) quand l'image est publiée.
 - [ ] L'entrer dans l'assistant, avec le choix des racines à surveiller. Aucune
       option réservée à la ligne de commande.
 - [ ] Trancher le rafraîchissement : 5 secondes comme la console, ou un flux SSE.

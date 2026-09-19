@@ -204,6 +204,31 @@ def test_l_accueil_se_ferme_apres_les_applications():
     assert source.index("ensure_servarr") < source.index("seerr.initialize()")
 
 
+def test_la_cle_api_est_lue_dans_les_reglages_principaux():
+    """Seerr cree sa cle lui-meme. `settings/main` ne la montre qu'a un
+    administrateur : sans elle, nzb360 et Arr Control ne s'y connectent pas."""
+    faux = _Faux(servarrs={"main": {"apiKey": "CLE-SEERR", "applicationTitle": "Seerr"}})
+
+    assert faux.api_key() == "CLE-SEERR"
+    assert faux.corps[-1][0] == "/settings/main"
+
+
+def test_sans_cle_la_lecture_rend_vide():
+    """Un compte sans droits recoit les reglages SANS apiKey."""
+    assert _Faux(servarrs={"main": {"applicationTitle": "Seerr"}}).api_key() == ""
+
+
+def test_l_etape_garde_la_cle_apres_la_session():
+    """La cle se lit une fois la session administrateur ouverte, et ne remplace
+    une cle connue que si Seerr en rend une."""
+    import inspect
+
+    source = inspect.getsource(Wirer.step_seerr_setup)
+
+    assert source.index("login_jellyfin") < source.index("seerr.api_key()")
+    assert "seerr.api_key() or inst.api_key" in source
+
+
 def test_les_identifiants_arr_survivent_a_un_redemarrage():
     """`PUT config/host` repond 202 et n'applique le compte qu'au REDEMARRAGE.
 

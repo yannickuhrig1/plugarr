@@ -58,9 +58,10 @@ configuré ces services, avec de fausses adresses, dans un second profil :
   sont installés.
 
 Comme SABnzbd, PlugArr ne leur donne pas d'accès distant : ils n'entrent que
-dans le profil local. PlugArr ne connaît pas la clé API de Seerr (Seerr la crée
-lui-même à sa configuration) : Seerr est donc annoncé comme exclu tant qu'elle
-manque. Aucun de ces trois services n'a encore été essayé en connexion réelle
+dans le profil local. Seerr crée lui-même sa clé API : PlugArr la lit au câblage
+(`GET /api/v1/settings/main`, réservé à l'administrateur, vérifié sur un Seerr
+3.4.1 jetable : clé égale à celle de son `settings.json`). Une installation
+câblée avant cet ajout n'a pas la clé : relancer le câblage. Aucun de ces trois services n'a encore été essayé en connexion réelle
 sur le téléphone.
 
 En démonstration, le nom du fichier comporte `demo` et les accès sont fictifs.

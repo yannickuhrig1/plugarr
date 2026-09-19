@@ -921,6 +921,10 @@ class Wirer:
             if not deja:
                 seerr.initialize()
             pret = seerr.initialized
+            # La cle que Seerr s'est donnee : sans elle, les applications du
+            # telephone (nzb360, Arr Control) ne peuvent pas s'y connecter.
+            # Persistee dans .env et stack.yml comme celle de Jellyfin.
+            inst.api_key = seerr.api_key() or inst.api_key
 
         detail = t("accueil deja termine") if deja else t("accueil execute")
         detail += f", identifiant Jellyfin ({identifiant})"

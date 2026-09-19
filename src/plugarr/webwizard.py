@@ -15,7 +15,9 @@ import ntpath
 import posixpath
 import re
 import secrets
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -33,6 +35,7 @@ from . import (
     catalog,
     dashboard,
     downloadclients,
+    import_prowlarr,
     i18n,
     journal,
     migrations,
@@ -63,6 +66,9 @@ from .runner import Check, check_docker
 
 ASSETS = Path(__file__).parent / "web"
 MAX_INDEXER_RESULTS = 40
+#: Une archive PlugArr complete pese une centaine de Mo ; une sauvegarde
+#: Prowlarr seule, un ou deux.
+MAX_BACKUP_UPLOAD = 2 * 1024 * 1024 * 1024
 DEFAULT_VPN = "protonvpn"
 VPN_ALIASES = {"pia": "private internet access"}
 
@@ -126,6 +132,9 @@ class WizardState:
         self.indexer_client: ArrClient | None = None
         self.indexers: ProwlarrIndexers | None = None
         self.indexer_matches: dict[str, IndexerDefinition] = {}
+        #: Indexeurs lus dans une sauvegarde, avec leurs identifiants. Ils ne
+        #: quittent jamais le serveur : le navigateur ne voit que la cle.
+        self.backup_indexers: dict[str, import_prowlarr.IndexeurSauvegarde] = {}
         self.result = 0
 
     def stack_hash(self, path: Path | None = None):
@@ -786,6 +795,60 @@ class WizardState:
             configured = [str(i.get("name", "?")) for i in indexers.configured()]
         return {"ok": ok, "message": self.redact(message), "configured": configured}
 
+    def prepare_indexer_backup(self):
+        """Refuse AVANT de recevoir le fichier, pas apres l'avoir lu."""
+        self._require_completed()
+        if not self.cfg.enabled("prowlarr"):
+            raise ValueError("Prowlarr n'est pas installe dans cette selection.")
+
+    def inspect_indexer_backup(self, path: Path):
+        self.prepare_indexer_backup()
+        sauvegarde = import_prowlarr.lire(path)
+        if self.demo:
+            statuts = [(entree, import_prowlarr.IMPORTABLE) for entree in sauvegarde.indexeurs]
+        else:
+            statuts = import_prowlarr.examiner(sauvegarde, self._ensure_indexers())
+        self.backup_indexers = {}
+        rows = []
+        for entree, statut in statuts:
+            key = None
+            if statut == import_prowlarr.IMPORTABLE:
+                key = secrets.token_urlsafe(12)
+                self.backup_indexers[key] = entree
+            rows.append(
+                {
+                    "key": key,
+                    "name": entree.name,
+                    "definition": entree.definition_file or entree.implementation,
+                    "enabled": entree.enable,
+                    "status": statut,
+                }
+            )
+        return {"source": sauvegarde.source, "indexers": rows, "ignored": sauvegarde.ignores}
+
+    def import_indexer_backup(self, payload):
+        self.prepare_indexer_backup()
+        key = str(payload.get("key", ""))
+        entree = self.backup_indexers.get(key)
+        if entree is None:
+            raise ValueError("Indexeur de sauvegarde invalide, expire ou deja importe.")
+        if self.demo:
+            ok, message, warnings = True, "Import simule : aucun indexeur contacte.", []
+            configured = [entree.name]
+        else:
+            indexers = self._ensure_indexers()
+            ok, message, warnings = import_prowlarr.importer(entree, indexers)
+            configured = [str(i.get("name", "?")) for i in indexers.configured()]
+        if ok:
+            self.backup_indexers.pop(key, None)
+        return {
+            "ok": ok,
+            "name": entree.name,
+            "message": self.redact(message),
+            "warnings": [self.redact(w) for w in warnings],
+            "configured": configured,
+        }
+
     def report(self):
         self._require_completed()
         failed = [result for result in self.results if not result.ok]
@@ -856,6 +919,7 @@ class WizardState:
         return dashboard.render(cfg, live=False, remote_report=self.remote_result, demo=self.demo).encode("utf-8")
 
     def close_resources(self):
+        self.backup_indexers = {}
         if self.indexer_client is not None:
             self.indexer_client.close()
             self.indexer_client = None
@@ -1285,6 +1349,37 @@ class WizardHandler(BaseHTTPRequestHandler):
         else:
             self.respond({"error": "Route inconnue."}, 404)
 
+    def receive_indexer_backup(self):
+        """Recoit le fichier brut, l'ecrit dans un dossier temporaire le temps
+        de le lire, puis l'efface : la sauvegarde contient les cles des
+        indexeurs et n'a pas a rester sur le disque."""
+        try:
+            if self.headers.get("Content-Type", "").split(";")[
+                0
+            ] != "application/octet-stream" or self.headers.get("Transfer-Encoding"):
+                raise ValueError("Fichier de sauvegarde attendu.")
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= MAX_BACKUP_UPLOAD:
+                raise ValueError("Taille de fichier refusee (2 Go au plus).")
+            self.server.state.prepare_indexer_backup()
+        except (ValueError, TypeError):
+            vider_corps_requete(self)
+            raise
+        dossier = Path(tempfile.mkdtemp(prefix="plugarr-televersement-"))
+        try:
+            chemin = dossier / "sauvegarde"
+            with open(chemin, "wb") as fichier:
+                reste = length
+                while reste > 0:
+                    morceau = self.rfile.read(min(reste, 1024 * 1024))
+                    if not morceau:
+                        raise ValueError("Televersement interrompu.")
+                    fichier.write(morceau)
+                    reste -= len(morceau)
+            return self.server.state.inspect_indexer_backup(chemin)
+        finally:
+            shutil.rmtree(dossier, ignore_errors=True)
+
     def stream_events(self):
         """Instantane initial puis mises a jour poussees, avec reprise sans perte.
 
@@ -1324,6 +1419,11 @@ class WizardHandler(BaseHTTPRequestHandler):
             vider_corps_requete(self)
             return
         try:
+            state = self.server.state
+            route = urlsplit(self.path).path
+            if route == "/api/indexers/backup":
+                self.respond(self.receive_indexer_backup())
+                return
             if self.headers.get("Content-Type", "").split(";")[
                 0
             ] != "application/json" or self.headers.get("Transfer-Encoding"):
@@ -1336,8 +1436,6 @@ class WizardHandler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise TypeError("Objet JSON requis.")
-            state = self.server.state
-            route = urlsplit(self.path).path
             if route == "/api/selection":
                 selected = body.get("services")
                 if (
@@ -1373,6 +1471,8 @@ class WizardHandler(BaseHTTPRequestHandler):
                 result = state.search_indexers(body)
             elif route == "/api/indexers/add":
                 result = state.add_indexer(body)
+            elif route == "/api/indexers/backup/import":
+                result = state.import_indexer_backup(body)
             elif route == "/api/graph":
                 result = state.graph_preview(body)
             elif route == "/api/validate":

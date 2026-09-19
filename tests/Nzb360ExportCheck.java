@@ -31,6 +31,7 @@ class Nzb360ExportCheck {
                     check(Boolean.TRUE.equals(prefs.get(prefix + "_server_enabled_preference")));
                     check(((String)prefs.get(prefix + "_server_primary_connectionstring_preference")).startsWith(mode.equals("remote") ? "https://" : "http://192.0.2.5:"));
                     check(prefs.get(prefix + "_server_local_connectionstring_preference").equals(""));
+                    check(Boolean.FALSE.equals(prefs.get(prefix + "_localconnectionswitch_preference")));
                 }
                 check(prefs.get("nzbdrone_apikey_preference").equals("TEST-API-KEY"));
                 check(prefs.get("radarr_apikey_preference").equals("TEST-API-KEY"));
@@ -38,6 +39,26 @@ class Nzb360ExportCheck {
                 check(read(zip, "servers.xml").isEmpty());
             }
         }
-        System.out.println("JVM: all three ZIP entries deserialize correctly; credentials, booleans, Unicode and network mapping OK");
+        // SABnzbd keys from the 24.4.1 sample; its enable flag is the generic one.
+        try (ZipFile zip = new ZipFile(new File(args[0], "local-sab.zip"))) {
+            Map<?, ?> prefs = read(zip, "com.kevinforeman.nzb360_preferences.xml");
+            check(Boolean.TRUE.equals(prefs.get("server_enabled_preference")));
+            check(prefs.get("sabnzbd_server_primary_connectionstring_preference").equals("http://192.0.2.5:8085"));
+            check(prefs.get("sabnzbd_server_local_connectionstring_preference").equals(""));
+            check(prefs.get("sabapi_preference").equals("TEST-SAB-KEY"));
+        }
+        // One file for home and away.
+        try (ZipFile zip = new ZipFile(new File(args[0], "both.zip"))) {
+            Map<?, ?> prefs = read(zip, "com.kevinforeman.nzb360_preferences.xml");
+            for (String prefix : List.of("nzbdrone", "radarr", "torrent")) {
+                check(((String)prefs.get(prefix + "_server_primary_connectionstring_preference")).startsWith("https://"));
+                check(((String)prefs.get(prefix + "_server_local_connectionstring_preference")).startsWith("http://192.0.2.5:"));
+                check(prefs.get(prefix + "_server_SSID_preference").equals("Maison"));
+                check(Boolean.TRUE.equals(prefs.get(prefix + "_localconnectionswitch_preference")));
+            }
+            check(Boolean.FALSE.equals(prefs.get("server_enabled_preference")));
+            check(!prefs.containsKey("sabapi_preference"));
+        }
+        System.out.println("JVM: all three ZIP entries deserialize correctly; credentials, booleans, Unicode, network mapping, SABnzbd and Wi-Fi switch OK");
     }
 }

@@ -87,6 +87,24 @@ const GRAPH_LABELS = {
 const tr = key => (lang === 'en' ? EN : FR)[key] || FR[key] || key;
 Object.assign(EN, globalThis.PlugArrRemote?.english || {});
 FR.remote = 'Accès à distance'; EN.remote = 'Remote access';
+Object.assign(FR, {
+  backupChooseFile:'Choisissez d’abord un fichier de sauvegarde.', backupUploading:'Lecture de la sauvegarde…',
+  backupNone:'Aucun indexeur dans cette sauvegarde.', backupFound:'indexeur(s) trouvé(s)', backupImportable:'à importer',
+  backupStatusConfigured:'déjà configuré', backupStatusUnknown:'définition absente de ce Prowlarr', backupStatusImportable:'importable',
+  backupDisabled:'désactivé', backupIgnored:'Laissés de côté, volontairement', backupSourcePlugarr:'Archive PlugArr', backupSourceProwlarr:'Sauvegarde Prowlarr', backupSourceBase:'Base Prowlarr',
+  backupIgnoredapplications:'applications', backupIgnoreddownload_clients:'clients de téléchargement', backupIgnoredproxies:'proxys', backupIgnorednotifications:'notifications',
+  backupImporting:'Import', backupSelectNone:'Cochez au moins un indexeur.', backupDone:'Import terminé',
+});
+Object.assign(EN, {
+  backupImportTitle:'Import indexers from a backup', backupImportHelp:'Prowlarr backup (.zip) or PlugArr archive. Only indexers are imported: the links to qBittorrent, Sonarr and Radarr stay those of this installation.',
+  backupFile:'Backup file', backupInspect:'Inspect', backupImport:'Import selection',
+  backupChooseFile:'Choose a backup file first.', backupUploading:'Reading backup…',
+  backupNone:'No indexer in this backup.', backupFound:'indexer(s) found', backupImportable:'to import',
+  backupStatusConfigured:'already configured', backupStatusUnknown:'definition missing from this Prowlarr', backupStatusImportable:'importable',
+  backupDisabled:'disabled', backupIgnored:'Deliberately left out', backupSourcePlugarr:'PlugArr archive', backupSourceProwlarr:'Prowlarr backup', backupSourceBase:'Prowlarr database',
+  backupIgnoredapplications:'applications', backupIgnoreddownload_clients:'download clients', backupIgnoredproxies:'proxies', backupIgnorednotifications:'notifications',
+  backupImporting:'Importing', backupSelectNone:'Tick at least one indexer.', backupDone:'Import finished',
+});
 let token = new URLSearchParams(location.hash.slice(1)).get('token');
 try {
   if (token) sessionStorage.setItem('plugarr-wizard-token', token);
@@ -96,11 +114,14 @@ if (location.hash) history.replaceState(null, '', location.pathname);
 
 async function request(path, body, asText = false) {
   let response;
+  // Un fichier part tel quel : la sauvegarde peut peser une centaine de Mo et
+  // n'a rien a faire dans du JSON.
+  const raw = body instanceof Blob;
   try {
     response = await fetch(path, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: {Authorization:'Bearer ' + (token || ''), ...(body === undefined ? {} : {'Content-Type':'application/json'})},
-      ...(body === undefined ? {} : {body:JSON.stringify(body)}),
+      headers: {Authorization:'Bearer ' + (token || ''), ...(body === undefined ? {} : {'Content-Type': raw ? 'application/octet-stream' : 'application/json'})},
+      ...(body === undefined ? {} : {body: raw ? body : JSON.stringify(body)}),
     });
   } catch (_) {
     throw new Error(tr('networkError'));
@@ -711,6 +732,67 @@ async function searchIndexers() {
   finally { $('indexer-search').disabled = false; }
 }
 
+const BACKUP_SOURCES = {plugarr:'backupSourcePlugarr', prowlarr:'backupSourceProwlarr', base:'backupSourceBase'};
+const BACKUP_STATUSES = {importable:'backupStatusImportable', configure:'backupStatusConfigured', inconnu:'backupStatusUnknown'};
+
+function backupRow(indexer) {
+  const row = E('label');
+  const box = E('input'); box.type = 'checkbox';
+  box.disabled = !indexer.key; box.checked = Boolean(indexer.key);
+  if (indexer.key) box.dataset.key = indexer.key; else row.classList.add('unavailable');
+  box.dataset.name = indexer.name;
+  const status = E('span', tr(BACKUP_STATUSES[indexer.status] || 'unavailable'), 'chip');
+  row.append(box, E('strong', indexer.name), E('small', indexer.definition + (indexer.enabled ? '' : ` · ${tr('backupDisabled')}`)), status);
+  return row;
+}
+
+async function inspectIndexerBackup() {
+  const file = $('indexer-backup-file').files[0];
+  $('indexer-backup-list').replaceChildren();
+  $('indexer-backup-import').hidden = true;
+  if (!file) { $('indexer-backup-status').textContent = tr('backupChooseFile'); return; }
+  $('indexer-backup-inspect').disabled = true;
+  $('indexer-backup-status').textContent = tr('backupUploading');
+  try {
+    const response = await api('/api/indexers/backup', file);
+    const importable = response.indexers.filter(indexer => indexer.key).length;
+    $('indexer-backup-list').replaceChildren(...response.indexers.map(backupRow));
+    $('indexer-backup-import').hidden = importable === 0;
+    const ignored = Object.entries(response.ignored || {}).filter(([, count]) => count > 0).map(([name, count]) => `${count} ${tr('backupIgnored' + name)}`);
+    $('indexer-backup-status').textContent = response.indexers.length
+      ? `${tr(BACKUP_SOURCES[response.source])} : ${response.indexers.length} ${tr('backupFound')}, ${importable} ${tr('backupImportable')}.${ignored.length ? ` ${tr('backupIgnored')} : ${ignored.join(', ')}.` : ''}`
+      : tr('backupNone');
+  } catch (failure) { $('indexer-backup-status').textContent = '× ' + failure.message; }
+  finally { $('indexer-backup-inspect').disabled = false; }
+}
+
+async function importIndexerBackup() {
+  const boxes = [...$('indexer-backup-list').querySelectorAll('input[data-key]:checked')];
+  if (!boxes.length) { $('indexer-backup-status').textContent = tr('backupSelectNone'); return; }
+  $('indexer-backup-import').disabled = true; $('indexer-backup-inspect').disabled = true;
+  const list = E('ul', undefined, 'backup-result');
+  // Un indexeur a la fois : Prowlarr contacte chacun pour le valider, et un
+  // tracker lent ne doit pas masquer l'avancement des autres.
+  for (const [index, box] of boxes.entries()) {
+    $('indexer-backup-status').textContent = `${tr('backupImporting')} ${index + 1}/${boxes.length} : ${box.dataset.name}…`;
+    let line;
+    try {
+      const response = await api('/api/indexers/backup/import', {key:box.dataset.key});
+      line = `${response.ok ? '✓' : '×'} ${response.name} : ${response.message}${response.warnings.length ? ` (${response.warnings.join(' ; ')})` : ''}`;
+      if (response.ok) {
+        const row = box.closest('label');
+        box.checked = false; box.disabled = true; delete box.dataset.key;
+        row.classList.add('unavailable'); row.querySelector('.chip').textContent = tr('backupStatusConfigured');
+      }
+      renderConfigured(response.configured || []);
+    } catch (failure) { line = `× ${box.dataset.name} : ${failure.message}`; }
+    list.append(E('li', line));
+  }
+  $('indexer-backup-status').replaceChildren(E('span', `${tr('backupDone')} :`), list);
+  $('indexer-backup-import').hidden = !$('indexer-backup-list').querySelector('input[data-key]');
+  $('indexer-backup-import').disabled = false; $('indexer-backup-inspect').disabled = false;
+}
+
 async function loadPostInstall() {
   $('post-install').hidden = false;
   $('env-path').textContent = tr('reportLoading');
@@ -928,6 +1010,8 @@ $('restore-confirm').addEventListener('change', () => { $('restore-run').disable
 for (const id of ['restore-archive','restore-target']) $(id).addEventListener('input', clearRestoreInspection);
 $('vpn-test').addEventListener('click', testVpn);
 $('indexer-search').addEventListener('click', searchIndexers);
+$('indexer-backup-inspect').addEventListener('click', inspectIndexerBackup);
+$('indexer-backup-import').addEventListener('click', importIndexerBackup);
 $('indexer-query').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchIndexers(); } });
 $('admin').addEventListener('click', openAdmin);
 $('access-page').addEventListener('click', openAccessPage);

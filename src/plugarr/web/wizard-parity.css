@@ -103,10 +103,23 @@ td code { overflow-wrap: anywhere; white-space: normal; }
 .indexer-heading { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
 .indexer-fields { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 15px 0; }
 .wrap-anywhere { overflow-wrap: anywhere; }
+.backup-import { margin: 20px 0; }
+.backup-import .search-row { margin: 4px 0; }
+.backup-import input[type="file"] { cursor: pointer; height: auto; margin-top: 0; width: 100%; }
+.backup-list { display: grid; gap: 6px; }
+.backup-list:empty { display: none; }
+.backup-list > label { align-items: center; background: #12131d; border: 1px solid #404050; border-radius: 8px; cursor: pointer; display: flex; gap: 10px; min-width: 0; padding: 10px 12px; }
+.backup-list > label.unavailable { cursor: default; opacity: .7; }
+.backup-list strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.backup-list small { color: var(--muted); }
+.backup-result { display: grid; gap: 4px; margin: 0; padding-left: 20px; }
 .completion-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
 
 @media (max-width: 800px) {
   .utility-grid, .choice-list, .indexer-fields { grid-template-columns: 1fr; }
+  .backup-list > label { flex-wrap: wrap; }
+  .backup-list strong { flex-basis: calc(100% - 40px); }
+  .backup-list small { margin-left: 28px; }
   .status-card { align-items: start; grid-template-columns: 30px minmax(0, 1fr); }
   .status-card button { grid-column: 1 / -1; width: 100%; }
   .path-actions, .action-status, .search-row { align-items: stretch; flex-direction: column; }
@@ -119,3 +132,31 @@ td code { overflow-wrap: anywhere; white-space: normal; }
   .completion-actions { display: grid; }
   .completion-actions button { width: 100%; }
 }
+
+/* Configurer mon telephone. Ces regles vivaient dans un <style> de wizard.html,
+   que la CSP de l'assistant (style-src 'self') bloquait : les champs a copier
+   s'affichaient sans mise en page. */
+.mobile-field{display:flex;gap:10px;align-items:end;margin:14px 0}
+.mobile-field label{display:grid;gap:8px;flex:1;min-width:0}
+.mobile-field input{width:100%;padding:12px;background:#12131d;border:1px solid #51495e;border-radius:8px;color:inherit;font:inherit}
+.mobile-field button{flex:none}
+@media (max-width: 600px) {
+.mobile-field{flex-wrap:wrap}
+.mobile-field label{flex-basis:100%}
+}
+
+/* Exports pour le telephone (Arr Control, nzb360, qbRemote), crees par remote.js. */
+.mobile-export { display: grid; gap: 12px; margin: 22px 0; }
+.mobile-export[hidden], .mobile-export [hidden] { display: none !important; }
+.mobile-export > label:not(.inline-choice) { display: grid; font-size: .88rem; gap: 8px; }
+.mobile-export select, .mobile-export input:not([type="checkbox"]) {
+  background: #12131d;
+  border: 1px solid #404050;
+  border-radius: 8px;
+  color: #f4f0f8;
+  min-height: 44px;
+  min-width: 0;
+  padding: 10px 12px;
+  width: 100%;
+}
+.mobile-export p { margin: 0; }

@@ -73,8 +73,10 @@ class ArrClient:
     def get(self, resource: str) -> Any:
         return self._request("GET", resource)
 
-    def post(self, resource: str, payload: dict) -> Any:
-        return self._request("POST", resource, json=payload)
+    def post(self, resource: str, payload: dict, *, timeout: float | None = None) -> Any:
+        if timeout is None:
+            return self._request("POST", resource, json=payload)
+        return self._request("POST", resource, json=payload, timeout=timeout)
 
     def put(self, resource: str, payload: dict) -> Any:
         return self._request("PUT", resource, json=payload)

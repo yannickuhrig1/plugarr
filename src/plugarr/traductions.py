@@ -779,6 +779,27 @@ EN: dict[str, str] = {
     # -- derniers messages du chemin d'echec -----------------------------------------
     ' (deja posee)': ' (already set)',
     'deja configure': 'already configured',
+    # -- import d'indexeurs depuis une sauvegarde Prowlarr ----------------------
+    "client de telechargement {nom} absent : client par defaut de Prowlarr": (
+        "download client {nom} missing: Prowlarr default client"
+    ),
+    "definition absente de ce Prowlarr": "definition missing from this Prowlarr",
+    "etiquettes absentes de ce Prowlarr, retirees : {noms}": (
+        "tags missing from this Prowlarr, removed: {noms}"
+    ),
+    "reglages absents de cette version de la definition, ignores : {noms}": (
+        "settings missing from this version of the definition, ignored: {noms}"
+    ),
+    "Afficher ce qui serait importe, sans rien ecrire.": "Show what would be imported, without writing anything.",
+    "Sauvegarde Prowlarr (.zip), archive PlugArr ou prowlarr.db.": (
+        "Prowlarr backup (.zip), PlugArr archive or prowlarr.db."
+    ),
+    "[dim]Non importes, volontairement : {liste}[/dim]": "[dim]Deliberately not imported: {liste}[/dim]",
+    "[dim]{nom} : deja configure[/dim]": "[dim]{nom}: already configured[/dim]",
+    "[yellow]{nom} : definition absente de ce Prowlarr, ignore[/yellow]": (
+        "[yellow]{nom}: definition missing from this Prowlarr, skipped[/yellow]"
+    ),
+    "{nom} : serait importe": "{nom}: would be imported",
     'introuvable a la relecture': 'not found when read back',
     'la session est-elle bien authentifiee ?': 'is the session properly authenticated?',
     'pas de profil de client de telechargement pour {service}. Connus : {liste}': 'no download client profile for {service}. Known: {liste}',

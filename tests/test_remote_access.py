@@ -164,3 +164,17 @@ def test_arr_auth_bypasses_block_publication(tmp_path, httpx_mock, required, met
                             json={"authenticationRequired": required, "authenticationMethod": method})
     with pytest.raises(ValueError, match="authentification"):
         remote_access._protect_applications(cfg, tmp_path)
+
+
+def test_qbremote_export_is_readable_by_an_independent_aes_zip_reader():
+    """Le fichier de qbRemote 1.8.0 est un ZIP WinZip AES-256. Le test JS le
+    relit avec un dechiffreur ecrit a part, sur des donnees fictives."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    if not shutil.which("node"):
+        pytest.skip("Node requis pour l'export qbRemote")
+    subprocess.run(["node", "tests/js/qbremote_export.cjs"],
+                   cwd=Path(__file__).resolve().parent.parent,
+                   check=True, capture_output=True, text=True)

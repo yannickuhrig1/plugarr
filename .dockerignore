@@ -1,0 +1,7 @@
+# Seuls pyproject.toml, README.md, LICENSE et src/ entrent dans l'image.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
+src/**/__pycache__

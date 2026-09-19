@@ -401,8 +401,12 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
 
 - [x] Trancher le périmètre de la 0.10.0 : le niveau 1 d'abord, dans la
       console, sur l'hôte. Le conteneur suit, avec l'image.
-- [ ] Publier une image `plugarr` multi-architecture, épinglée, avant tout le
-      reste.
+- [x] Construire une image `plugarr` multi-architecture, épinglée
+      (`Dockerfile`, `.github/workflows/docker.yml`) : base Python par tag et
+      condensat, compte sans privilège, amd64 et arm64 construits à chaque
+      poussée, essai de démarrage avant tout. Publication sur
+      `ghcr.io/yannickuhrig1/plugarr` au premier tag de version, jamais en
+      `latest`. Essayée sur le banc : 262 Mo, démarre, rapporte sa version.
 - [ ] Une commande `plugarr veille` servant une page en LECTURE SEULE : aucun
       bouton d'action, réemploi de `status_payload` et des clients existants.
 - [x] Niveau 1, sans socket, dans la console (`veille.py`, `/api/veille`) :

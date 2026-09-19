@@ -395,7 +395,12 @@ Dozzle reads logs and asks for the socket.
 
 - [x] Settle the scope for 0.10.0: level 1 first, in the console, on the
       host. The container follows, with the image.
-- [ ] Publish a multi-architecture, pinned `plugarr` image, before anything else.
+- [x] Build a multi-architecture, pinned `plugarr` image (`Dockerfile`,
+      `.github/workflows/docker.yml`): Python base by tag and digest,
+      unprivileged account, amd64 and arm64 built on every push, start-up test
+      first. Published to `ghcr.io/yannickuhrig1/plugarr` on the first version
+      tag, never as `latest`. Tried on the test bench: 262 MB, starts, reports
+      its version.
 - [ ] A `plugarr veille` command serving a READ-ONLY page: no action buttons,
       reusing `status_payload` and the existing clients.
 - [x] Level 1, no socket, in the console (`veille.py`, `/api/veille`):

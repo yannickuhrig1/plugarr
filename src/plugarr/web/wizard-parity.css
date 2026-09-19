@@ -160,3 +160,10 @@ td code { overflow-wrap: anywhere; white-space: normal; }
   width: 100%;
 }
 .mobile-export p { margin: 0; }
+
+/* QR code du lien a usage unique vers le telephone (remote.js). Fond blanc et
+   marge claire : un QR sur fond sombre se lit mal, voire pas du tout. */
+.phone-qr { display: grid; gap: 10px; justify-items: start; }
+.phone-qr[hidden] { display: none !important; }
+.phone-qr svg { width: min(260px, 100%); height: auto; background: #fff; border-radius: 8px; }
+.phone-qr code { overflow-wrap: anywhere; font-size: 0.85em; opacity: 0.8; }

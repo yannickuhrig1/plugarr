@@ -141,8 +141,9 @@ globalThis.PlugArrRemote = (() => {
       const consent=el('label');consent.className='inline-choice';const check=el('input');check.type='checkbox';check.id='nzb-export-confirm';
       consent.append(check,el('span',text('J’ai sauvegardé mes réglages nzb360. La restauration de ce ZIP remplace tous mes réglages nzb360, y compris les services qui n’y figurent pas.','I backed up my nzb360 settings. Restoring this ZIP replaces all my nzb360 settings, including services it does not contain.')));nzbBox.append(consent);
       const nzbButton=el('button',text('Télécharger pour nzb360','Download for nzb360'));nzbButton.id='nzb-export-download';nzbButton.type='button';nzbButton.className='primary';nzbButton.disabled=true;
-      nzbButton.addEventListener('click',downloadNzb360);check.addEventListener('change',renderNzbExport);
+      nzbButton.addEventListener('click',()=>downloadNzb360());check.addEventListener('change',renderNzbExport);
       nzbSelect.addEventListener('change',()=>{check.checked=false;renderNzbExport();});nzbBox.append(nzbButton);
+      phoneButton(nzbBox,'nzb',()=>downloadNzb360(true));
       nzbBox.append(el('p',text('Dans nzb360 24.4.1, utilisez Sauvegarde / Restauration avec ce ZIP. Sans sauvegarde de départ, il ne contient que les applications PlugArr, sans achat ni licence ; en fusion, il reprend toute votre sauvegarde. Secrets non chiffrés : ne partagez pas ce fichier.','In nzb360 24.4.1, use Backup / Restore with this ZIP. Without a starting backup it only holds the PlugArr applications, with no purchase or licence; when merged it carries your whole backup. Unencrypted secrets: do not share this file.')));
       box.after(nzbBox);
       const qbBox=el('section');qbBox.id='qb-export';qbBox.className='mobile-export';qbBox.hidden=true;
@@ -159,7 +160,8 @@ globalThis.PlugArrRemote = (() => {
       const qbConsent=el('label');qbConsent.className='inline-choice';const qbCheck=el('input');qbCheck.type='checkbox';qbCheck.id='qb-export-confirm';
       qbConsent.append(qbCheck,el('span',text('J’ai sauvegardé mes réglages qbRemote. La restauration de ce fichier remplace tous mes serveurs qbRemote ; les préférences d’affichage restent.','I backed up my qbRemote settings. Restoring this file replaces all my qbRemote servers; display preferences stay.')));qbBox.append(qbConsent);
       const qbButton=el('button',text('Télécharger pour qbRemote','Download for qbRemote'));qbButton.id='qb-export-download';qbButton.type='button';qbButton.className='primary';qbButton.disabled=true;
-      qbButton.addEventListener('click',downloadQbRemote);qbBox.append(qbButton);
+      qbButton.addEventListener('click',()=>downloadQbRemote());qbBox.append(qbButton);
+      phoneButton(qbBox,'qb',()=>downloadQbRemote(true));
       qbSelect.addEventListener('change',()=>{qbCheck.checked=false;renderQbExport();});
       for(const input of [ssid,password])input.addEventListener('input',()=>{qbStatus='';renderQbExport();});qbCheck.addEventListener('change',renderQbExport);
       qbBox.append(el('p',text('Dans qbRemote 1.8.0, restaurez ce fichier depuis la fonction de sauvegarde, avec le mot de passe choisi ici. Sans sauvegarde de départ, seul le serveur PlugArr est inclus et vos préférences d’affichage ne sont pas touchées ; en fusion, tout le contenu de votre sauvegarde est repris. Le fichier est chiffré, mais gardez-le privé.','In qbRemote 1.8.0, restore this file from the backup feature with the password chosen here. Without a starting backup only the PlugArr server is included and display preferences are untouched; when merged, your whole backup is carried over. The file is encrypted, but keep it private.')));
@@ -486,6 +488,7 @@ globalThis.PlugArrRemote = (() => {
       $('nzb-export-ssid-label').hidden=!distant;
       const result=nzbResult($('nzb-export-network').value,distant?$('nzb-export-ssid').value.trim():'');
       $('nzb-export-download').disabled=!result.count||!$('nzb-export-confirm').checked;
+      if($('nzb-export-phone'))$('nzb-export-phone').disabled=$('nzb-export-download').disabled;
       const switching=result.switching
         ?text(` Sur le Wi-Fi « ${$('nzb-export-ssid').value.trim()} », ${result.switching} application(s) passent sur l’adresse locale. Autorisez la localisation quand nzb360 la demande : Android en a besoin pour lire le nom du Wi-Fi.`,` On Wi-Fi "${$('nzb-export-ssid').value.trim()}", ${result.switching} service(s) switch to the local address. Allow location when nzb360 asks: Android needs it to read the Wi-Fi name.`)
         :(distant?text(' Sans nom de Wi-Fi, ce profil utilise toujours l’adresse distante.',' Without a Wi-Fi name, this profile always uses the remote address.'):'');
@@ -496,7 +499,7 @@ globalThis.PlugArrRemote = (() => {
         +(nzbBaseError?' '+nzbBaseError:'')
         +(current.demo?' '+text('DÉMONSTRATION : accès fictifs.','DEMO: fictitious connections.'):'')
         +($('nzb-export-network').value==='remote'&&current.remote?.mode==='tailscale'?' '+text('Avec Tailscale, connectez aussi le téléphone.','With Tailscale, connect the phone too.'):'');
-    }catch{ $('nzb-export-download').disabled=true;$('nzb-export-notice').textContent=text('Export impossible : un champ dépasse la taille prise en charge.','Export unavailable: a field exceeds the supported size.'); }
+    }catch{ $('nzb-export-download').disabled=true;if($('nzb-export-phone'))$('nzb-export-phone').disabled=true;$('nzb-export-notice').textContent=text('Export impossible : un champ dépasse la taille prise en charge.','Export unavailable: a field exceeds the supported size.'); }
   }
   const nzbReplace=()=>[...document.querySelectorAll('#nzb-export-conflicts input[data-replace]:checked')].map(box=>box.dataset.replace);
   // Fresh export, or merge into the loaded backup: same notice, same button.
@@ -530,13 +533,37 @@ globalThis.PlugArrRemote = (() => {
     }
     $('nzb-export-confirm').checked=false;renderNzbExport();
   }
-  function downloadNzb360(){
+  async function downloadNzb360(toPhone=false){
     if(!current||!$('nzb-export-confirm').checked)return;
     try{
       const network=$('nzb-export-network').value,result=nzbResult(network,network==='remote'?$('nzb-export-ssid').value.trim():'');if(!result.count)return;
-      const url=URL.createObjectURL(new Blob([result.bytes],{type:'application/zip'}));
-      const link=el('a');link.href=url;link.download=nzbBase?`nzb360_backup_plugarr${current.demo?'-demo':''}-fusion-${network}.zip`:`plugarr${current.demo?'-demo':''}-nzb360-24.4.1-${network}.zip`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      await deliver(result.bytes,nzbBase?`nzb360_backup_plugarr${current.demo?'-demo':''}-fusion-${network}.zip`:`plugarr${current.demo?'-demo':''}-nzb360-24.4.1-${network}.zip`,toPhone&&'nzb');
     }catch{renderNzbExport();}
+  }
+  function saveFile(bytes,name){
+    const url=URL.createObjectURL(new Blob([bytes],{type:'application/zip'}));
+    const link=el('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  // The file goes to the PC, or to the phone through a one-time link on the
+  // local network, shown as a QR code (wizard only: the offline page has no server).
+  async function deliver(bytes,name,phone){
+    if(!phone)return saveFile(bytes,name);
+    const box=$(`${phone}-export-qr`);box.hidden=false;box.replaceChildren(el('p',text('Préparation du lien…','Preparing the link…')));
+    try{
+      const shared=await request(`/api/phone-share?name=${encodeURIComponent(name)}`,new Blob([bytes],{type:'application/octet-stream'}));
+      const until=new Date(Date.now()+shared.expires_in*1000).toLocaleTimeString(language()==='en'?'en':'fr',{hour:'2-digit',minute:'2-digit'});
+      box.replaceChildren(qrSvg(shared.url),
+        el('p',(shared.demo?text('DÉMONSTRATION : aucun lien n’est réellement ouvert. ','DEMO: no link is actually opened. '):'')
+          +text(`Scannez avec l’appareil photo du téléphone, connecté au même Wi-Fi que ce serveur. Le lien sert une seule fois, jusqu’à ${until}. Le fichier arrive dans Téléchargements : restaurez-le ensuite dans l’application.`,
+            `Scan with the phone camera, on the same Wi-Fi as this server. The link works once, until ${until}. The file lands in Downloads: then restore it in the app.`)),el('code',shared.url));
+    }catch(error){box.replaceChildren(el('p',error.message||text('Lien impossible à ouvrir.','The link could not be opened.')));}
+  }
+  function phoneButton(parent,prefix,action){
+    if(!request)return;
+    const button=el('button',text('Envoyer au téléphone (QR code)','Send to the phone (QR code)'));button.id=`${prefix}-export-phone`;button.type='button';button.className='secondary';button.disabled=true;
+    button.addEventListener('click',action);
+    const box=el('div');box.id=`${prefix}-export-qr`;box.className='phone-qr';box.hidden=true;
+    parent.append(button,box);
   }
   // qbRemote 1.8.0 backup, schema observed in a backup made by the app itself:
   // WinZip AES-256 (AE-1) ZIP holding JSON files. Only manifest.json and
@@ -696,6 +723,7 @@ globalThis.PlugArrRemote = (() => {
     const server=buildQbRemoteServer(current,$('qb-export-network').value,$('qb-export-ssid').value.trim());
     const password=$('qb-export-password').value;
     $('qb-export-download').disabled=!server||!$('qb-export-confirm').checked||password.length<QB_PASSWORD_MIN;
+    if($('qb-export-phone'))$('qb-export-phone').disabled=$('qb-export-download').disabled;
     let message=server
       ?text(`qbRemote 1.8.0 : serveur « ${server.name} » vers ${server.scheme}://${server.host}:${server.port}.`,`qbRemote 1.8.0: server "${server.name}" at ${server.scheme}://${server.host}:${server.port}.`)
       :text('Export impossible : adresse ou identifiants de qBittorrent indisponibles pour ce réseau.','Export unavailable: qBittorrent address or credentials missing for this network.');
@@ -706,10 +734,10 @@ globalThis.PlugArrRemote = (() => {
     if(current.demo)message+=' '+text('DÉMONSTRATION : accès fictifs.','DEMO: fictitious connections.');
     $('qb-export-notice').textContent=message;
   }
-  async function downloadQbRemote(){
+  async function downloadQbRemote(toPhone=false){
     if(!current||$('qb-export-download').disabled)return;
     const network=$('qb-export-network').value;
-    $('qb-export-download').disabled=true;
+    $('qb-export-download').disabled=true;if($('qb-export-phone'))$('qb-export-phone').disabled=true;
     try{
       const base=$('qb-export-base').files[0];let bytes;
       if(base){
@@ -720,8 +748,7 @@ globalThis.PlugArrRemote = (() => {
         qbStatus=text(`Fusion faite : ${merged.kept} serveur(s) de votre sauvegarde gardé(s), serveur PlugArr ${merged.updated?'mis à jour':'ajouté'}.`,`Merged: ${merged.kept} server(s) from your backup kept, PlugArr server ${merged.updated?'updated':'added'}.`);
       }else bytes=await buildQbRemoteExport(current,network,$('qb-export-ssid').value.trim(),$('qb-export-password').value);
       if(!bytes)return;
-      const url=URL.createObjectURL(new Blob([bytes],{type:'application/zip'}));
-      const link=el('a');link.href=url;link.download=base?`qbRemote_plugarr${current.demo?'-demo':''}-fusion-${network}.backup.zip`:`qbRemote_plugarr${current.demo?'-demo':''}-${network}.backup.zip`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      await deliver(bytes,base?`qbRemote_plugarr${current.demo?'-demo':''}-fusion-${network}.backup.zip`:`qbRemote_plugarr${current.demo?'-demo':''}-${network}.backup.zip`,toPhone&&'qb');
     }catch(error){
       qbStatus=error instanceof ZipPasswordError
         ?text('Mot de passe incorrect pour cette sauvegarde qbRemote.','Wrong password for this qbRemote backup.')
@@ -730,6 +757,100 @@ globalThis.PlugArrRemote = (() => {
           :text('Ce navigateur ne sait pas chiffrer le fichier. Ouvrez la page dans Chrome, Edge ou Firefox récents.','This browser cannot encrypt the file. Open the page in a recent Chrome, Edge or Firefox.');
     }
     finally{renderQbExport();}
+  }
+  // QR code (ISO/IEC 18004), byte mode, error correction M, versions 1 to 10:
+  // enough for the one-time link to the phone. Written here rather than loaded
+  // from a CDN, which the wizard's CSP forbids.
+  const QR_BLOCKS=[null,[[1,16]],[[1,28]],[[1,44]],[[2,32]],[[2,43]],[[4,27]],[[4,31]],[[2,38],[2,39]],[[3,36],[2,37]],[[4,43],[1,44]]];
+  const QR_ECC=[0,10,16,26,18,24,16,18,22,22,26];
+  const QR_ALIGN=[null,[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50]];
+  const qrMul=(x,y)=>{let z=0;for(let i=7;i>=0;i--){z=(z<<1)^((z>>>7)*0x11d);z^=((y>>>i)&1)*x;}return z;};
+  function qrEcc(data,degree){
+    const divisor=new Array(degree-1).fill(0);divisor.push(1);let root=1;
+    for(let i=0;i<degree;i++){for(let j=0;j<divisor.length;j++){divisor[j]=qrMul(divisor[j],root);if(j+1<divisor.length)divisor[j]^=divisor[j+1];}root=qrMul(root,2);}
+    const result=new Array(degree).fill(0);
+    for(const b of data){const factor=b^result.shift();result.push(0);divisor.forEach((c,i)=>{result[i]^=qrMul(c,factor);});}
+    return result;
+  }
+  function qrMatrix(textValue,forcedMask){
+    const bytes=[...new TextEncoder().encode(textValue)];
+    const capacity=v=>QR_BLOCKS[v].reduce((n,[count,size])=>n+count*size,0);
+    let version=1;while(version<=10&&4+(version<10?8:16)+8*bytes.length>8*capacity(version))version++;
+    if(version>10)throw new Error('Too long for a QR code');
+    const bits=[];const put=(value,n)=>{for(let i=n-1;i>=0;i--)bits.push((value>>>i)&1);};
+    put(4,4);put(bytes.length,version<10?8:16);for(const b of bytes)put(b,8);
+    const total=8*capacity(version);put(0,Math.min(4,total-bits.length));while(bits.length%8)bits.push(0);
+    for(let pad=0xec;bits.length<total;pad^=0xec^0x11)put(pad,8);
+    const data=[];for(let i=0;i<bits.length;i+=8)data.push(bits.slice(i,i+8).reduce((a,b)=>a*2+b,0));
+    const blocks=[];let offset=0;
+    for(const [count,size] of QR_BLOCKS[version])for(let i=0;i<count;i++){blocks.push(data.slice(offset,offset+size));offset+=size;}
+    const eccs=blocks.map(block=>qrEcc(block,QR_ECC[version]));
+    const codewords=[];
+    for(let i=0;i<Math.max(...blocks.map(b=>b.length));i++)for(const block of blocks)if(i<block.length)codewords.push(block[i]);
+    for(let i=0;i<QR_ECC[version];i++)for(const ecc of eccs)codewords.push(ecc[i]);
+    const size=17+4*version;
+    const modules=Array.from({length:size},()=>new Array(size).fill(false));
+    const reserved=Array.from({length:size},()=>new Array(size).fill(false));
+    const set=(x,y,dark)=>{modules[y][x]=dark;reserved[y][x]=true;};
+    for(let i=0;i<size;i++){set(6,i,i%2===0);set(i,6,i%2===0);}
+    for(const [cx,cy] of [[3,3],[size-4,3],[3,size-4]])
+      for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){const x=cx+dx,y=cy+dy,d=Math.max(Math.abs(dx),Math.abs(dy));if(x>=0&&x<size&&y>=0&&y<size)set(x,y,d!==2&&d!==4);}
+    const align=QR_ALIGN[version],last=align.length-1;
+    for(let i=0;i<align.length;i++)for(let j=0;j<align.length;j++){
+      if((i===0&&j===0)||(i===0&&j===last)||(i===last&&j===0))continue;
+      for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)set(align[i]+dx,align[j]+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1);
+    }
+    const format=mask=>{
+      const value=(0<<3)|mask;let rem=value;for(let i=0;i<10;i++)rem=(rem<<1)^((rem>>>9)*0x537);
+      const f=((value<<10)|rem)^0x5412,bit=i=>((f>>>i)&1)===1;
+      for(let i=0;i<=5;i++)set(8,i,bit(i));
+      set(8,7,bit(6));set(8,8,bit(7));set(7,8,bit(8));
+      for(let i=9;i<15;i++)set(14-i,8,bit(i));
+      for(let i=0;i<8;i++)set(size-1-i,8,bit(i));
+      for(let i=8;i<15;i++)set(8,size-15+i,bit(i));
+      set(8,size-8,true);
+    };
+    format(0);
+    if(version>=7){
+      let rem=version;for(let i=0;i<12;i++)rem=(rem<<1)^((rem>>>11)*0x1f25);
+      const v=(version<<12)|rem;
+      for(let i=0;i<18;i++){const dark=((v>>>i)&1)===1,a=size-11+i%3,b=Math.floor(i/3);set(a,b,dark);set(b,a,dark);}
+    }
+    let index=0;
+    for(let right=size-1;right>=1;right-=2){
+      if(right===6)right=5;
+      for(let vert=0;vert<size;vert++)for(let j=0;j<2;j++){
+        const x=right-j,y=((right+1)&2)===0?size-1-vert:vert;
+        if(!reserved[y][x]&&index<codewords.length*8){modules[y][x]=((codewords[index>>>3]>>>(7-(index&7)))&1)===1;index++;}
+      }
+    }
+    const masks=[(x,y)=>(x+y)%2===0,(x,y)=>y%2===0,x=>x%3===0,(x,y)=>(x+y)%3===0,(x,y)=>(Math.floor(x/3)+Math.floor(y/2))%2===0,
+      (x,y)=>x*y%2+x*y%3===0,(x,y)=>(x*y%2+x*y%3)%2===0,(x,y)=>((x+y)%2+x*y%3)%2===0];
+    const apply=mask=>{for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(!reserved[y][x]&&masks[mask](x,y))modules[y][x]=!modules[y][x];};
+    // Penalty rules of the standard: runs, 2x2 blocks, finder-like patterns, balance.
+    const penalty=()=>{
+      let score=0,dark=0;
+      const lines=[...modules,...modules[0].map((_,x)=>modules.map(row=>row[x]))];
+      for(const line of lines){
+        let run=1;for(let i=1;i<=size;i++){if(i<size&&line[i]===line[i-1])run++;else{if(run>=5)score+=run-2;run=1;}}
+        const t=line.map(Number).join('');for(const p of ['10111010000','00001011101'])for(let i=t.indexOf(p);i>=0;i=t.indexOf(p,i+1))score+=40;
+      }
+      for(let y=0;y<size;y++)for(let x=0;x<size;x++){if(modules[y][x])dark++;if(x<size-1&&y<size-1){const c=modules[y][x];if(c===modules[y][x+1]&&c===modules[y+1][x]&&c===modules[y+1][x+1])score+=3;}}
+      return score+10*Math.floor(Math.abs(dark*20-size*size*10)/(size*size));
+    };
+    let best=forcedMask??-1;
+    if(best<0){let lowest=Infinity;for(let mask=0;mask<8;mask++){apply(mask);format(mask);const score=penalty();if(score<lowest){lowest=score;best=mask;}apply(mask);}}
+    apply(best);format(best);
+    return {version,mask:best,modules};
+  }
+  function qrSvg(textValue){
+    const {modules}=qrMatrix(textValue),size=modules.length,ns='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox',`0 0 ${size+8} ${size+8}`);svg.setAttribute('role','img');
+    svg.setAttribute('aria-label',text('QR code du lien de téléchargement','QR code of the download link'));
+    const background=document.createElementNS(ns,'rect');background.setAttribute('width',size+8);background.setAttribute('height',size+8);background.setAttribute('fill','#fff');
+    const path=document.createElementNS(ns,'path');let d='';
+    modules.forEach((row,y)=>row.forEach((dark,x)=>{if(dark)d+=`M${x+4} ${y+4}h1v1h-1z`;}));
+    path.setAttribute('d',d);path.setAttribute('fill','#000');svg.append(background,path);return svg;
   }
   function mobile(){
     if(!current||!$('mobile-service'))return;
@@ -767,5 +888,5 @@ globalThis.PlugArrRemote = (() => {
     $('mobile-copy-status').textContent='';
   }
   return {english,init,refresh,read,valid,report,mountMobile,buildArrControlExport,buildNzb360Export,buildQbRemoteServer,buildQbRemoteExport,
-    javaPreferences,readJavaPreferences,zipStored,zipAes,readZipFiles,inspectNzb360Backup,mergeNzb360,mergeQbRemote,ZipPasswordError};
+    javaPreferences,readJavaPreferences,zipStored,zipAes,readZipFiles,inspectNzb360Backup,mergeNzb360,mergeQbRemote,ZipPasswordError,qrMatrix};
 })();

@@ -24,7 +24,7 @@ import webbrowser
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -35,13 +35,13 @@ from . import (
     catalog,
     dashboard,
     downloadclients,
-    import_prowlarr,
     i18n,
+    import_prowlarr,
     journal,
     migrations,
     orchestrator,
-    reprise,
     remote_access,
+    reprise,
     sauvegarde,
     vpnessai,
     vpnservers,
@@ -61,6 +61,8 @@ from .layout import (
     resolve_ids,
 )
 from .models import VPN_PROVIDERS, PlatformProfile, VpnConfig
+from .phone_share import TAILLE_MAX as MAX_PHONE_SHARE
+from .phone_share import PartageTelephone
 from .remote_models import RemoteAccessConfig
 from .runner import Check, check_docker
 
@@ -128,6 +130,8 @@ class WizardState:
         self.worker = None
         self.admin_server = None
         self.admin_url = None
+        #: Lien a usage unique vers le telephone (QR code), ouvert a la demande.
+        self.phone_share: PartageTelephone | None = None
         self.restore_inspections: dict[str, dict] = {}
         self.indexer_client: ArrClient | None = None
         self.indexers: ProwlarrIndexers | None = None
@@ -849,6 +853,23 @@ class WizardState:
             "configured": configured,
         }
 
+    def share_to_phone(self, contenu: bytes, nom: str) -> dict:
+        """Publie un fichier du telephone derriere un lien a usage unique.
+
+        Seulement une fois l'installation terminee : c'est la page d'acces qui
+        produit ces fichiers. En demonstration, aucun serveur n'est ouvert.
+        """
+        self._require_completed()
+        if self.demo:
+            return {"url": "http://192.0.2.50:49152/t/demonstration", "expires_in": 600, "demo": True}
+        with self.lock:
+            hote = dashboard.resolve_host(self.cfg)[0]
+            if self.phone_share is None or self.phone_share.hote != hote:
+                if self.phone_share is not None:
+                    self.phone_share.arreter()
+                self.phone_share = PartageTelephone(hote)
+            return self.phone_share.publier(contenu, nom)
+
     def report(self):
         self._require_completed()
         failed = [result for result in self.results if not result.ok]
@@ -920,6 +941,9 @@ class WizardState:
 
     def close_resources(self):
         self.backup_indexers = {}
+        if self.phone_share is not None:
+            self.phone_share.arreter()
+            self.phone_share = None
         if self.indexer_client is not None:
             self.indexer_client.close()
             self.indexer_client = None
@@ -1380,6 +1404,26 @@ class WizardHandler(BaseHTTPRequestHandler):
         finally:
             shutil.rmtree(dossier, ignore_errors=True)
 
+    def receive_phone_share(self):
+        """Recoit le fichier prepare par le navigateur pour le telephone. Il
+        reste en memoire, jamais sur le disque, le temps d'un telechargement."""
+        try:
+            if self.headers.get("Content-Type", "").split(";")[
+                0
+            ] != "application/octet-stream" or self.headers.get("Transfer-Encoding"):
+                raise ValueError("Fichier attendu.")
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= MAX_PHONE_SHARE:
+                raise ValueError("Taille de fichier refusee (1 Mo au plus).")
+        except (ValueError, TypeError):
+            vider_corps_requete(self)
+            raise
+        contenu = self.rfile.read(length)
+        if len(contenu) != length:
+            raise ValueError("Envoi interrompu.")
+        nom = parse_qs(urlsplit(self.path).query).get("name", [""])[0]
+        return self.server.state.share_to_phone(contenu, nom)
+
     def stream_events(self):
         """Instantane initial puis mises a jour poussees, avec reprise sans perte.
 
@@ -1423,6 +1467,9 @@ class WizardHandler(BaseHTTPRequestHandler):
             route = urlsplit(self.path).path
             if route == "/api/indexers/backup":
                 self.respond(self.receive_indexer_backup())
+                return
+            if route == "/api/phone-share":
+                self.respond(self.receive_phone_share())
                 return
             if self.headers.get("Content-Type", "").split(";")[
                 0

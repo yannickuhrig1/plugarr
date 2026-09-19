@@ -78,6 +78,23 @@ les parties (Paramètres, Serveurs, Historique), la restauration garde les
 2 serveurs de l'utilisateur et ajoute PlugArr, dont « Tester » joint le
 qBittorrent du banc par l'adresse locale.
 
+## Envoi au téléphone par QR code
+
+Dans l'assistant, « Envoyer au téléphone (QR code) » ouvre un lien à usage
+unique sur l'adresse du serveur dans le réseau local (`phone_share.py`) : un
+seul téléchargement, dix minutes au plus, jeton aléatoire, adresse privée
+uniquement, fichier gardé en mémoire et jamais écrit sur le disque. Le QR code
+contient ce lien ; le fichier arrive dans Téléchargements, à restaurer ensuite
+dans l'application. Le transfert se fait en HTTP sur le réseau local. Absent de
+la page hors ligne, qui n'a pas de serveur.
+
+Vérifié le 19 septembre 2026 : QR affiché sur le PC, scanné par l'appareil
+photo du téléphone, fichier reçu identique (même empreinte), serveur fermé
+après le téléchargement. Le générateur de QR code (octet, correction M,
+versions 1 à 10) donne les mêmes matrices que la bibliothèque `qrcode` sur
+112 cas. Sous Windows, le pare-feu peut demander une autorisation à la
+première ouverture du lien.
+
 ## Validation
 
 `tests/js/qbremote_export.cjs` relit le fichier avec un déchiffreur WinZip AES

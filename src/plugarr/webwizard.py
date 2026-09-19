@@ -922,7 +922,7 @@ class WizardState:
                         path = self.project_dir / dashboard.FILENAME
                         path.write_text(dashboard.render(self.cfg, remote_report=result), encoding="utf-8")
                         path.chmod(0o600)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     # Exception details can contain a sensitive authorization URL.
                     message = str(exc) if isinstance(exc, ValueError) else "Vérification distante impossible. Vérifiez Docker, le réseau et les identifiants des applications."
                     result = {**remote_access.summary(self.cfg, demo=self.demo), "status": "error", "message": self.redact(message)}

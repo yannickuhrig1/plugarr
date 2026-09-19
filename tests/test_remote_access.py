@@ -125,6 +125,7 @@ def test_choice_survives_serialization(tmp_path):
 
 def test_public_qb_preferences_are_backed_up_hardened_and_verified(tmp_path, httpx_mock):
     from urllib.parse import parse_qs
+
     import httpx
 
     _, cfg = config(tmp_path)

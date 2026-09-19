@@ -37,6 +37,11 @@ DELAI = 4.0
 
 #: La sortie du VPN coute un `docker exec` : relue au plus une fois par minute.
 DUREE_CACHE_VPN = 60.0
+#: Un echec, lui, est relu vite : au demarrage de Gluetun, le serveur de
+#: controle repond `public_ip` vide quelques secondes avant que le tunnel ne
+#: soit monte (constate le 2026-09-19 sur ProtonVPN). Le garder une minute
+#: afficherait « non verifiee » bien apres que tout va bien.
+DUREE_CACHE_ECHEC_VPN = 10.0
 
 CONTROLE_GLUETUN = "http://127.0.0.1:8000/v1/publicip/ip"
 
@@ -198,8 +203,10 @@ def vpn(cfg: StackConfig) -> dict | None:
     conteneur = f"{cfg.project_name}-gluetun"
     with _verrou_vpn:
         lu = _cache_vpn.get(conteneur)
-        if lu and time.monotonic() - lu[0] < DUREE_CACHE_VPN:
-            return lu[1]
+        if lu:
+            duree = DUREE_CACHE_VPN if lu[1]["ok"] else DUREE_CACHE_ECHEC_VPN
+            if time.monotonic() - lu[0] < duree:
+                return lu[1]
     sortie = _lire_sortie_vpn(conteneur)
     with _verrou_vpn:
         _cache_vpn[conteneur] = (time.monotonic(), sortie)

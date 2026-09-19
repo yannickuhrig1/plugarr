@@ -171,7 +171,7 @@ supprime le démarrage automatique livré en 0.1.9. Ce qui protège aujourd'hui 
 | **Configurer le téléphone par fichier** | ✅ prêt pour la 0.10.0 | Sauvegardes à restaurer dans **nzb360** 24.4.1 (Sonarr, Radarr, Lidarr, Seerr, qBittorrent ou Transmission, SABnzbd) et **qbRemote** 1.8.0 (chiffrée AES-256). Un seul fichier pour la maison et l'extérieur : l'appli bascule sur l'adresse locale sur le Wi-Fi de la maison. Formats relevés dans de vraies sauvegardes, puis chaque service validé sur un vrai téléphone Android, dont l'interrupteur de bascule de nzb360 sans lequel l'adresse locale ne sert jamais. |
 | **Garder les réglages du téléphone** | ✅ prêt pour la 0.10.0 | La restauration remplace tout. PlugArr part donc de la sauvegarde de l'utilisateur et n'y ajoute que ses services : serveur PlugArr ajouté à qbRemote ; dans nzb360, un **profil « PlugArr » séparé**, sans rien remplacer. Validé sur le téléphone avec de vraies sauvegardes : autres serveurs, Tautulli et profils intacts. |
 | **Envoi au téléphone par QR code** | ✅ prêt pour la 0.10.0 | Un lien à usage unique, dix minutes au plus, sur l'adresse privée du serveur. Validé en scannant avec l'appareil photo du téléphone. Sous Windows, le pare-feu demande une autorisation à la première ouverture, et l'assistant le signale. |
-| **Veille dans la console** | ✅ prêt pour la 0.10.0 | Panneau en lecture seule, rafraîchi toutes les 5 s : place libre par disque (un disque partagé par plusieurs dossiers n'est compté qu'une fois), débits de qBittorrent, Transmission et SABnzbd par leurs propres API, sortie du VPN lue au serveur de contrôle de Gluetun. Débits vérifiés sur le banc avec un vrai téléchargement (l'image Debian) : les chiffres suivent ceux de qBittorrent. La sortie du VPN n'a pas encore été relevée sur un vrai tunnel. |
+| **Veille dans la console** | ✅ prêt pour la 0.10.0 | Panneau en lecture seule, rafraîchi toutes les 5 s : place libre par disque (un disque partagé par plusieurs dossiers n'est compté qu'une fois), débits de qBittorrent, Transmission et SABnzbd par leurs propres API, sortie du VPN lue au serveur de contrôle de Gluetun. Débits vérifiés sur le banc avec un vrai téléchargement (l'image Debian) : les chiffres suivent ceux de qBittorrent. Sortie du VPN relevée sur un vrai tunnel ProtonVPN (WireGuard), différente de l'adresse de la maison ; un échec n'est gardé que 10 s, car Gluetun annonce une adresse vide quelques secondes au démarrage. |
 | **VueTorrent pour qBittorrent** | ✅ prêt pour la 0.10.0 | En option dans l'assistant web, le TUI et `--qbittorrent-ui`. Mod épinglé par tag et condensat, cache `/modcache` en volume : VueTorrent survit aux redémarrages sans Internet. Essayé sur le banc dans les deux sens : VueTorrent servi et câblage intact, puis retour à l'interface d'origine. |
 | **Seerr démarre et se connecte** | ✅ prêt pour la 0.10.0 | Première installation réelle : Seerr redémarrait en boucle (`EACCES`). Son image ignore PUID/PGID : il tourne maintenant sous PUID:PGID et reçoit son dossier. Sa clé API, qu'il crée lui-même, est lue au câblage pour les applications du téléphone. |
 
@@ -408,8 +408,8 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
 - [x] Niveau 1, sans socket, dans la console (`veille.py`, `/api/veille`) :
       état des services (déjà là), sortie du VPN par le serveur de contrôle de
       Gluetun, place libre par disque, débits par les clients de
-      téléchargement. Reste à relever la sortie du VPN sur un vrai tunnel, et à
-      monter les racines en lecture seule le jour où la veille passera en
+      téléchargement. Sortie du VPN relevée sur un vrai tunnel ProtonVPN. Reste
+      à monter les racines en lecture seule le jour où la veille passera en
       conteneur.
 - [ ] Niveau 2, socket en lecture seule derrière un proxy (POST refusé), en
       option explicite : CPU et RAM par conteneur, boucles de redémarrage, kills

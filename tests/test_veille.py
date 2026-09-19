@@ -179,6 +179,19 @@ def test_la_sortie_du_vpn_est_lue_puis_gardee_une_minute(tmp_path, monkeypatch):
     assert appels == [f"{cfg.project_name}-gluetun"], "un docker exec a chaque rafraichissement"
 
 
+def test_un_echec_est_relu_vite_pour_voir_le_tunnel_monter(tmp_path, monkeypatch):
+    """Au demarrage, Gluetun repond `public_ip` vide quelques secondes."""
+    reponses = iter(['{"public_ip": ""}', '{"public_ip": "198.51.100.7", "country": "X"}'])
+    horloge = [1000.0]
+    monkeypatch.setattr(veille, "exec_in", lambda *a, **k: (True, next(reponses)))
+    monkeypatch.setattr(veille.time, "monotonic", lambda: horloge[0])
+    cfg = _avec_vpn(tmp_path)
+
+    assert veille.vpn(cfg)["ok"] is False
+    horloge[0] += veille.DUREE_CACHE_ECHEC_VPN + 1
+    assert veille.vpn(cfg)["ok"] is True
+
+
 def test_un_tunnel_sans_adresse_est_signale(tmp_path, monkeypatch):
     monkeypatch.setattr(veille, "exec_in", lambda *a, **k: (True, "{}"))
 

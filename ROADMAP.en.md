@@ -168,7 +168,7 @@ startup shipped in 0.1.9. What protects you today: `chmod 600`, a generated
 | **Setting up the phone from a file** | ✅ ready for 0.10.0 | Backups to restore in **nzb360** 24.4.1 (Sonarr, Radarr, Lidarr, Seerr, qBittorrent or Transmission, SABnzbd) and **qbRemote** 1.8.0 (AES-256 encrypted). One file for home and away: the app switches to the local address on the home Wi-Fi. Formats read from real backups, then every service validated on a real Android phone, including nzb360's switching toggle, without which the local address is never used. |
 | **Keeping the phone's settings** | ✅ ready for 0.10.0 | Restoring replaces everything. PlugArr therefore starts from the user's backup and only adds its services: a PlugArr server added to qbRemote; in nzb360, a **separate "PlugArr" profile** that replaces nothing. Validated on the phone with real backups: other servers, Tautulli and profiles intact. |
 | **Sending to the phone by QR code** | ✅ ready for 0.10.0 | A one-time link, ten minutes at most, on the server's private address. Validated by scanning with the phone camera. On Windows, the firewall asks for permission the first time, and the wizard says so. |
-| **Watch in the console** | ✅ ready for 0.10.0 | Read-only panel, refreshed every 5 s: free space per disk (a disk shared by several folders is counted once), qBittorrent, Transmission and SABnzbd throughput through their own APIs, VPN exit read from Gluetun's control server. Throughput checked on the test bench with a real download (the Debian image): the figures follow qBittorrent's. The VPN exit has not yet been read on a real tunnel. |
+| **Watch in the console** | ✅ ready for 0.10.0 | Read-only panel, refreshed every 5 s: free space per disk (a disk shared by several folders is counted once), qBittorrent, Transmission and SABnzbd throughput through their own APIs, VPN exit read from Gluetun's control server. Throughput checked on the test bench with a real download (the Debian image): the figures follow qBittorrent's. VPN exit read on a real ProtonVPN tunnel (WireGuard), different from the home address; a failure is only kept 10 s, since Gluetun reports an empty address for a few seconds at startup. |
 | **VueTorrent for qBittorrent** | ✅ ready for 0.10.0 | Optional in the web wizard, the TUI and `--qbittorrent-ui`. Mod pinned by tag and digest, `/modcache` cache as a volume: VueTorrent survives restarts without Internet. Tried on the test bench both ways: VueTorrent served and wiring intact, then back to the original interface. |
 | **Seerr starts and connects** | ✅ ready for 0.10.0 | First real installation: Seerr restarted in a loop (`EACCES`). Its image ignores PUID/PGID: it now runs as PUID:PGID and is given its folder. Its API key, which it creates itself, is read during wiring for the phone apps. |
 
@@ -401,7 +401,7 @@ Dozzle reads logs and asks for the socket.
 - [x] Level 1, no socket, in the console (`veille.py`, `/api/veille`):
       service status (already there), VPN exit through Gluetun's control
       server, free space per disk, throughput through the download clients.
-      Still to do: read the VPN exit on a real tunnel, and mount the roots
+      VPN exit read on a real ProtonVPN tunnel. Still to do: mount the roots
       read-only once the watch moves into a container.
 - [ ] Level 2, read-only socket behind a proxy (POST refused), as an explicit
       option: CPU and RAM per container, restart loops, OOM kills, logs. Its cost

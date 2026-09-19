@@ -267,7 +267,27 @@ def qbittorrent_password_hash(password: str) -> str:
     return f"@ByteArray({value})"
 
 
-def render_qbittorrent_conf(*, username: str, password: str, port: int = 8080) -> str:
+#: Dossier ou le mod VueTorrent depose l'interface dans le conteneur.
+VUETORRENT_ROOT = "/vuetorrent"
+
+
+def _reglages_interface(interface: str) -> dict[str, str]:
+    """Cles de `qBittorrent.conf` qui choisissent l'interface web.
+
+    Posees AVANT le premier demarrage : qBittorrent sert alors VueTorrent des
+    la premiere page, sans passer par ses options.
+    """
+    if interface == "vuetorrent":
+        return {
+            r"WebUI\AlternativeUIEnabled": "true",
+            r"WebUI\RootFolder": VUETORRENT_ROOT,
+        }
+    return {}
+
+
+def render_qbittorrent_conf(
+    *, username: str, password: str, port: int = 8080, interface: str = ""
+) -> str:
     """qBittorrent.conf minimal.
 
     `HostHeaderValidation=false` est indispensable : sans lui, qBittorrent rejette
@@ -297,13 +317,19 @@ def render_qbittorrent_conf(*, username: str, password: str, port: int = 8080) -
         f"Downloads\\SavePath={CONTAINER_PATHS['torrents_root']}/",
         f"Downloads\\TempPath={CONTAINER_PATHS['torrents_incomplete']}/",
         "Downloads\\TempPathEnabled=true",
+        *(f"{cle}={valeur}" for cle, valeur in _reglages_interface(interface).items()),
         "",
     ]
     return "\n".join(lines)
 
 
 def seed_qbittorrent(
-    config_dir: Path, *, username: str, password: str, port: int = 8080
+    config_dir: Path,
+    *,
+    username: str,
+    password: str,
+    port: int = 8080,
+    interface: str = "",
 ) -> tuple[bool, str]:
     """Ecrit qBittorrent.conf s'il n'existe pas.
 
@@ -317,11 +343,16 @@ def seed_qbittorrent(
         # mot de passe qui y est hache vient d'une installation precedente, mais
         # plugarr en a genere un nouveau et l'annonce dans son rapport.
         # qBittorrent repondait alors « Forbidden » a tout le cablage. Constate
-        # a l'usage. On ne remplace que l'identifiant et le mot de passe : le
-        # reste des reglages appartient a l'utilisateur.
-        return _replace_qbittorrent_credentials(target, username=username, password=password)
+        # a l'usage. On ne remplace que l'identifiant, le mot de passe et le
+        # choix d'interface fait dans l'assistant : le reste des reglages
+        # appartient a l'utilisateur.
+        return _replace_qbittorrent_credentials(
+            target, username=username, password=password, interface=interface
+        )
     target.write_text(
-        render_qbittorrent_conf(username=username, password=password, port=port),
+        render_qbittorrent_conf(
+            username=username, password=password, port=port, interface=interface
+        ),
         encoding="utf-8",
     )
     return True, "qBittorrent.conf pre-seme (mot de passe hashe PBKDF2)"
@@ -353,7 +384,7 @@ def seed_transmission(
 
 
 def _replace_qbittorrent_credentials(
-    target: Path, *, username: str, password: str
+    target: Path, *, username: str, password: str, interface: str = ""
 ) -> tuple[bool, str]:
     """Met a jour identifiant et mot de passe dans un qBittorrent.conf existant.
 
@@ -367,7 +398,14 @@ def _replace_qbittorrent_credentials(
         # Meme raison que dans le gabarit : ne pas se faire bannir soi-meme.
         r"WebUI\MaxAuthenticationFailCount": "100",
         r"WebUI\BanDuration": "60",
+        **_reglages_interface(interface),
     }
+    if not interface and re.search(
+        rf"^WebUI\\RootFolder={re.escape(VUETORRENT_ROOT)}$", texte, re.MULTILINE
+    ):
+        # VueTorrent abandonne : revenir a l'interface d'origine. Une autre
+        # interface posee a la main par l'utilisateur n'est pas touchee.
+        remplacements[r"WebUI\AlternativeUIEnabled"] = "false"
     for cle, valeur in remplacements.items():
         motif = re.compile(rf"^{re.escape(cle)}=.*$", re.MULTILINE)
         if motif.search(texte):

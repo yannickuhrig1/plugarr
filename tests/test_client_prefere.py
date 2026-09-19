@@ -177,8 +177,8 @@ def test_stack_yml_passe_en_version_3():
     effacer le client prefere, champ qu'elle ne connait pas."""
     migre, notes = migrations.migrer({"version": 2})
 
-    assert migre["version"] == 3 == migrations.VERSION_COURANTE
-    assert notes == ["stack.yml migre en version 3"]
+    assert migre["version"] == migrations.VERSION_COURANTE >= 3
+    assert notes[0] == "stack.yml migre en version 3"
 
 
 def test_une_reinstallation_reprend_le_client_prefere():

@@ -24,6 +24,15 @@ _TAGS = {
     "recyclarr": "8.7.1",
 }
 
+#: VueTorrent, interface de remplacement de qBittorrent, pose par le chargeur de
+#: mods des images LinuxServer (`DOCKER_MODS`). Epingle comme Silo : tag lisible
+#: ET digest. Mesure le 2026-09-19 sur qBittorrent 5.2.3 : le chargeur accepte
+#: `depot:tag@sha256:...` et telecharge exactement cette version.
+VUETORRENT_MOD = (
+    "ghcr.io/vuetorrent/vuetorrent-lsio-mod:2.35.0"
+    "@sha256:f6445ce1eefc597650d4f469ad7b18e35451ce79fc9588f4276a2a0221ca793e"
+)
+
 #: Silo s'epingle autrement : il ne publie pas de version au sens habituel, mais
 #: un numero de construction monotone. `build-522` porte l'etiquette
 #: `org.opencontainers.image.version` de l'image, relevee dans l'image elle-meme.

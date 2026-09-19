@@ -102,11 +102,9 @@ below, and each has a first point to settle before writing a line:
   published for two architectures. Level 1 (service status, the VPN's public
   IP, disk, client throughput) can also live in the console, on the host, with
   no image. See "Continuous watch, in a container";
-- **qBittorrent themes**: VueTorrent and theme.park go through linuxserver mods
-  that are not pinned like the rest of the catalogue (VueTorrent recorded at
-  `:latest`, theme.park at `:<app>`). A pinnable version has to be found, or
-  the reason there is none written down, before offering them. See
-  "Customising the interfaces".
+- **qBittorrent themes**: VueTorrent is ready, pinned and offered in the
+  wizard. theme.park is set aside for 0.10.0: measured, it does not survive a
+  restart without Internet. See "Customising the interfaces".
 
 **Shelfarr and Shelfmark** follow: their digests are already recorded, and
 Audiobookshelf unblocks them, since they deliver into its libraries.
@@ -170,6 +168,7 @@ startup shipped in 0.1.9. What protects you today: `chmod 600`, a generated
 | **Setting up the phone from a file** | ✅ ready for 0.10.0 | Backups to restore in **nzb360** 24.4.1 (Sonarr, Radarr, Lidarr, Seerr, qBittorrent or Transmission, SABnzbd) and **qbRemote** 1.8.0 (AES-256 encrypted). One file for home and away: the app switches to the local address on the home Wi-Fi. Formats read from real backups, then every service validated on a real Android phone, including nzb360's switching toggle, without which the local address is never used. |
 | **Keeping the phone's settings** | ✅ ready for 0.10.0 | Restoring replaces everything. PlugArr therefore starts from the user's backup and only adds its services: a PlugArr server added to qbRemote; in nzb360, a **separate "PlugArr" profile** that replaces nothing. Validated on the phone with real backups: other servers, Tautulli and profiles intact. |
 | **Sending to the phone by QR code** | ✅ ready for 0.10.0 | A one-time link, ten minutes at most, on the server's private address. Validated by scanning with the phone camera. On Windows, the firewall asks for permission the first time, and the wizard says so. |
+| **VueTorrent for qBittorrent** | ✅ ready for 0.10.0 | Optional in the web wizard, the TUI and `--qbittorrent-ui`. Mod pinned by tag and digest, `/modcache` cache as a volume: VueTorrent survives restarts without Internet. Tried on the test bench both ways: VueTorrent served and wiring intact, then back to the original interface. |
 | **Seerr starts and connects** | ✅ ready for 0.10.0 | First real installation: Seerr restarted in a loop (`EACCES`). Its image ignores PUID/PGID: it now runs as PUID:PGID and is given its folder. Its API key, which it creates itself, is read during wiring for the phone apps. |
 
 ---
@@ -467,9 +466,12 @@ putting it anywhere else would have nothing to settle.
 Requested in use: being able to replace a service's web interface, or give it a
 theme, without leaving PlugArr.
 
-**Planned for 0.10.0, on qBittorrent first**: VueTorrent and a theme.park
-theme. The other services will follow the same mechanism once this one is
-proven.
+**Delivered for 0.10.0: VueTorrent on qBittorrent.** theme.park is not
+offered: measured below, it downloads the qBittorrent sources again from
+GitHub every time the container is created, disappears on the first restart
+without Internet even with the cache, and has its stylesheets loaded from
+`theme-park.dev` on every page. The other services will only follow if a mod
+meets these conditions.
 
 Two mechanisms, both carried by linuxserver.io mods — therefore limited to the
 catalogue's `lscr.io/...` images. Gluetun, Recyclarr, Seerr and Silo are not
@@ -524,22 +526,39 @@ with an internal Docker network to simulate having no Internet.
 - **VueTorrent and theme.park exclude each other.** Together on a clean
   configuration, qBittorrent serves its original interface, themed: theme.park
   wins. It is one **or** the other, not both.
+- **Why theme.park wins.** Its script rewrites `WebUI\AlternativeUIEnabled=true`
+  and `WebUI\RootFolder=/themepark` at every start, after a
+  `qBittorrent.conf.bak` copy made only once. It ships no interface: **every
+  time the container is created it clones the qBittorrent sources from GitHub**
+  (branch `release-<version>`, version read from the Alpine edge index, not
+  from the image) and adds two stylesheets that the browser loads from
+  `theme-park.dev` on every page.
+- **Without Internet, theme.park is lost even with `/modcache`.** The mod is
+  taken from the cache, but the clone fails: `/themepark` does not exist,
+  qBittorrent serves its original interface and rewrites
+  `WebUI\AlternativeUIEnabled=false`. The cache only protects VueTorrent.
+- **Removing theme.park gives back the original interface.** Restarted without
+  the mod, qBittorrent sets `AlternativeUIEnabled` to `false` by itself. What
+  remains: `WebUI\RootFolder=/themepark`, inert, and `qBittorrent.conf.bak`.
 
 ### What remains to be done for 0.10.0
 
 - [x] Find a pinnable version of each mod: by digest for both, and by
       versioned tag as well for VueTorrent.
 - [x] Measure what qBittorrent does when it restarts without access to GitHub:
-      see above. Rule kept: `/modcache` as a volume under `CONFIG_ROOT`, so the
-      stack restarts offline without losing anything.
+      see above. Rule kept: `/modcache` as a volume under `CONFIG_ROOT`, so
+      VueTorrent survives an offline restart (theme.park does not, see above).
 - [x] Check VueTorrent and theme.park together: they exclude each other, the
       wizard will offer one or the other.
-- [ ] Find what theme.park changes in `qBittorrent.conf` to win, and whether
-      removing the mod gives back the original interface cleanly.
-- [ ] Set `WebUI\AlternativeUIEnabled` and `WebUI\RootFolder` when pre-seeding
-      `qBittorrent.conf`.
-- [ ] Offer it in the web wizard and the TUI, as an explicit option, with what it
-      implies written on screen. No option reserved for the command line.
+- [x] Find what theme.park changes in `qBittorrent.conf` to win, and whether
+      removing the mod gives back the original interface: yes, see above.
+- [x] Set `WebUI\AlternativeUIEnabled` and `WebUI\RootFolder` when pre-seeding
+      `qBittorrent.conf`. An installation that drops VueTorrent sets
+      `AlternativeUIEnabled` back to `false`; an interface set by hand is left
+      alone.
+- [x] Offer it in the web wizard and the TUI, as an explicit option, with what
+      it implies written on screen, and `--qbittorrent-ui` on the command line.
+      VueTorrent only: theme.park is set aside, see above.
 
 ---
 

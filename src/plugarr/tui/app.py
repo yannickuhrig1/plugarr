@@ -68,6 +68,9 @@ class PlugArrApp(App):
         self.vpn: VpnConfig = VpnConfig()
         #: Client prefere entre clients du meme protocole ; vide = automatique.
         self.client_prefere: str = ""
+        #: Interface web de qBittorrent. None = pas encore demandee : l'ecran
+        #: du VPN pre-coche alors le choix de l'installation en place.
+        self.qbittorrent_ui: str | None = None
         self.platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
         #: Template TRaSH choisi par service. Vide = celui par defaut.
         self.recyclarr_templates: dict[str, str] = {}
@@ -135,6 +138,8 @@ class PlugArrApp(App):
         cfg.client_prefere = (
             self.client_prefere if self.client_prefere in concurrents(cfg.services) else ""
         )
+        if "qbittorrent" in cfg.services:
+            cfg.qbittorrent_ui = self.qbittorrent_ui or ""
 
         # Une installation deja presente : on reprend ce qu'elle portait plutot
         # que de l'effacer. Le VPN est le cas grave — sans cela il disparait en
@@ -163,7 +168,10 @@ class PlugArrApp(App):
                         if self.vpn.enabled
                         else {"language", "ui_language", "recyclarr_templates"}
                     )
-                    | ({"client_prefere"} if cfg.client_prefere else set()),
+                    | ({"client_prefere"} if cfg.client_prefere else set())
+                    # Demande a l'ecran, qui partait du choix en place :
+                    # « interface d'origine » est alors un choix, pas un oubli.
+                    | ({"qbittorrent_ui"} if self.qbittorrent_ui is not None else set()),
                 )
                 # Ecrire ici les artefacts d'une pile installee ailleurs
                 # donnerait DEUX repertoires de projet portant le meme nom de

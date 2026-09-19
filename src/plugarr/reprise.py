@@ -187,6 +187,7 @@ _REGLAGES: tuple[tuple[str, str], ...] = (
     ("admin_password_hash", "mot de passe de la console"),
     ("recyclarr_templates", "profils de qualite"),
     ("client_prefere", "client de telechargement prefere"),
+    ("qbittorrent_ui", "interface de qBittorrent"),
 )
 
 

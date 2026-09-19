@@ -190,6 +190,8 @@ def test_le_catalogue_ne_traduit_pas_par_l_identite():
         "Date",
         "Volumes",
         "Catalogue",
+        # Un nom de logiciel.
+        "VueTorrent",
         "VPN ({fournisseur})",
     }, identiques
 

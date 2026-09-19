@@ -337,11 +337,17 @@ class ServiceInstance(BaseModel):
 #: plus changer sans tout reinstaller.
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,32}")
 
+#: Interfaces web de qBittorrent que PlugArr sait poser. Vide = celle
+#: d'origine. theme.park n'y est pas : mesure le 2026-09-19, il retelecharge les
+#: sources de qBittorrent depuis GitHub a chaque creation du conteneur et
+#: disparait au premier redemarrage sans Internet, cache ou non (ROADMAP).
+INTERFACES_QBITTORRENT = ("", "vuetorrent")
+
 
 class StackConfig(BaseModel):
     """Etat canonique versionnable (stack.yml)."""
 
-    version: int = 3
+    version: int = 4
     project_name: str = "plugarr"
     platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
 
@@ -396,6 +402,10 @@ class StackConfig(BaseModel):
     #: Client de telechargement prefere quand plusieurs du meme protocole sont
     #: installes. Vide = choix automatique, voir `downloadclients.priorites`.
     client_prefere: str = ""
+    #: Interface web de qBittorrent : vide = celle d'origine, "vuetorrent" =
+    #: VueTorrent, pose par un mod LinuxServer epingle (voir
+    #: `catalog.VUETORRENT_MOD` et `compose`).
+    qbittorrent_ui: str = ""
     #: Repertoire des artefacts, necessaire pour lancer une commande ponctuelle.
     #: Renseigne a l'execution, pas persiste : il depend d'ou l'on se trouve.
     project_dir: object | None = Field(default=None, exclude=True)
@@ -433,6 +443,15 @@ class StackConfig(BaseModel):
                     "espace.",
                     valeur=repr(v),
                 )
+            )
+        return v
+
+    @field_validator("qbittorrent_ui")
+    @classmethod
+    def _interface_connue(cls, v: str) -> str:
+        if v not in INTERFACES_QBITTORRENT:
+            raise ValueError(
+                t("interface de qBittorrent inconnue : {valeur}", valeur=repr(v))
             )
         return v
 

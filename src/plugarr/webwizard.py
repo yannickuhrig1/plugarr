@@ -60,7 +60,7 @@ from .layout import (
     path_warning,
     resolve_ids,
 )
-from .models import VPN_PROVIDERS, PlatformProfile, VpnConfig
+from .models import INTERFACES_QBITTORRENT, VPN_PROVIDERS, PlatformProfile, VpnConfig
 from .phone_share import TAILLE_MAX as MAX_PHONE_SHARE
 from .phone_share import PartageTelephone
 from .remote_models import RemoteAccessConfig
@@ -92,6 +92,7 @@ class WizardInput(BaseModel):
     reprendre: bool = True
     reset_config: bool = False
     client_prefere: str = ""
+    qbittorrent_ui: str = ""
     remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
 
 
@@ -253,6 +254,7 @@ class WizardState:
                 "vpn": vpn,
                 "recyclarr_templates": cfg.recyclarr_templates if cfg else {},
                 "client_prefere": cfg.client_prefere if cfg else "",
+                "qbittorrent_ui": cfg.qbittorrent_ui if cfg else "",
                 "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
                 "reprendre": cfg is not None,
                 "reset_config": False,
@@ -374,6 +376,11 @@ class WizardState:
                     "Client de telechargement prefere invalide pour la selection."
                 )
             cfg.client_prefere = form.client_prefere
+        if form.qbittorrent_ui not in INTERFACES_QBITTORRENT:
+            raise ValueError("Interface de qBittorrent inconnue.")
+        if form.qbittorrent_ui and not cfg.enabled("qbittorrent"):
+            raise ValueError("VueTorrent demande que qBittorrent soit selectionne.")
+        cfg.qbittorrent_ui = form.qbittorrent_ui
         cfg.recyclarr_templates = form.recyclarr_templates
         if form.recyclarr_templates:
             if self.demo:
@@ -401,6 +408,9 @@ class WizardState:
                     "language",
                     "ui_language",
                     "recyclarr_templates",
+                    # Toujours impose : le formulaire part du choix precedent,
+                    # et « interface d'origine » est un choix, pas un oubli.
+                    "qbittorrent_ui",
                     *(("client_prefere",) if form.client_prefere else ()),
                     *(("vpn",) if cfg.vpn.enabled else ()),
                 },
@@ -1072,6 +1082,7 @@ class WizardState:
                     "vpn" if cfg.vpn.protects("sabnzbd") else "direct"
                 ) if cfg.enabled("sabnzbd") else None,
                 "recyclarr_templates": cfg.recyclarr_templates,
+                "qbittorrent_ui": cfg.qbittorrent_ui,
                 "client_prefere": next(
                     (
                         sid

@@ -1028,6 +1028,23 @@ class VpnScreen(WizardScreen):
                     "eux a chaque telechargement.[/dim]",
                     classes="service-note",
                 )
+            if "qbittorrent" in self.app.selection:
+                if self.app.qbittorrent_ui is None:
+                    self.app.qbittorrent_ui = _interface_qbittorrent_en_place(self.app)
+                vue = self.app.qbittorrent_ui == "vuetorrent"
+                yield Label("Interface web de qBittorrent", classes="group-title")
+                with RadioSet(id="qbittorrent-ui"):
+                    yield RadioButton("Interface d'origine", value=not vue, id="qbui-origine")
+                    yield RadioButton("VueTorrent", value=vue, id="qbui-vuetorrent")
+                yield Static(
+                    "[dim]VueTorrent remplace l'interface de qBittorrent par une "
+                    "interface plus moderne, pratique aussi sur telephone. Le premier "
+                    "demarrage demande Internet pour le telecharger (version figee par "
+                    "PlugArr) ; il est ensuite garde dans le dossier de qBittorrent et "
+                    "survit aux redemarrages sans Internet. Pour revenir en arriere, "
+                    "choisissez l'interface d'origine et relancez l'installation.[/dim]",
+                    classes="service-note",
+                )
             if "sabnzbd" in self.app.selection:
                 yield Label("Trajet de SABnzbd", classes="group-title")
                 with RadioSet(id="sab-route"):
@@ -1249,6 +1266,12 @@ class VpnScreen(WizardScreen):
             return concurrents[0]
         return coche.id.removeprefix("prefere-")
 
+    def qbittorrent_ui_voulu(self) -> str:
+        if "qbittorrent" not in self.app.selection:
+            return ""
+        coche = self.query_one("#qbittorrent-ui", RadioSet).pressed_button
+        return "vuetorrent" if coche is not None and coche.id == "qbui-vuetorrent" else ""
+
     def sab_vpn_voulu(self) -> bool:
         if "sabnzbd" not in self.app.selection:
             return False
@@ -1306,11 +1329,27 @@ class VpnScreen(WizardScreen):
             return
         self.app.vpn = self.config()
         self.app.client_prefere = self.client_prefere_voulu()
+        self.app.qbittorrent_ui = self.qbittorrent_ui_voulu()
         _suite_apres_vpn(self.app)
 
     @on(Button.Pressed, "#back")
     def back(self) -> None:
         self.app.pop_screen()
+
+
+def _interface_qbittorrent_en_place(app) -> str:
+    """Interface de qBittorrent de l'installation en place, pour pre-cocher.
+
+    L'assistant web part du `stack.yml` precedent ; le TUI non. Sans ceci, une
+    reinstallation par le TUI retirerait VueTorrent sans qu'on l'ait demande.
+    """
+    from .. import reprise
+
+    try:
+        trouvee = reprise.trouver(Path(app.project_dir or "."), app.config_root)
+    except Exception:  # noqa: BLE001 - version future, fichier illisible
+        return ""
+    return trouvee.cfg.qbittorrent_ui if trouvee else ""
 
 
 def _suite_apres_vpn(app) -> None:
@@ -1381,6 +1420,13 @@ class SummaryScreen(WizardScreen):
                 t(
                     "[b]Client prefere[/b] {client}, les autres en secours",
                     client=catalog.get(prefere).display_name,
+                )
+            )
+        if cfg.qbittorrent_ui == "vuetorrent":
+            lignes.append(
+                t(
+                    "[b]qBittorrent[/b]    interface VueTorrent [dim](telechargee au "
+                    "premier demarrage, puis gardee en cache)[/dim]"
                 )
             )
         # Un VPN configure ajoute un conteneur que le tableau ci-dessus ne montre

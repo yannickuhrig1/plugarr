@@ -19,6 +19,7 @@ Docker Compose v5.3.0, Docker Desktop sous Windows 11 (backend WSL2).
 | Jellyfin | `lscr.io/linuxserver/jellyfin` | `10.11.11` | 10.11.11 |
 | Lidarr | `lscr.io/linuxserver/lidarr` | `3.1.0` | 3.1.0.4875 |
 | qBittorrent | `lscr.io/linuxserver/qbittorrent` | `5.2.3` | v5.2.3 |
+| VueTorrent (mod de qBittorrent, en option) | `ghcr.io/vuetorrent/vuetorrent-lsio-mod` | `2.35.0@sha256:f6445ce1…` | page servie : « VueTorrent » |
 | Flood | `jesec/flood` | `4.16.1` | pas encore testé |
 
 ## Constats vérifiés expérimentalement
@@ -131,6 +132,25 @@ mot de passe temporaire n'apparaît dans les logs.
 **Attention au code de retour** : qBittorrent 5.x renvoie `204` en cas de succès et
 `200` avec le corps `Fails.` en cas d'échec. C'est donc la présence du cookie qui fait
 foi, jamais le code HTTP seul.
+
+### VueTorrent : le mod s'épingle, son cache doit être un volume
+
+Mesuré le 19 septembre 2026 sur qBittorrent 5.2.3, sur le banc :
+
+- le chargeur de mods de LinuxServer accepte `dépôt:tag@sha256:…` dans
+  `DOCKER_MODS` et télécharge exactement cette version ;
+- `WebUI\AlternativeUIEnabled=true` et `WebUI\RootFolder=/vuetorrent`, posés au
+  pré-semis, font servir VueTorrent dès le premier démarrage ;
+- recréé sans Internet et sans cache, le conteneur saute le mod et qBittorrent
+  réécrit `AlternativeUIEnabled=false` : VueTorrent est perdu même le réseau
+  revenu. `/modcache` monté en volume (`CONFIG_ROOT/qbittorrent/modcache`)
+  garde l'archive, et le mod est repris hors ligne ;
+- installation réelle par `plugarr install --qbittorrent-ui vuetorrent` sur la
+  pile du banc : VueTorrent servi, câblage intact ; puis `--qbittorrent-ui
+  origine` : interface d'origine rendue.
+
+theme.park n'est pas proposé : il reclone les sources de qBittorrent depuis
+GitHub à chaque création du conteneur et disparaît hors ligne, cache ou non.
 
 ### `HostHeaderValidation` doit être désactivé
 

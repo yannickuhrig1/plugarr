@@ -154,6 +154,39 @@ EN: dict[str, str] = {
         "selection. Possible choices: {choix}[/red]"
     ),
     "aucun, un seul client par type": "none, only one client per type",
+    "Interface web de qBittorrent : origine ou vuetorrent. VueTorrent "
+    "est telecharge au premier demarrage, puis garde en cache.": (
+        "qBittorrent web interface: origine (original) or vuetorrent. VueTorrent "
+        "is downloaded on first start, then kept in a cache."
+    ),
+    "[red]--qbittorrent-ui attend origine ou vuetorrent.[/red]": (
+        "[red]--qbittorrent-ui expects origine or vuetorrent.[/red]"
+    ),
+    "[red]--qbittorrent-ui vuetorrent demande qBittorrent dans la selection.[/red]": (
+        "[red]--qbittorrent-ui vuetorrent requires qBittorrent in the selection.[/red]"
+    ),
+    "interface de qBittorrent inconnue : {valeur}": "unknown qBittorrent interface: {valeur}",
+    "interface de qBittorrent": "qBittorrent interface",
+    "Interface web de qBittorrent": "qBittorrent web interface",
+    "Interface d'origine": "Original interface",
+    "VueTorrent": "VueTorrent",
+    "[dim]VueTorrent remplace l'interface de qBittorrent par une "
+    "interface plus moderne, pratique aussi sur telephone. Le premier "
+    "demarrage demande Internet pour le telecharger (version figee par "
+    "PlugArr) ; il est ensuite garde dans le dossier de qBittorrent et "
+    "survit aux redemarrages sans Internet. Pour revenir en arriere, "
+    "choisissez l'interface d'origine et relancez l'installation.[/dim]": (
+        "[dim]VueTorrent replaces the qBittorrent interface with a more modern "
+        "one, also handy on a phone. The first start needs Internet to download "
+        "it (version pinned by PlugArr); it is then kept in the qBittorrent "
+        "folder and survives restarts without Internet. To go back, choose the "
+        "original interface and run the installation again.[/dim]"
+    ),
+    "[b]qBittorrent[/b]    interface VueTorrent [dim](telechargee au "
+    "premier demarrage, puis gardee en cache)[/dim]": (
+        "[b]qBittorrent[/b]    VueTorrent interface [dim](downloaded on "
+        "first start, then kept in a cache)[/dim]"
+    ),
     ", priorite {rang}": ", priority {rang}",
     "priorites realignees : {clients}": "priorities realigned: {clients}",
     "Connexion directe + SSL/TLS (recommande)": "Direct connection + SSL/TLS (recommended)",

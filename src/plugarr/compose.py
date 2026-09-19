@@ -446,6 +446,15 @@ def _service_block(cfg: StackConfig, service_id: str) -> dict:
             # cohabitation sure plutot que simplement probable.
             "${DATA_ROOT}/media:/mnt/media:ro",
         ]
+    elif service_id == "qbittorrent" and cfg.qbittorrent_ui == "vuetorrent":
+        # Le mod est telecharge par le conteneur a chaque creation. `/modcache`
+        # en volume n'est pas un confort : mesure le 2026-09-19, un conteneur
+        # recree sans Internet et sans ce cache saute le mod, et qBittorrent,
+        # ne trouvant plus /vuetorrent, reecrit `AlternativeUIEnabled=false`.
+        # VueTorrent etait alors perdu pour de bon, meme le reseau revenu. Avec
+        # le cache, le mod est repris hors ligne et le reglage reste intact.
+        block["environment"]["DOCKER_MODS"] = catalog.VUETORRENT_MOD
+        block["volumes"].append(f"${{CONFIG_ROOT}}/{spec.config_dir}/modcache:/modcache")
     elif service_id == "autobrr":
         # autobrr n'a pas besoin de /data : il ne touche pas aux fichiers, il
         # pousse des sorties vers les applications.

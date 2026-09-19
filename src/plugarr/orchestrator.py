@@ -621,6 +621,7 @@ def seed_all(cfg: StackConfig) -> list[str]:
                 username=inst.username or "plugarr",
                 password=inst.password or "",
                 port=spec.internal_port,
+                interface=cfg.qbittorrent_ui,
             )
             actions.append(f"{sid} : {message}")
         elif spec.api_family == "sabnzbd":

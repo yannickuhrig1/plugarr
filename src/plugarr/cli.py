@@ -41,7 +41,13 @@ from .clients.arr import ArrClient
 from .i18n import t
 from .interface import Interface
 from .layout import create_tree, default_profile, path_warning
-from .models import VPN_PROVIDERS, PlatformProfile, StackConfig, VpnConfig
+from .models import (
+    INTERFACES_QBITTORRENT,
+    VPN_PROVIDERS,
+    PlatformProfile,
+    StackConfig,
+    VpnConfig,
+)
 from .orchestrator import InstallAborted, Progress
 from .runner import Compose
 from .wiring import Wirer
@@ -401,6 +407,14 @@ def install(
             "installes. Les autres restent declares, en secours."
         ),
     ),
+    qbittorrent_ui: str | None = typer.Option(
+        None,
+        "--qbittorrent-ui",
+        help=t(
+            "Interface web de qBittorrent : origine ou vuetorrent. VueTorrent "
+            "est telecharge au premier demarrage, puis garde en cache."
+        ),
+    ),
 ) -> None:
     """Deploie et cable la stack de bout en bout, sans interaction."""
     selection = [s.strip() for s in services.split(",") if s.strip()]
@@ -528,6 +542,20 @@ def install(
             raise typer.Exit(1)
         cfg.client_prefere = client_prefere
 
+    if qbittorrent_ui is not None:
+        interface = "" if qbittorrent_ui == "origine" else qbittorrent_ui
+        if interface not in INTERFACES_QBITTORRENT:
+            console.print(
+                t("[red]--qbittorrent-ui attend origine ou vuetorrent.[/red]")
+            )
+            raise typer.Exit(1)
+        if interface and "qbittorrent" not in cfg.services:
+            console.print(
+                t("[red]--qbittorrent-ui vuetorrent demande qBittorrent dans la selection.[/red]")
+            )
+            raise typer.Exit(1)
+        cfg.qbittorrent_ui = interface
+
     # Reprendre AVANT le recapitulatif : c'est lui qui doit montrer ce qui sera
     # reellement pose. Reprendre apres reviendrait a annoncer une chose et a en
     # ecrire une autre.
@@ -569,6 +597,7 @@ def install(
                     ("vpn", vpn),
                     ("recyclarr_templates", bool(chosen)),
                     ("client_prefere", bool(client_prefere)),
+                    ("qbittorrent_ui", qbittorrent_ui is not None),
                 )
                 if donne
             }

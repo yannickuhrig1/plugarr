@@ -44,6 +44,7 @@ COUVERTES = {
     "vpn_countries": "VpnScreen",
     "sabnzbd_vpn": "VpnScreen",
     "client_prefere": "VpnScreen",
+    "qbittorrent_ui": "VpnScreen",
     "recyclarr_sonarr": "TemplatesScreen",
     "recyclarr_radarr": "TemplatesScreen",
     "reset_config": "ExistingConfigScreen",

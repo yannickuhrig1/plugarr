@@ -838,7 +838,9 @@ def wire(project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack
     # « Path '/data/media/anime' does not exist ». Constate en reparant une pile
     # reelle apres l'ajout de l'anime. `create_tree` est idempotent : sur une
     # installation a jour il ne cree rien et ne dit rien.
-    nouveaux = create_tree(cfg.data_root, cfg.config_root, list(cfg.services))
+    nouveaux = create_tree(
+        cfg.data_root, cfg.config_root, list(cfg.services), owner=(cfg.puid, cfg.pgid)
+    )
     if nouveaux:
         console.print(f"  [dim]arborescence[/dim] {len(nouveaux)} dossier(s) cree(s)")
 

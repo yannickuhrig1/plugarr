@@ -39,8 +39,9 @@ Clés relevées : `sabnzbd_server_primary_connectionstring_preference`,
 `sabnzbd_server_local_connectionstring_preference` et `sabapi_preference`.
 L'échantillon n'a pas de `sabnzbd_server_enabled_preference` ; l'activation
 passe par `server_enabled_preference` et le Wi-Fi par `server_SSID_preference`,
-clés génériques que nous attribuons à SABnzbd (nzb360 est né client SABnzbd).
-**C'est une déduction, pas un constat** : à vérifier en premier sur le téléphone.
+clés génériques que nous attribuions à SABnzbd (nzb360 est né client SABnzbd).
+Confirmé sur le téléphone le 19 septembre 2026 : SABnzbd apparaît dans le menu
+et répond (« Idle », file vide) avec ces seules clés.
 PlugArr ne gère pas d'accès distant pour SABnzbd : il n'entre que dans le profil local.
 
 ### Lidarr, Seerr et Transmission
@@ -61,8 +62,15 @@ Comme SABnzbd, PlugArr ne leur donne pas d'accès distant : ils n'entrent que
 dans le profil local. Seerr crée lui-même sa clé API : PlugArr la lit au câblage
 (`GET /api/v1/settings/main`, réservé à l'administrateur, vérifié sur un Seerr
 3.4.1 jetable : clé égale à celle de son `settings.json`). Une installation
-câblée avant cet ajout n'a pas la clé : relancer le câblage. Aucun de ces trois services n'a encore été essayé en connexion réelle
-sur le téléphone.
+câblée avant cet ajout n'a pas la clé : relancer le câblage.
+
+Validé sur le téléphone le 19 septembre 2026, contre le banc (Lidarr, Seerr,
+Transmission et SABnzbd installés par PlugArr) : export neuf restauré, les six
+applications au menu ; Lidarr lit sa bibliothèque (« 0 artists »), Seerr ses
+demandes, SABnzbd sa file ; avec Transmission à la place de qBittorrent, « Test
+Connection » répond « Connected Successfully to Primary Address! ». Un export
+neuf (sans fusion) ramène nzb360 à son écran d'accueil (« Get Started ») :
+normal, il ne contient pas les préférences d'une application déjà utilisée.
 
 En démonstration, le nom du fichier comporte `demo` et les accès sont fictifs.
 Une restauration de cette démonstration ne donne pas une installation fonctionnelle.

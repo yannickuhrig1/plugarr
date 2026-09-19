@@ -307,6 +307,10 @@ def _service_block(cfg: StackConfig, service_id: str) -> dict:
         # Il transmet des demandes aux *arr, qui telechargent.
         block["environment"] = {"TZ": cfg.timezone, "LOG_LEVEL": "info"}
         block["volumes"] = [f"${{CONFIG_ROOT}}/{spec.config_dir}:/app/config"]
+        # Son image ignore PUID/PGID et tourne en `node` (UID 1000) : sans
+        # `user`, elle ne peut pas ecrire dans un dossier qui n'est pas a elle
+        # (voir layout.SANS_PUID).
+        block["user"] = f"{cfg.puid}:{cfg.pgid}"
     elif service_id == "sabnzbd":
         block["environment"] = {
             "PUID": str(cfg.puid),

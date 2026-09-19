@@ -245,8 +245,26 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
     return detected[0], detected[1], t("detecte ({origine})", origine=t(defaults.source)), True
 
 
-def create_tree(data_root: str | Path, config_root: str | Path, service_ids: list[str]) -> list[Path]:
-    """Cree l'arborescence. Idempotent."""
+#: Images qui ignorent PUID/PGID et tournent sous l'utilisateur que leur donne
+#: le compose (`user:`). Seerr tourne sinon en `node` (UID 1000) et plante sur
+#: « EACCES: mkdir '/app/config/logs/' » dans un dossier qui n'est pas a lui
+#: (constate sur le banc le 2026-09-19 ; sa documentation Docker demande un
+#: `chown` ou `--user`).
+SANS_PUID = frozenset({"seerr"})
+
+
+def create_tree(
+    data_root: str | Path,
+    config_root: str | Path,
+    service_ids: list[str],
+    *,
+    owner: tuple[int, int] | None = None,
+) -> list[Path]:
+    """Cree l'arborescence. Idempotent.
+
+    `owner` (PUID, PGID) : lance en root, PlugArr donne a ces identifiants le
+    dossier des images de `SANS_PUID`, qui ne savent pas le faire elles-memes.
+    """
     created: list[Path] = []
     data_root, config_root = Path(data_root), Path(config_root)
     for sub in DATA_SUBDIRS:
@@ -268,7 +286,26 @@ def create_tree(data_root: str | Path, config_root: str | Path, service_ids: lis
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
             created.append(p)
+        if sid in SANS_PUID and owner is not None:
+            _donner(p, owner)
     return created
+
+
+def _est_root() -> bool:
+    import os
+
+    return os.name == "posix" and os.geteuid() == 0
+
+
+def _donner(dossier: Path, owner: tuple[int, int]) -> None:
+    """Attribue le dossier et son contenu. Seul root le peut ; hors root, le
+    dossier appartient deja a l'utilisateur qui lance PlugArr."""
+    import os
+
+    if not _est_root():
+        return
+    for chemin in (dossier, *dossier.rglob("*")):
+        os.chown(chemin, *owner, follow_symlinks=False)
 
 
 def _dossiers_absents(chemin: Path) -> list[Path]:

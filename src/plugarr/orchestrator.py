@@ -824,7 +824,9 @@ def install(
     Leve InstallAborted avec un message actionnable en cas d'echec bloquant.
     """
     cfg.project_dir = project_dir
-    created = create_tree(cfg.data_root, cfg.config_root, list(cfg.services))
+    created = create_tree(
+        cfg.data_root, cfg.config_root, list(cfg.services), owner=(cfg.puid, cfg.pgid)
+    )
     on_progress(Progress("arborescence", f"{len(created)} dossiers crees"))
 
     written = compose.write_artifacts(cfg, project_dir)
@@ -1373,7 +1375,7 @@ def add_service(
     cfg.services.update(instances)
     on_progress(Progress("ajout", ", ".join(catalog.get(s).display_name for s in nouveaux)))
 
-    create_tree(cfg.data_root, cfg.config_root, nouveaux)
+    create_tree(cfg.data_root, cfg.config_root, nouveaux, owner=(cfg.puid, cfg.pgid))
     compose.write_artifacts(cfg, project_dir)
 
     # Pre-semis limite aux nouveaux : les anciens tournent, et reecrire la

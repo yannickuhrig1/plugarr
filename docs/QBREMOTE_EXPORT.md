@@ -63,6 +63,21 @@ généré par la page d'accès, adresse distante volontairement injoignable
 
 Faire une sauvegarde qbRemote avant toute restauration.
 
+## Fusion avec la sauvegarde de l'utilisateur
+
+« Partir de ma sauvegarde qbRemote » : le navigateur ouvre la sauvegarde avec
+son mot de passe (ou sans, si elle n'est pas chiffrée), ajoute le serveur
+PlugArr à `servers.json` avec l'identifiant suivant, et recopie tous les autres
+fichiers à l'octet près avant de rechiffrer avec le même mot de passe. Un
+serveur déjà nommé PlugArr est mis à jour, pas dupliqué. Rien ne quitte le
+navigateur. Vérifié sur une vraie sauvegarde 1.8.0 : 7 fichiers identiques,
+les 2 serveurs d'origine intacts (mêmes identifiants), PlugArr ajouté en 6.
+
+Validé sur le téléphone le 19 septembre 2026 : qbRemote propose alors toutes
+les parties (Paramètres, Serveurs, Historique), la restauration garde les
+2 serveurs de l'utilisateur et ajoute PlugArr, dont « Tester » joint le
+qBittorrent du banc par l'adresse locale.
+
 ## Validation
 
 `tests/js/qbremote_export.cjs` relit le fichier avec un déchiffreur WinZip AES

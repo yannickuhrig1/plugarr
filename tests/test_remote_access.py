@@ -178,3 +178,18 @@ def test_qbremote_export_is_readable_by_an_independent_aes_zip_reader():
     subprocess.run(["node", "tests/js/qbremote_export.cjs"],
                    cwd=Path(__file__).resolve().parent.parent,
                    check=True, capture_output=True, text=True)
+
+
+def test_merge_with_user_backups_keeps_everything_else():
+    """Fusion avec la sauvegarde de l'utilisateur (nzb360 et qbRemote) : rien
+    d'autre que les services PlugArr ne change. Flux Java de reference ecrit par
+    un vrai ObjectOutputStream, donnees fictives."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    if not shutil.which("node"):
+        pytest.skip("Node requis pour la fusion des sauvegardes")
+    subprocess.run(["node", "tests/js/fusion_export.cjs"],
+                   cwd=Path(__file__).resolve().parent.parent,
+                   check=True, capture_output=True, text=True)

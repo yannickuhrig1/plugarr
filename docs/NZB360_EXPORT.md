@@ -5,9 +5,9 @@ nzb360 (ZIP) dans « Configurer mon téléphone », ainsi que dans le HTML tél�
 
 ## Essai
 
-1. Faire une sauvegarde complète dans nzb360 avant tout essai. Utiliser de préférence
-   une installation séparée de l'application : le traitement des réglages existants
-   par la restauration n'a pas été vérifié.
+1. Faire une sauvegarde complète dans nzb360 avant tout essai : la restauration
+   remplace tous les réglages (constaté sur téléphone). Pour garder les siens,
+   partir de cette sauvegarde (voir « Fusion » plus bas).
 2. Choisir **nzb360**, puis le profil local ou distant dans le bloc d'export.
 3. Cocher la confirmation après avoir sauvegardé ses réglages.
 4. Télécharger le ZIP et le sélectionner dans la fonction de sauvegarde/restauration
@@ -45,6 +45,32 @@ PlugArr ne gère pas d'accès distant pour SABnzbd : il n'entre que dans le prof
 
 En démonstration, le nom du fichier comporte `demo` et les accès sont fictifs.
 Une restauration de cette démonstration ne donne pas une installation fonctionnelle.
+
+## Fusion avec la sauvegarde de l'utilisateur
+
+« Partir de ma sauvegarde nzb360 » : le navigateur relit les trois flux Java de
+la sauvegarde (chaînes, booléens, Integer, Long, Float, Double ; références
+Java comprises), puis n'écrit que les clés des services PlugArr. nzb360 n'a
+qu'un Sonarr, un Radarr, etc. par profil : un service déjà présent dans la
+sauvegarde (il a une adresse, même désactivé) est **gardé par défaut**, une
+case permet de le remplacer. Tout le reste est recopié : autres services,
+préférences, et `nzb360prefs.xml` (licence) à l'octet près. Un type Java inconnu
+fait refuser le fichier plutôt que de le réécrire au hasard.
+
+Vérifié sur une vraie sauvegarde 24.4.1 (132 + 10 clés) : relue puis réécrite,
+elle est égale à l'originale pour `ObjectInputStream` (mêmes clés, valeurs et
+types) ; en remplaçant Sonarr, seules ses 4 clés changent, plus l'interrupteur
+de bascule.
+
+Validé sur le téléphone le 19 septembre 2026 : sauvegarde fraîche fusionnée par
+l'interface (Radarr remplacé, le reste gardé), restauration acceptée. Le tiroir
+garde Torrents, Sonarr, Radarr et Tautulli ; Radarr passe sur celui du banc par
+l'adresse locale, Sonarr et Tautulli restent ceux de l'utilisateur.
+
+Piste suivante : les profils de serveurs de nzb360 (`servers.xml`, menu
+« Default » en bas du tiroir) permettraient d'ajouter PlugArr à côté du profil
+existant au lieu d'arbitrer service par service. Leur format demande une
+sauvegarde avec un second profil.
 
 ## Construction et confidentialité
 

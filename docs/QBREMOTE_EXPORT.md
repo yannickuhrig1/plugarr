@@ -92,8 +92,15 @@ Vérifié le 19 septembre 2026 : QR affiché sur le PC, scanné par l'appareil
 photo du téléphone, fichier reçu identique (même empreinte), serveur fermé
 après le téléchargement. Le générateur de QR code (octet, correction M,
 versions 1 à 10) donne les mêmes matrices que la bibliothèque `qrcode` sur
-112 cas. Sous Windows, le pare-feu peut demander une autorisation à la
-première ouverture du lien.
+112 cas.
+
+Sous Windows, avec `plugarr.exe` (essai du 19 septembre 2026, pare-feu en
+« bloquer les entrées » avec notification, Wi-Fi classé « Public ») : à la
+première ouverture d'un lien, Windows affiche sa fenêtre du pare-feu et le
+téléphone reste bloqué jusqu'au clic sur « Autoriser », qui crée une règle
+entrante pour les profils privé et public. La règle suit le chemin de
+l'exécutable : une version rangée ailleurs redemande l'autorisation. Sous le QR
+code, l'assistant le signale quand il tourne sous Windows.
 
 ## Validation
 

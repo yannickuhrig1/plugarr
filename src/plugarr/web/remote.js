@@ -615,7 +615,8 @@ globalThis.PlugArrRemote = (() => {
       box.replaceChildren(qrSvg(shared.url),
         el('p',(shared.demo?text('DÉMONSTRATION : aucun lien n’est réellement ouvert. ','DEMO: no link is actually opened. '):'')
           +text(`Scannez avec l’appareil photo du téléphone, connecté au même Wi-Fi que ce serveur. Le lien sert une seule fois, jusqu’à ${until}. Le fichier arrive dans Téléchargements : restaurez-le ensuite dans l’application.`,
-            `Scan with the phone camera, on the same Wi-Fi as this server. The link works once, until ${until}. The file lands in Downloads: then restore it in the app.`)),el('code',shared.url));
+            `Scan with the phone camera, on the same Wi-Fi as this server. The link works once, until ${until}. The file lands in Downloads: then restore it in the app.`)
+          +(shared.firewall_prompt?' '+text('Windows peut afficher une fenêtre du pare-feu pour PlugArr : cliquez « Autoriser », sinon le téléphone ne pourra pas télécharger le fichier.','Windows may show a firewall window for PlugArr: click "Allow", otherwise the phone cannot download the file.'):'')),el('code',shared.url));
     }catch(error){box.replaceChildren(el('p',error.message||text('Lien impossible à ouvrir.','The link could not be opened.')));}
   }
   function phoneButton(parent,prefix,action){

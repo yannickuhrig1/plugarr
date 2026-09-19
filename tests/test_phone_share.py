@@ -173,3 +173,11 @@ def test_en_demonstration_aucun_serveur_n_est_ouvert(assistant):
     assert reponse.json()["demo"] is True
     assert "192.0.2.50" in reponse.json()["url"]
     assert server.state.phone_share is None
+
+
+def test_sous_windows_la_fenetre_du_pare_feu_est_annoncee(partage, monkeypatch):
+    """plugarr.exe : le telephone reste bloque jusqu'au clic « Autoriser »."""
+    monkeypatch.setattr(phone_share.sys, "platform", "win32")
+    assert partage.publier(CONTENU, "f.zip")["firewall_prompt"] is True
+    monkeypatch.setattr(phone_share.sys, "platform", "linux")
+    assert partage.publier(CONTENU, "f.zip")["firewall_prompt"] is False

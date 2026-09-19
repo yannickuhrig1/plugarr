@@ -22,6 +22,7 @@ import ipaddress
 import re
 import secrets
 import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -78,6 +79,11 @@ class PartageTelephone:
         return {
             "url": f"http://{hote}:{serveur.server_address[1]}/t/{jeton}",
             "expires_in": int(self.duree),
+            # Sous Windows, le pare-feu bloque l'entree jusqu'au clic sur
+            # « Autoriser » dans sa fenetre, affichee a la premiere ouverture
+            # (constate avec plugarr.exe le 2026-09-19, reseau Wi-Fi en profil
+            # « Public »). La regle suit le chemin de l'executable.
+            "firewall_prompt": sys.platform == "win32",
         }
 
     def _servir(self, jeton: str) -> tuple[bytes, str] | None:

@@ -12,12 +12,12 @@ nzb360 (ZIP) dans « Configurer mon téléphone », ainsi que dans le HTML tél�
 3. Cocher la confirmation après avoir sauvegardé ses réglages.
 4. Télécharger le ZIP et le sélectionner dans la fonction de sauvegarde/restauration
    de nzb360 **24.4.1**. Ne pas décompresser ce ZIP pour l'import.
-5. Tester Sonarr, Radarr, qBittorrent et SABnzbd. Pour Tailscale, connecter aussi le téléphone.
+5. Tester Sonarr, Radarr, Lidarr, Seerr, qBittorrent ou Transmission, et SABnzbd. Pour Tailscale, connecter aussi le téléphone.
 
 Un fichier contient toutes les applications compatibles dont l'adresse et les
 identifiants sont disponibles pour le réseau choisi. Les exclusions sont affichées.
-Prowlarr et Seerr restent réservés à l'export Arr Control : leur format nzb360
-n'est pas établi par l'échantillon fourni.
+Prowlarr reste réservé à l'export Arr Control : nzb360 le range parmi les
+indexeurs, dans un objet Java qui lui est propre (voir « Relevé du 19 septembre »).
 
 ### Un seul fichier pour la maison et l'extérieur
 
@@ -43,6 +43,26 @@ clés génériques que nous attribuons à SABnzbd (nzb360 est né client SABnzbd
 **C'est une déduction, pas un constat** : à vérifier en premier sur le téléphone.
 PlugArr ne gère pas d'accès distant pour SABnzbd : il n'entre que dans le profil local.
 
+### Lidarr, Seerr et Transmission
+
+Clés relevées le 19 septembre 2026 dans une sauvegarde faite après avoir
+configuré ces services, avec de fausses adresses, dans un second profil :
+
+- Lidarr : préfixe `lidarr_`, même modèle que Radarr (`_server_enabled_preference`,
+  adresses principale et locale, `_server_SSID_preference`,
+  `_localconnectionswitch_preference`, `_apikey_preference`) ;
+- Seerr : préfixe `overseerr_`, même modèle ;
+- Transmission : les clés `torrent_` de qBittorrent, avec
+  `torrent_client_preference` à `transmission`. nzb360 n'a qu'un client
+  torrent par profil : qBittorrent passe avant Transmission quand les deux
+  sont installés.
+
+Comme SABnzbd, PlugArr ne leur donne pas d'accès distant : ils n'entrent que
+dans le profil local. PlugArr ne connaît pas la clé API de Seerr (Seerr la crée
+lui-même à sa configuration) : Seerr est donc annoncé comme exclu tant qu'elle
+manque. Aucun de ces trois services n'a encore été essayé en connexion réelle
+sur le téléphone.
+
 En démonstration, le nom du fichier comporte `demo` et les accès sont fictifs.
 Une restauration de cette démonstration ne donne pas une installation fonctionnelle.
 
@@ -67,17 +87,33 @@ l'interface (Radarr remplacé, le reste gardé), restauration acceptée. Le tiro
 garde Torrents, Sonarr, Radarr et Tautulli ; Radarr passe sur celui du banc par
 l'adresse locale, Sonarr et Tautulli restent ceux de l'utilisateur.
 
-Piste suivante : les profils de serveurs de nzb360 (`servers.xml`, menu
-« Default » en bas du tiroir) permettraient d'ajouter PlugArr à côté du profil
-existant au lieu d'arbitrer service par service. Leur format demande une
-sauvegarde avec un second profil.
+Un Transmission ou un qBittorrent déjà présent occupe le même emplacement
+torrent : la case de remplacement nomme le client de la sauvegarde.
+
+### Relevé du 19 septembre : profils et indexeurs
+
+- `servers.xml` est une `HashMap` dont la clé `servers` contient un
+  `java.util.HashSet` de chaînes : `"000Default*"`, `"001test"`. Chaque profil
+  autre que Default a ses réglages dans `NNN.xml` (`001.xml`), avec les mêmes
+  noms de clés ; Default reste dans `com.kevinforeman.nzb360_preferences.xml`.
+- `nzb360prefs.xml` note le profil en cours dans `lastActiveProfile` : `*` pour
+  Default, `001` pour le profil de `001.xml`.
+- Prowlarr est un indexeur : `nzb360indexers.bkp`, liste Java de
+  `com.kevinforeman.sabconnect.searchproviders.NewznabIndexer` (clé API, date
+  Joda, propriétés de serveur). Trop fragile à produire, PlugArr ne l'écrit pas.
+- La restauration ne supprime pas un indexeur absent de la sauvegarde.
+
+La fusion n'écrit que le profil Default et recopie `servers.xml`, les `NNN.xml`
+et les indexeurs à l'octet près. Si la sauvegarde est sur un autre profil,
+l'assistant le signale. Piste suivante : écrire un profil « PlugArr » à part
+(`002.xml` et une entrée dans le `HashSet`), ce qui demande d'écrire ce type Java.
 
 ## Construction et confidentialité
 
 Le ZIP contient trois flux de sérialisation Java HashMap, conformément à la structure
 observée dans la sauvegarde 24.4.1 fournie :
 
-- `com.kevinforeman.nzb360_preferences.xml` : version, activation des trois services,
+- `com.kevinforeman.nzb360_preferences.xml` : version, activation des services,
   adresses principales et identifiants de la stack concernée ; champs locaux/SSID
   remplis seulement en profil distant avec un nom de Wi-Fi, vides sinon.
 - `nzb360prefs.xml` : version 24.4.1 uniquement.

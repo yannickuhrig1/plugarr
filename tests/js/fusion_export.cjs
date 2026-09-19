@@ -69,6 +69,37 @@ const sauvegarde=R.zipStored([['com.kevinforeman.nzb360_preferences.xml',R.javaP
   assert.equal(prefsRemplace.get('nzbdrone_apikey_preference'),'CLE-PLUGARR');
   assert.equal(prefsRemplace.get('tautulli_apikey_preference'),'CLE-TAUTULLI');
   await assert.rejects(()=>R.inspectNzb360Backup(R.zipStored([['autre.txt',new Uint8Array([1])]])));
+  assert.equal(base.activeProfile,'*','profil Default par defaut');
+
+  // Emplacement torrent unique, deuxieme profil actif. servers.xml reprend la
+  // structure relevee (HashMap -> HashSet {"000Default*","001test"}) : illisible
+  // par readJavaPreferences, il doit etre recopie tel quel.
+  const profils=Uint8Array.from(Buffer.from(
+    'aced0005737200116a6176612e7574696c2e486173684d61700507dac1c31660d103000246000a6c6f6164466163746f724900097468726573686f6c6478703f40000000000001770800000002000000'
+    +'0174000773657276657273737200116a6176612e7574696c2e48617368536574ba44859596b8b7340300007870770c000000103f4000000000000274000b30303044656661756c742a740007303031746573747878','hex'));
+  assert.throws(()=>R.readJavaPreferences(profils));
+  const avecTransmission=R.zipStored([
+    ['com.kevinforeman.nzb360_preferences.xml',R.javaPreferences({...utilisateur,torrent_client_preference:'transmission',
+      torrent_server_enabled_preference:true,torrent_server_primary_connectionstring_preference:'http://192.0.2.9:9091'})],
+    ['nzb360prefs.xml',R.javaPreferences({...licence,lastActiveProfile:'001'})],['servers.xml',profils],
+    ['001.xml',R.javaPreferences({lidarr_server_enabled_preference:true})]]);
+  const base2=await R.inspectNzb360Backup(avecTransmission);
+  assert.equal(base2.activeProfile,'001');
+  assert.deepEqual(base2.configured.map(c=>c.id),['sonarr','torrent']);
+  const avecLidarr={services:[...services,{id:'lidarr',name:'Lidarr',local_url:'http://192.0.2.5:8686',remote_url:'',api_key:'CLE-LIDARR'}],demo:false};
+  const garde=R.mergeNzb360(base2,avecLidarr,'local');
+  assert.deepEqual([...garde.kept],['sonarr','torrent']);assert.deepEqual([...garde.added],['radarr','lidarr']);
+  const prefsGarde=(await R.inspectNzb360Backup(garde.bytes)).preferences;
+  assert.equal(prefsGarde.get('torrent_client_preference'),'transmission','Transmission de l utilisateur garde');
+  assert.equal(prefsGarde.get('lidarr_apikey_preference'),'CLE-LIDARR');
+  const relue=await R.readZipFiles(garde.bytes);
+  assert.deepEqual([...relue.find(([n])=>n==='servers.xml')[1]],[...profils],'profils recopies a l octet pres');
+  const origine=await R.readZipFiles(avecTransmission);
+  assert.deepEqual([...relue.find(([n])=>n==='001.xml')[1]],[...origine.find(([n])=>n==='001.xml')[1]],'profil 001 recopie');
+  const remplaceTorrent=R.mergeNzb360(base2,data,'local','',['torrent']);
+  assert.deepEqual([...remplaceTorrent.replaced],['qbittorrent']);
+  const prefsQb=(await R.inspectNzb360Backup(remplaceTorrent.bytes)).preferences;
+  assert.equal(prefsQb.get('torrent_client_preference'),'qbittorrent');assert.equal(prefsQb.get('torrent_username'),'essai');
 
   // -- qbRemote : fusion -------------------------------------------------------------
   const serveurs=[{id:4,name:'Seedbox',host:'seedbox.example.test',password:'MDP-UTILISATEUR'},{id:5,name:'Maison',host:'192.0.2.9'}];
@@ -94,7 +125,7 @@ const sauvegarde=R.zipStored([['com.kevinforeman.nzb360_preferences.xml',R.javaP
   const enClair=R.zipStored([['servers.json',new TextEncoder().encode(JSON.stringify(serveurs))]]);
   const depuisClair=await R.mergeQbRemote(enClair,'nouveau',data,'local');
   assert.deepEqual(Object.keys(readAesZip(depuisClair.bytes,'nouveau')),['manifest.json','servers.json']);
-  console.log('fusion : flux Java de reference, nzb360 (garde, ajoute, remplace) et qbRemote (chiffre, en clair, mise a jour) OK');
+  console.log('fusion : flux Java de reference, nzb360 (garde, ajoute, remplace, emplacement torrent, profils) et qbRemote (chiffre, en clair, mise a jour) OK');
 })().catch(error=>{console.error(error);process.exit(1);});
 
 // Dechiffreur WinZip AES independant de remote.js (node:crypto).

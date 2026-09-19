@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const context={URL,Date};vm.createContext(context);
 vm.runInContext(fs.readFileSync('src/plugarr/web/remote.js','utf8'),context);
 const build=context.PlugArrRemote.buildNzb360Export;
-const services=['sonarr','radarr','qbittorrent','seerr'].map(id=>({id,name:id,local_url:`http://192.0.2.5:8989/${id}`,remote_url:`https://${id}.example.test`,api_key:'TEST-API-KEY',username:'test-user',password:'TEST-é\u0000😀-password'}));
+const services=['sonarr','radarr','qbittorrent','prowlarr'].map(id=>({id,name:id,local_url:`http://192.0.2.5:8989/${id}`,remote_url:`https://${id}.example.test`,api_key:'TEST-API-KEY',username:'test-user',password:'TEST-é\u0000😀-password'}));
 const data={services,remote:{auth_url:'DO-NOT-EXPORT'},private_license:'DO-NOT-EXPORT'};
 const root=fs.mkdtempSync(path.resolve('build/nzb360-format-'));
 for(const network of ['local','remote']){
@@ -30,5 +30,19 @@ assert.equal(build({services:[{...sab,api_key:'-'}]},'local').count,0);
 const both=build(withSab,'remote','Maison');assert.equal(both.count,3);assert.equal(both.switching,3);
 fs.writeFileSync(path.join(root,'both.zip'),both.bytes);
 assert.equal(build(withSab,'local','Maison').switching,0,'a local profile needs no switch');
+// Lidarr, Seerr and Transmission: local profile only, like SABnzbd.
+const extra=[
+  {id:'lidarr',name:'Lidarr',local_url:'http://192.0.2.5:8686',remote_url:'',api_key:'TEST-LIDARR-KEY',username:'-',password:'-'},
+  {id:'seerr',name:'Seerr',local_url:'http://192.0.2.5:5055',remote_url:'',api_key:'TEST-SEERR-KEY',username:'-',password:'-'},
+  {id:'transmission',name:'Transmission',local_url:'http://192.0.2.5:9091',remote_url:'',api_key:'-',username:'tr-user',password:'TR-PASS'}];
+const localExtra=build({services:[services[0],...extra]},'local');assert.equal(localExtra.count,4);assert.equal(localExtra.omitted.length,0);
+fs.writeFileSync(path.join(root,'local-extra.zip'),localExtra.bytes);
+const remoteExtra=build({services:[...services,...extra]},'remote','Maison');assert.equal(remoteExtra.count,3);
+assert.deepEqual([...remoteExtra.omitted],['Lidarr','Seerr']);
+// One torrent slot in nzb360: qBittorrent keeps it, Transmission is left out.
+const qbFirst=build({services:[...services,...extra]},'local');assert.equal(qbFirst.count,5);
+fs.writeFileSync(path.join(root,'qb-first.zip'),qbFirst.bytes);
+assert.equal(build({services:[{...extra[0],api_key:'-'}]},'local').count,0);
+assert.equal(build({services:[{...extra[2],password:''}]},'local').count,0);
 console.log(root);
-console.log('nzb360 export: mappings, network isolation, missing credentials, oversized fields and secret exclusions OK');
+console.log('nzb360 export: mappings, network isolation, missing credentials, oversized fields and secret exclusions, Lidarr, Seerr and Transmission OK');

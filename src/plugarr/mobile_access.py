@@ -11,7 +11,7 @@ def append_to(page, cfg, host, *, remote=None, demo=False):
                  "url": inst.url(host), "local_url": inst.url(host),
                  "remote_url": (remote or {}).get("urls", {}).get(sid, ""),
                  "username": inst.username or "", "password": inst.password or "", "api_key": inst.api_key or ""}
-                for sid, inst in cfg.services.items() if sid in (*remote_access.SUPPORTED, "prowlarr", "seerr", "sabnzbd")]
+                for sid, inst in cfg.services.items() if sid in (*remote_access.SUPPORTED, "prowlarr", "seerr", "sabnzbd", "lidarr", "transmission")]
     if not services:
         return page
     remote_info = remote or remote_access.summary(cfg, demo=demo)

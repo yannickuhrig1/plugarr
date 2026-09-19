@@ -59,6 +59,27 @@ class Nzb360ExportCheck {
             check(Boolean.FALSE.equals(prefs.get("server_enabled_preference")));
             check(!prefs.containsKey("sabapi_preference"));
         }
-        System.out.println("JVM: all three ZIP entries deserialize correctly; credentials, booleans, Unicode, network mapping, SABnzbd and Wi-Fi switch OK");
+        // Lidarr, Seerr (overseerr_ keys) and Transmission (torrent slot), keys
+        // read from a 24.4.1 backup made after configuring them.
+        try (ZipFile zip = new ZipFile(new File(args[0], "local-extra.zip"))) {
+            Map<?, ?> prefs = read(zip, "com.kevinforeman.nzb360_preferences.xml");
+            for (String prefix : List.of("lidarr", "overseerr", "torrent")) {
+                check(Boolean.TRUE.equals(prefs.get(prefix + "_server_enabled_preference")));
+                check(((String)prefs.get(prefix + "_server_primary_connectionstring_preference")).startsWith("http://192.0.2.5:"));
+                check(Boolean.FALSE.equals(prefs.get(prefix + "_localconnectionswitch_preference")));
+            }
+            check(prefs.get("lidarr_apikey_preference").equals("TEST-LIDARR-KEY"));
+            check(prefs.get("overseerr_apikey_preference").equals("TEST-SEERR-KEY"));
+            check(prefs.get("torrent_client_preference").equals("transmission"));
+            check(prefs.get("torrent_username").equals("tr-user"));
+            check(prefs.get("torrent_password").equals("TR-PASS"));
+            check(prefs.get("torrent_rpc_path").equals(""));
+        }
+        try (ZipFile zip = new ZipFile(new File(args[0], "qb-first.zip"))) {
+            Map<?, ?> prefs = read(zip, "com.kevinforeman.nzb360_preferences.xml");
+            check(prefs.get("torrent_client_preference").equals("qbittorrent"));
+            check(prefs.get("torrent_username").equals("test-user"));
+        }
+        System.out.println("JVM: all three ZIP entries deserialize correctly; credentials, booleans, Unicode, network mapping, SABnzbd, Lidarr, Seerr, Transmission and Wi-Fi switch OK");
     }
 }

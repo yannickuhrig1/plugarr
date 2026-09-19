@@ -4,8 +4,8 @@ globalThis.PlugArrRemote = (() => {
   const $ = id => document.getElementById(id);
   const el = (tag, text) => { const n=document.createElement(tag); if(text!==undefined)n.textContent=text; return n; };
   const ids=['sonarr','radarr','qbittorrent'];
-  // Fiches du telephone : SABnzbd en plus, sans acces distant gere par PlugArr.
-  const mobileIds=[...ids,'sabnzbd'];
+  // Fiches du telephone : services sans acces distant gere par PlugArr en plus.
+  const mobileIds=[...ids,'sabnzbd','lidarr','seerr','transmission'];
   // Version 1 server-export schema observed in the user's Arr Control export.
   // Only service identifiers present in that sample are supported here.
   const arrServices={
@@ -399,22 +399,48 @@ globalThis.PlugArrRemote = (() => {
           sabnzbd_server_local_connectionstring_preference:local,server_SSID_preference:local?home:'',sabapi_preference:key};
       }else omitted.push(sab.name);
     }
+    // Lidarr, Seerr (`overseerr_` keys) and Transmission: key names read from a
+    // 24.4.1 backup made after configuring them in a second profile. Like
+    // SABnzbd, PlugArr gives them no remote access: local profile only.
+    // nzb360 has a single torrent slot: qBittorrent keeps it when both exist.
+    const present=value=>typeof value==='string'&&value.length>0&&value!=='-';
+    for(const [id,prefix] of [['lidarr','lidarr'],['seerr','overseerr'],['transmission','torrent']]){
+      const service=data.services.find(s=>s.id===id);
+      if(!service||(id==='transmission'&&groups.qbittorrent))continue;
+      let address='';
+      try{const url=new URL(network==='remote'?service.remote_url:(service.local_url||service.url));if(['http:','https:'].includes(url.protocol)&&!url.username&&!url.password)address=url.href.replace(/\/$/,'');}catch{}
+      const needed=id==='transmission'?[service.username,service.password]:[service.api_key];
+      if(!address||!needed.every(present)){omitted.push(service.name);continue;}
+      const secrets=id==='transmission'?{torrent_client_preference:'transmission',torrent_username:service.username,torrent_password:service.password,torrent_rpc_path:''}
+        :{[`${prefix}_apikey_preference`]:service.api_key};
+      const local=home?localAddress(id):'';
+      if(local)switching.add(id);
+      groups[id]={[`${prefix}_server_enabled_preference`]:true,[`${prefix}_server_primary_connectionstring_preference`]:address,
+        [`${prefix}_server_local_connectionstring_preference`]:local,[`${prefix}_server_SSID_preference`]:local?home:'',
+        [`${prefix}_localconnectionswitch_preference`]:Boolean(local),...secrets};
+    }
     return {groups,omitted,switching};
   }
   function buildNzb360Export(data,network='local',ssid=''){
     const {groups,omitted,switching}=nzb360Groups(data,network,ssid);
-    const preferences={version:'24.4.1',nzbdrone_server_enabled_preference:false,radarr_server_enabled_preference:false,torrent_server_enabled_preference:false,server_enabled_preference:false};
+    const preferences={version:'24.4.1',nzbdrone_server_enabled_preference:false,radarr_server_enabled_preference:false,torrent_server_enabled_preference:false,server_enabled_preference:false,
+      lidarr_server_enabled_preference:false,overseerr_server_enabled_preference:false};
     for(const group of Object.values(groups))Object.assign(preferences,group);
     const files=[['com.kevinforeman.nzb360_preferences.xml',javaPreferences(preferences)],
       ['nzb360prefs.xml',javaPreferences({version:'24.4.1'})],['servers.xml',javaPreferences({})]];
     return {bytes:zipStored(files),count:Object.keys(groups).length,omitted,switching:switching.size};
   }
   const NZB360_FILE='com.kevinforeman.nzb360_preferences.xml';
+  // Slots of the Default profile. qBittorrent and Transmission share the
+  // single torrent slot (`torrent_` keys, client in torrent_client_preference).
   const NZB360_PRIMARY={sonarr:'nzbdrone_server_primary_connectionstring_preference',radarr:'radarr_server_primary_connectionstring_preference',
-    qbittorrent:'torrent_server_primary_connectionstring_preference',sabnzbd:'sabnzbd_server_primary_connectionstring_preference'};
+    torrent:'torrent_server_primary_connectionstring_preference',sabnzbd:'sabnzbd_server_primary_connectionstring_preference',
+    lidarr:'lidarr_server_primary_connectionstring_preference',seerr:'overseerr_server_primary_connectionstring_preference'};
   const NZB360_ENABLED={sonarr:'nzbdrone_server_enabled_preference',radarr:'radarr_server_enabled_preference',
-    qbittorrent:'torrent_server_enabled_preference',sabnzbd:'server_enabled_preference'};
-  const NZB360_NAMES={sonarr:'Sonarr',radarr:'Radarr',qbittorrent:'qBittorrent',sabnzbd:'SABnzbd'};
+    torrent:'torrent_server_enabled_preference',sabnzbd:'server_enabled_preference',
+    lidarr:'lidarr_server_enabled_preference',seerr:'overseerr_server_enabled_preference'};
+  const NZB360_NAMES={sonarr:'Sonarr',radarr:'Radarr',qbittorrent:'qBittorrent',transmission:'Transmission',sabnzbd:'SABnzbd',lidarr:'Lidarr',seerr:'Seerr'};
+  const nzbSlot=id=>['qbittorrent','transmission'].includes(id)?'torrent':id;
   // A service counts as present as soon as it has an address, even disabled:
   // replacing it would lose that address.
   async function inspectNzb360Backup(bytes){
@@ -425,19 +451,29 @@ globalThis.PlugArrRemote = (() => {
     const configured=Object.keys(NZB360_PRIMARY)
       .filter(id=>{const value=preferences.get(NZB360_PRIMARY[id]);return typeof value==='string'&&value.length>0;})
       .map(id=>({id,url:preferences.get(NZB360_PRIMARY[id]),enabled:preferences.get(NZB360_ENABLED[id])===true}));
-    return {files,preferences,configured};
+    // PlugArr writes the Default profile. nzb360prefs.xml names the profile in
+    // use: "*" for Default, "001" for the profile stored in 001.xml, etc.
+    let activeProfile='*';
+    try{const app=files.find(([name])=>name==='nzb360prefs.xml');const value=app&&readJavaPreferences(app[1]).get('lastActiveProfile');if(typeof value==='string'&&value)activeProfile=value;}catch{}
+    return {files,preferences,configured,activeProfile};
+  }
+  // Name shown for an occupied slot: the torrent slot names its client.
+  function nzbSlotName(base,slot){
+    if(slot!=='torrent')return NZB360_NAMES[slot];
+    const client=base.preferences.get('torrent_client_preference');
+    return NZB360_NAMES[client]||text('Client torrent','Torrent client');
   }
   function mergeNzb360(base,data,network='local',ssid='',replace=[]){
     const {groups,omitted,switching}=nzb360Groups(data,network,ssid);
     const preferences=new Map(base.preferences),added=[],replaced=[],kept=[];
     for(const [id,group] of Object.entries(groups)){
-      const present=base.configured.some(c=>c.id===id);
-      if(present&&!replace.includes(id)){kept.push(id);continue;}
+      const present=base.configured.some(c=>c.id===nzbSlot(id));
+      if(present&&!replace.includes(nzbSlot(id))){kept.push(nzbSlot(id));continue;}
       for(const [key,value] of Object.entries(group))preferences.set(key,value);
       (present?replaced:added).push(id);
     }
     const files=base.files.map(([name,content])=>[name,name===NZB360_FILE?javaPreferences(Object.fromEntries(preferences)):content]);
-    return {bytes:zipStored(files),added,replaced,kept,omitted,switching:[...switching].filter(id=>!kept.includes(id)).length};
+    return {bytes:zipStored(files),added,replaced,kept,omitted,switching:[...switching].filter(id=>!kept.includes(nzbSlot(id))).length};
   }
   function renderNzbExport(){
     const box=$('nzb-export');if(!box)return;
@@ -453,7 +489,7 @@ globalThis.PlugArrRemote = (() => {
       const switching=result.switching
         ?text(` Sur le Wi-Fi « ${$('nzb-export-ssid').value.trim()} », ${result.switching} application(s) passent sur l’adresse locale. Autorisez la localisation quand nzb360 la demande : Android en a besoin pour lire le nom du Wi-Fi.`,` On Wi-Fi "${$('nzb-export-ssid').value.trim()}", ${result.switching} service(s) switch to the local address. Allow location when nzb360 asks: Android needs it to read the Wi-Fi name.`)
         :(distant?text(' Sans nom de Wi-Fi, ce profil utilise toujours l’adresse distante.',' Without a Wi-Fi name, this profile always uses the remote address.'):'');
-      $('nzb-export-notice').textContent=text(`nzb360 24.4.1 : ${result.count} application(s) parmi Sonarr, Radarr, qBittorrent et SABnzbd (SABnzbd encore expérimental).`, `nzb360 24.4.1: ${result.count} service(s) among Sonarr, Radarr, qBittorrent and SABnzbd (SABnzbd still experimental).`)
+      $('nzb-export-notice').textContent=text(`nzb360 24.4.1 : ${result.count} application(s) parmi Sonarr, Radarr, Lidarr, Seerr, qBittorrent ou Transmission, et SABnzbd. nzb360 n’a qu’un client torrent : qBittorrent passe avant Transmission. Lidarr, Seerr, Transmission et SABnzbd n’ont pas encore été essayés sur un téléphone.`, `nzb360 24.4.1: ${result.count} service(s) among Sonarr, Radarr, Lidarr, Seerr, qBittorrent or Transmission, and SABnzbd. nzb360 has a single torrent client: qBittorrent comes before Transmission. Lidarr, Seerr, Transmission and SABnzbd have not yet been tried on a phone.`)
         +switching
         +(result.omitted.length?' '+text('Exclues (adresse ou identifiants indisponibles pour ce réseau) : ','Excluded (address or credentials unavailable for this network): ')+result.omitted.join(', ')+'.':'')
         +(result.merge?' '+result.merge:'')
@@ -467,10 +503,13 @@ globalThis.PlugArrRemote = (() => {
   function nzbResult(network,ssid){
     if(!nzbBase)return buildNzb360Export(current,network,ssid);
     const result=mergeNzb360(nzbBase,current,network,ssid,nzbReplace());
+    // added/replaced name PlugArr's services, kept names the user's slots.
     const names=list=>list.map(id=>NZB360_NAMES[id]).join(', ')||text('aucune','none');
+    const slots=list=>list.map(slot=>nzbSlotName(nzbBase,slot)).join(', ')||text('aucune','none');
+    const profile=nzbBase.activeProfile!=='*'?' '+text('Votre sauvegarde est sur un autre profil que Default : les applications PlugArr sont dans le profil Default, à choisir en bas du menu de nzb360.','Your backup is on a profile other than Default: the PlugArr services are in the Default profile, selectable at the bottom of the nzb360 menu.'):'';
     return {...result,count:result.added.length+result.replaced.length,
-      merge:text(`Fusion avec votre sauvegarde : ajoutées : ${names(result.added)} ; remplacées : ${names(result.replaced)} ; gardées telles quelles : ${names(result.kept)}. Tout le reste de votre sauvegarde est conservé (autres services, préférences, licence).`,
-        `Merged with your backup: added: ${names(result.added)}; replaced: ${names(result.replaced)}; kept as they are: ${names(result.kept)}. Everything else in your backup is kept (other services, preferences, licence).`)};
+      merge:text(`Fusion avec votre sauvegarde : ajoutées : ${names(result.added)} ; remplacées : ${names(result.replaced)} ; gardées telles quelles : ${slots(result.kept)}. Tout le reste de votre sauvegarde est conservé (autres services, profils, préférences, licence).${profile}`,
+        `Merged with your backup: added: ${names(result.added)}; replaced: ${names(result.replaced)}; kept as they are: ${slots(result.kept)}. Everything else in your backup is kept (other services, profiles, preferences, licence).${profile}`)};
   }
   async function loadNzbBase(){
     const file=$('nzb-export-base').files[0];
@@ -484,7 +523,7 @@ globalThis.PlugArrRemote = (() => {
           const label=el('label'),box=el('input');label.className='inline-choice';box.type='checkbox';box.dataset.replace=service.id;
           box.addEventListener('change',()=>{$('nzb-export-confirm').checked=false;renderNzbExport();});
           const detail=service.url+(service.enabled?'':text(', désactivé',', disabled'));
-          label.append(box,el('span',text(`Remplacer ${NZB360_NAMES[service.id]} (${detail}) par celui de PlugArr`,`Replace ${NZB360_NAMES[service.id]} (${detail}) with PlugArr's`)));
+          label.append(box,el('span',text(`Remplacer ${nzbSlotName(nzbBase,service.id)} (${detail}) par celui de PlugArr`,`Replace ${nzbSlotName(nzbBase,service.id)} (${detail}) with PlugArr's`)));
           $('nzb-export-conflicts').append(label);
         }
       }catch{nzbBase=null;nzbBaseError=text('Ce fichier n’est pas une sauvegarde nzb360 lisible : export sans fusion.','This file is not a readable nzb360 backup: export without merge.');}
@@ -722,7 +761,7 @@ globalThis.PlugArrRemote = (() => {
     $('mobile-help').textContent=note;
     const rows=[[text('Nom','Name'),service.name],[text('URL complète','Full URL'),raw],[text('Hôte (si demandé séparément)','Host (if requested separately)'),url.hostname],[text('Port','Port'),url.port||(url.protocol==='https:'?'443':'80')],['HTTPS / SSL',url.protocol==='https:'?text('Activé','Enabled'):text('Désactivé','Disabled')]];
     if(url.pathname!=='/')rows.push([text('Chemin de base','Base path'),url.pathname]);
-    if(service.id==='qbittorrent')rows.push([text('Utilisateur','Username'),service.username],[text('Mot de passe','Password'),service.password,true]);
+    if(['qbittorrent','transmission'].includes(service.id))rows.push([text('Utilisateur','Username'),service.username],[text('Mot de passe','Password'),service.password,true]);
     else rows.push([text('Clé API','API key'),service.api_key,true]);
     rows.forEach(([label,value,secret])=>$('mobile-fields').append(field(label,value||'',secret)));
     $('mobile-copy-status').textContent='';

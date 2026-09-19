@@ -501,13 +501,41 @@ The honest route is probably to pin the mod by tag like everything else, to offe
 it as an explicit option rather than a default, and to write in the wizard what
 it implies. Not to enable it silently because it looks nicer.
 
+### Measured on 19 September 2026
+
+On a disposable qBittorrent 5.2.3 on the test bench, `lscr.io/linuxserver/qbittorrent`,
+with an internal Docker network to simulate having no Internet.
+
+- **Pinning: possible for both.** The linuxserver mod loader (`docker-mods.v3`)
+  accepts `repo:tag@sha256:…` and then downloads that exact version. VueTorrent
+  publishes versioned tags (`2.35.0`); theme.park only floating per-app tags
+  (`qbittorrent`), so only the digest freezes it. Verified:
+  `vuetorrent-lsio-mod:2.35.0@sha256:f644…` is downloaded, installed, and
+  qBittorrent serves VueTorrent.
+- **Without Internet, qBittorrent does not break, but loses VueTorrent for good.**
+  Container recreated offline: the mod is skipped ("not found in modcache,
+  skipping"), qBittorrent serves its original interface, and **rewrites
+  `WebUI\AlternativeUIEnabled=false`** since `/vuetorrent` is missing. Once the
+  network is back the mod is there again but the interface stays the original
+  one: a single outage is enough.
+- **Measured fix: mount `/modcache` as a volume.** The loader keeps the mod
+  archive there; recreated offline, the container applies it from that cache
+  ("OFFLINE: … found in modcache") and VueTorrent stays, setting intact.
+- **VueTorrent and theme.park exclude each other.** Together on a clean
+  configuration, qBittorrent serves its original interface, themed: theme.park
+  wins. It is one **or** the other, not both.
+
 ### What remains to be done for 0.10.0
 
-- [ ] Find a pinnable version of each mod, or write down why there is none.
-- [ ] Measure what qBittorrent does when it restarts without access to GitHub,
-      mod by mod.
-- [ ] Check VueTorrent and theme.park together on the same qBittorrent
-      (`mod1|mod2`).
+- [x] Find a pinnable version of each mod: by digest for both, and by
+      versioned tag as well for VueTorrent.
+- [x] Measure what qBittorrent does when it restarts without access to GitHub:
+      see above. Rule kept: `/modcache` as a volume under `CONFIG_ROOT`, so the
+      stack restarts offline without losing anything.
+- [x] Check VueTorrent and theme.park together: they exclude each other, the
+      wizard will offer one or the other.
+- [ ] Find what theme.park changes in `qBittorrent.conf` to win, and whether
+      removing the mod gives back the original interface cleanly.
 - [ ] Set `WebUI\AlternativeUIEnabled` and `WebUI\RootFolder` when pre-seeding
       `qBittorrent.conf`.
 - [ ] Offer it in the web wizard and the TUI, as an explicit option, with what it

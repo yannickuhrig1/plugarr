@@ -510,14 +510,41 @@ La voie honnête est probablement d'épingler le mod par tag comme le reste, de 
 proposer en option explicite plutôt que par défaut, et d'écrire dans l'assistant
 ce que ça implique. Pas de l'activer en silence pour que ce soit joli.
 
+### Mesuré le 19 septembre 2026
+
+Sur un qBittorrent 5.2.3 jetable du banc, `lscr.io/linuxserver/qbittorrent`,
+avec un réseau Docker interne pour simuler l'absence d'Internet.
+
+- **Épinglage : possible pour les deux.** Le chargeur de mods de linuxserver
+  (`docker-mods.v3`) accepte `dépôt:tag@sha256:…` et télécharge alors cette
+  version précise. VueTorrent publie des tags versionnés (`2.35.0`), theme.park
+  seulement des tags flottants par application (`qbittorrent`) : pour lui, seul
+  le condensat fige la version. Vérifié : `vuetorrent-lsio-mod:2.35.0@sha256:f644…`
+  est téléchargé, installé, et qBittorrent sert VueTorrent.
+- **Sans Internet, qBittorrent ne casse pas, mais perd VueTorrent pour de bon.**
+  Conteneur recréé hors ligne : le mod est sauté (« not found in modcache,
+  skipping »), qBittorrent sert son interface d'origine, et **réécrit
+  `WebUI\AlternativeUIEnabled=false`** faute de trouver `/vuetorrent`. Le réseau
+  revenu, le mod est de nouveau là mais l'interface reste celle d'origine : une
+  seule coupure suffit.
+- **Parade mesurée : monter `/modcache` en volume.** Le chargeur y garde
+  l'archive du mod ; recréé hors ligne, le conteneur l'applique depuis ce cache
+  (« OFFLINE: … found in modcache ») et VueTorrent reste affiché, réglage intact.
+- **VueTorrent et theme.park s'excluent.** Ensemble sur une configuration propre,
+  qBittorrent sert son interface d'origine, thémée : theme.park l'emporte. C'est
+  l'un **ou** l'autre, pas les deux.
+
 ### Ce qu'il reste à faire pour la 0.10.0
 
-- [ ] Trouver une version épinglable de chaque mod, ou écrire pourquoi il n'y
-      en a pas.
-- [ ] Mesurer ce que devient qBittorrent quand il redémarre sans accès à
-      GitHub, mod par mod.
-- [ ] Vérifier VueTorrent et theme.park ensemble sur le même qBittorrent
-      (`mod1|mod2`).
+- [x] Trouver une version épinglable de chaque mod : par condensat pour les
+      deux, et par tag versionné en plus pour VueTorrent.
+- [x] Mesurer ce que devient qBittorrent quand il redémarre sans accès à
+      GitHub : voir ci-dessus. Règle retenue : `/modcache` en volume sous
+      `CONFIG_ROOT`, pour que la pile redémarre hors ligne sans rien perdre.
+- [x] Vérifier VueTorrent et theme.park ensemble : ils s'excluent, l'assistant
+      proposera l'un ou l'autre.
+- [ ] Relever ce que theme.park change dans `qBittorrent.conf` pour l'emporter,
+      et si le retrait du mod rend l'interface d'origine sans reste.
 - [ ] Poser `WebUI\AlternativeUIEnabled` et `WebUI\RootFolder` au pré-semis de
       `qBittorrent.conf`.
 - [ ] Le proposer dans l'assistant web et le TUI, en option explicite, avec ce

@@ -40,7 +40,9 @@ main{max-width:980px;margin:0 auto;padding:24px 16px 48px}h1{font-size:1.6rem;ma
 .carte{padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0;overflow-wrap:anywhere}
 .carte strong{display:block;font-size:1.15rem;margin-top:4px}.carte small{display:block;color:var(--muted)}
 .etat{display:flex;align-items:center;gap:8px}.etat::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--ko);flex:none}.etat.up::before{background:var(--ok)}
-meter{width:100%;height:14px}.disque{margin:12px 0}form{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+meter{width:100%;height:14px}.disque{margin:12px 0}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}tr.alerte td{color:var(--ko);font-weight:600}
+@media(max-width:650px){table{display:block;overflow-x:auto}}form{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
 input,button{font:inherit;padding:10px;min-height:44px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text)}button{cursor:pointer}
 </style>"""
 
@@ -51,6 +53,7 @@ _PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <h2>Débits</h2><div id="debits" class="grille"></div>
 <h2>Sortie du VPN</h2><p id="vpn">Lecture…</p>
 <h2>Disques</h2><div id="disques"></div>
+<div id="conteneurs-bloc" hidden><h2>Conteneurs</h2><table id="conteneurs"><thead><tr><th>Conteneur</th><th>État</th><th>Processeur</th><th>Mémoire</th><th>Redémarrages</th></tr></thead><tbody></tbody></table></div>
 <p id="etat" class="note" role="status"></p>
 <form method="post" action="/logout"><button type="submit">Se déconnecter</button></form></main>
 <script>
@@ -59,11 +62,16 @@ const el=(tag,text,cls)=>{{const e=document.createElement(tag);if(text!==undefin
 const nb=(x,d)=>x.toLocaleString('fr-FR',{{minimumFractionDigits:d,maximumFractionDigits:d}});
 const debit=o=>o==null?'non mesuré':o<1024?o+' o/s':o<1048576?nb(o/1024,0)+' Ko/s':nb(o/1048576,1)+' Mo/s';
 const taille=o=>o>=1099511627776?nb(o/1099511627776,2)+' To':nb(o/1073741824,1)+' Go';
+const octets=o=>o<1048576?nb(o/1024,0)+' Ko':o<1073741824?nb(o/1048576,0)+' Mo':nb(o/1073741824,2)+' Go';
 async function lire(){{if(document.hidden)return;try{{const r=await fetch('/api/veille',{{credentials:'same-origin'}});if(r.status===401){{location.reload();return}}const d=await r.json();
 $('services').replaceChildren(...(d.services||[]).map(s=>{{const c=el('div',undefined,'carte');c.append(el('span',s.name,'etat'+(s.up?' up':'')),el('small',s.up?'répond':'ne répond pas · '+s.detail));return c}}));
 $('debits').replaceChildren(...(d.debits.length?d.debits.map(c=>{{const m=el('div',undefined,'carte');m.append(c.name,el('strong',c.ok?'↓ '+debit(c.down)+(c.up==null?'':' · ↑ '+debit(c.up)):'Injoignable'),el('small',c.detail));return m}}):[el('p','Aucun client de téléchargement installé.')]));
 const v=d.vpn;$('vpn').textContent=v==null?'Aucun VPN configuré : les téléchargements sortent par votre propre adresse.':v.ok?v.ip+' · '+[v.ville,v.pays].filter(Boolean).join(', ')+(v.operateur?' · '+v.operateur:''):'Non vérifiée : '+v.detail;
 $('disques').replaceChildren(...d.disques.map(g=>{{const b=el('div',undefined,'disque');const m=el('meter');m.min=0;m.max=100;m.low=80;m.high=90;m.optimum=0;m.value=g.utilise_pct;const noms=g.dossiers.length>4?g.dossiers.slice(0,4).join(', ')+' et '+(g.dossiers.length-4)+' autres':g.dossiers.join(', ');b.append(el('strong',taille(g.libre)+' libres sur '+taille(g.total)+' ('+nb(g.utilise_pct,1)+' % utilisés)'),m,el('small',g.chemin+' · '+noms,'note'));return b}}));
+const cs=d.conteneurs||[];$('conteneurs-bloc').hidden=cs.length===0;
+$('conteneurs').tBodies[0].replaceChildren(...cs.map(c=>{{const r=el('tr',undefined,(c.oom||c.statut!=='running'||c.redemarrages>2)?'alerte':undefined);
+const etat=[c.statut,c.sante,c.oom?'arrêté faute de mémoire':'',c.statut!=='running'&&c.code?'code '+c.code:''].filter(Boolean).join(' · ');
+r.append(el('td',c.service),el('td',etat),el('td',c.cpu_pct==null?'—':nb(c.cpu_pct,1)+' %'),el('td',c.memoire==null?'—':octets(c.memoire)+(c.memoire_max?' sur '+octets(c.memoire_max):'')),el('td',String(c.redemarrages)));return r}}));
 $('etat').textContent='Relevé à '+new Date().toLocaleTimeString()}}catch(e){{$('etat').textContent='Veille indisponible : '+e.message}}}}
 lire();setInterval(lire,5000);document.addEventListener('visibilitychange',lire)}})();
 </script></body></html>"""

@@ -421,12 +421,22 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       téléchargement. Sortie du VPN relevée sur un vrai tunnel ProtonVPN. Reste
       à monter les racines en lecture seule le jour où la veille passera en
       conteneur.
-- [ ] Niveau 2, socket en lecture seule derrière un proxy (POST refusé), en
-      option explicite : CPU et RAM par conteneur, boucles de redémarrage, kills
-      OOM, journaux. Son coût s'écrit à l'écran, pas dans un fichier :
-      `GET /containers/{id}/json` rend les variables d'environnement RÉSOLUES —
-      vérifié — donc la clé privée WireGuard, les clés API et les mots de passe
-      que `.env` est censé garder.
+- [x] Niveau 2 sur l'HÔTE, par la ligne de commande Docker (`runner.py`,
+      `veille.conteneurs`) : processeur, mémoire, compteur de redémarrages,
+      kill OOM, code de sortie et santé, par conteneur. Des CHAMPS choisis,
+      jamais `docker inspect` entier : il rend les variables d'environnement
+      RÉSOLUES — vérifié — donc la clé privée WireGuard, les clés API et les
+      mots de passe que `.env` est censé garder. Relevé sur le banc le
+      2026-09-20 : 9 conteneurs, 2,1 s par lecture (`docker stats` prend deux
+      mesures espacées), d'où un cache de 10 s pour une page rafraîchie toutes
+      les 5 s. Tableau vérifié dans un vrai navigateur, console et page
+      autonome.
+- [ ] Niveau 2 dans un CONTENEUR : socket en lecture seule derrière un proxy
+      (POST refusé), en option explicite, pour la veille qui tourne dans la
+      pile. Sans lui, elle reste sans socket et la section disparaît au lieu de
+      mentir. Attend que la veille soit branchée dans le compose.
+- [ ] Journaux des conteneurs dans la veille : à peser à part, un journal peut
+      porter des identifiants (Gluetun écrit sa configuration au démarrage).
 - [x] N'exposer la veille qu'authentifiée : même mot de passe que la console
       (`adminauth`), mêmes sessions limitées. Sans mot de passe, elle refuse
       d'écouter ailleurs que sur 127.0.0.1 (vérifié dans le conteneur).

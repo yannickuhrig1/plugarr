@@ -97,6 +97,15 @@ def test_la_page_ne_porte_aucun_bouton_d_action():
     assert boutons == 1 and "Se déconnecter" in page
 
 
+def test_la_section_des_conteneurs_est_cachee_tant_qu_elle_est_vide():
+    """En conteneur, la veille n'a pas de socket Docker : la liste arrive
+    vide, et la section doit disparaitre au lieu de montrer un tableau nu."""
+    page = veille_serveur._PAGE.format(style="")
+
+    assert '<div id="conteneurs-bloc" hidden>' in page
+    assert "$('conteneurs-bloc').hidden=cs.length===0" in page
+
+
 # ------------------------------------------------------- adresses internes
 
 

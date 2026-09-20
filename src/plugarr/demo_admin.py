@@ -138,6 +138,12 @@ class DemoHandler(BaseHTTPRequestHandler):
                         {'dossiers': ['Données', 'torrents', 'usenet', 'media'], 'chemin': '/demo/media',
                          'total': 4096 * go, 'libre': 380 * go, 'utilise_pct': 90.7},
                     ],
+                    'conteneurs': [
+                        {'nom': f'demo-{sid}', 'service': sid, 'statut': 'running', 'sante': '',
+                         'redemarrages': 0, 'oom': False, 'code': 0, 'cpu_pct': 1.4,
+                         'memoire': 180 * 1024 ** 2, 'memoire_max': 4 * go}
+                        for sid in list(srv.cfg.services)[:4]
+                    ],
                 }
             elif route == '/api/doctor':
                 data = {'failed': 0, 'checks': [{'name': 'Diagnostic fictif', 'ok': True,

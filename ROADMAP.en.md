@@ -414,11 +414,21 @@ Dozzle reads logs and asks for the socket.
       server, free space per disk, throughput through the download clients.
       VPN exit read on a real ProtonVPN tunnel. Still to do: mount the roots
       read-only once the watch moves into a container.
-- [ ] Level 2, read-only socket behind a proxy (POST refused), as an explicit
-      option: CPU and RAM per container, restart loops, OOM kills, logs. Its cost
-      belongs on the screen, not in a file: `GET /containers/{id}/json` returns
-      the RESOLVED environment variables — verified — hence the WireGuard private
-      key, the API keys and the passwords `.env` is meant to keep.
+- [x] Level 2 on the HOST, through the Docker command line (`runner.py`,
+      `veille.conteneurs`): CPU, memory, restart count, OOM kill, exit code and
+      health, per container. Chosen FIELDS, never the whole `docker inspect`:
+      it returns the RESOLVED environment variables — verified — hence the
+      WireGuard private key, the API keys and the passwords `.env` is meant to
+      keep. Measured on the bench on 2026-09-20: 9 containers, 2.1 s per read
+      (`docker stats` takes two spaced samples), hence a 10 s cache for a page
+      that refreshes every 5 s. Table checked in a real browser, both in the
+      console and on the standalone page.
+- [ ] Level 2 in a CONTAINER: read-only socket behind a proxy (POST refused),
+      as an explicit option, for the watch running inside the stack. Without
+      it, the watch stays socket-free and the section disappears rather than
+      lie. Waits for the watch to be wired into the compose file.
+- [ ] Container logs in the watch: to be weighed separately, a log can carry
+      credentials (Gluetun writes its configuration at startup).
 - [x] Expose the watch only behind authentication: same password as the
       console (`adminauth`), same limited sessions. Without a password it
       refuses to listen anywhere but 127.0.0.1 (checked in the container).

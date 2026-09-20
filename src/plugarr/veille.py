@@ -8,7 +8,10 @@ ou la donnee existe deja :
 - les debits, aupres des clients de telechargement, par leurs propres API
   (routes relevees le 2026-09-19 sur les instances du banc) ;
 - la sortie du VPN, au serveur de controle de Gluetun, que `vpncheck` joint
-  deja par `docker exec` : son port n'est jamais publie sur l'hote.
+  deja par `docker exec` : son port n'est jamais publie sur l'hote ;
+- le CPU, la memoire, les redemarrages et les kills OOM par conteneur, par la
+  ligne de commande Docker, sur l'hote uniquement. Des CHAMPS choisis, jamais
+  l'inspection entiere : elle rend les variables d'environnement resolues.
 
 Un service qui ne repond pas donne une ligne en erreur, jamais une page en
 erreur : c'est une veille, elle doit rester lisible quand quelque chose tombe.
@@ -19,7 +22,8 @@ Deux emplacements, un seul code :
   `docker exec` ;
 - dans un CONTENEUR de la pile (`interne=True`, `plugarr veille --interne`) :
   les services par leur nom sur le reseau compose, Gluetun par HTTP. Aucun
-  socket Docker, donc aucun droit sur les conteneurs.
+  socket Docker, donc aucun droit sur les conteneurs, et pas de CPU ni de
+  memoire par conteneur : la section disparait au lieu de mentir.
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ import httpx
 from . import catalog, gluetun_auth
 from .layout import DATA_SUBDIRS
 from .models import StackConfig
-from .runner import exec_in
+from .runner import etats_conteneurs, exec_in, stats_conteneurs
 
 #: Delai par client. La page se rafraichit toutes les 5 s : un client qui ne
 #: repond pas ne doit pas la figer.
@@ -57,8 +61,16 @@ CONTROLE_GLUETUN = "http://127.0.0.1:8000/v1/publicip/ip"
 #: mais Gluetun previent a chaque appel que la route deviendra protegee.
 CONTROLE_GLUETUN_INTERNE = "http://gluetun:8000/v1/publicip/ip"
 
+#: Le releve des conteneurs coute `docker stats`, qui prend DEUX mesures
+#: espacees pour calculer le CPU : 2,1 s mesurees sur le banc pour neuf
+#: conteneurs, le 2026-09-20. La page se rafraichit toutes les 5 s ; sans ce
+#: cache, Docker travaillerait presque sans arret.
+DUREE_CACHE_CONTENEURS = 10.0
+
 _cache_vpn: dict[str, tuple[float, dict]] = {}
 _verrou_vpn = threading.Lock()
+_cache_conteneurs: dict[str, tuple[float, list[dict]]] = {}
+_verrou_conteneurs = threading.Lock()
 
 
 # ------------------------------------------------------------------- disques
@@ -225,6 +237,55 @@ def etats(cfg: StackConfig, *, interne: bool = False) -> list[dict]:
         return list(pool.map(lambda sid: _etat(cfg, sid, interne), presents))
 
 
+# -------------------------------------------------------------- conteneurs
+
+
+def _noms_conteneurs(cfg: StackConfig) -> list[str]:
+    noms = [f"{cfg.project_name}-{sid}" for sid in catalog.STARTUP_ORDER if cfg.enabled(sid)]
+    if cfg.vpn_enabled:
+        noms.insert(0, f"{cfg.project_name}-gluetun")
+    return noms
+
+
+def conteneurs(cfg: StackConfig, *, interne: bool = False) -> list[dict]:
+    """CPU, memoire, redemarrages et kills OOM, un element par conteneur.
+
+    Lu par la ligne de commande Docker, sur l'HOTE seulement. Dans un
+    conteneur (`interne`), la veille n'a pas de socket Docker et n'en veut
+    pas : la liste est vide, et la page n'affiche pas la section.
+
+    Un compteur de redemarrages qui monte est le signe le plus utile ici : un
+    service qui boucle repond parfois a HTTP entre deux chutes, et la ligne
+    « en marche » seule ne le dirait pas.
+    """
+    if interne:
+        return []
+    with _verrou_conteneurs:
+        lu = _cache_conteneurs.get(cfg.project_name)
+        if lu and time.monotonic() - lu[0] < DUREE_CACHE_CONTENEURS:
+            return lu[1]
+    noms = _noms_conteneurs(cfg)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_stats = pool.submit(stats_conteneurs, noms)
+        f_etats = pool.submit(etats_conteneurs, noms)
+        releves, etats_lus = f_stats.result(), f_etats.result()
+    lignes = []
+    for nom in noms:
+        etat = etats_lus.get(nom)
+        if etat is None:
+            # Conteneur jamais cree, ou supprime depuis : rien a en dire.
+            continue
+        lignes.append({
+            "nom": nom,
+            "service": nom[len(cfg.project_name) + 1:],
+            **etat,
+            **releves.get(nom, {"cpu_pct": None, "memoire": None, "memoire_max": None}),
+        })
+    with _verrou_conteneurs:
+        _cache_conteneurs[cfg.project_name] = (time.monotonic(), lignes)
+    return lignes
+
+
 # ----------------------------------------------------------------------- VPN
 
 
@@ -284,15 +345,17 @@ def vpn(cfg: StackConfig, *, interne: bool = False) -> dict | None:
 
 def payload(cfg: StackConfig, *, interne: bool = False, avec_etats: bool = False) -> dict:
     """`avec_etats` : la console a deja l'etat Docker, la veille seule non."""
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         f_disques = pool.submit(disques, cfg)
         f_debits = pool.submit(debits, cfg, interne=interne)
         f_vpn = pool.submit(vpn, cfg, interne=interne)
+        f_conteneurs = pool.submit(conteneurs, cfg, interne=interne)
         f_etats = pool.submit(etats, cfg, interne=interne) if avec_etats else None
         donnees = {
             "disques": f_disques.result(),
             "debits": f_debits.result(),
             "vpn": f_vpn.result(),
+            "conteneurs": f_conteneurs.result(),
         }
         if f_etats is not None:
             donnees["services"] = f_etats.result()

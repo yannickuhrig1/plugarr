@@ -501,6 +501,11 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       (`MESURES_SIMULTANEES`) : 2,1 s démon froid, 2,4 s entre la connexion et
       le tableau rempli dans le navigateur. Deux tests tiennent le parallélisme
       et son plafond ; le premier échoue bien en 2,7 s si on revient en file.
+      **Images publiées vérifiées** (`preview.4`, les deux, épinglées par
+      condensat d'index) : les trois conteneurs démarrent, 12 conteneurs avec
+      processeur et mémoire, 2,2 s à froid, journal du proxy à 12 statistiques
+      et 1 liste sans un seul appel à la route des secrets, et la console de la
+      variante `-admin` a redémarré Lidarr à travers le socket.
 - [ ] Journaux des conteneurs dans la veille : à peser à part, un journal peut
       porter des identifiants (Gluetun écrit sa configuration au démarrage).
 - [x] N'exposer la veille qu'authentifiée : même mot de passe que la console

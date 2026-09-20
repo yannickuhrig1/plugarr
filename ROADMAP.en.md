@@ -490,6 +490,11 @@ Dozzle reads logs and asks for the socket.
       (`MESURES_SIMULTANEES`): 2.1 s with a cold daemon, 2.4 s from login to a
       filled table in the browser. Two tests hold the parallelism and its cap;
       the first does fail, at 2.7 s, if the code goes back to sequential.
+      **Published images checked** (`preview.4`, both of them, pinned by index
+      digest): the three containers start, 12 containers with CPU and memory,
+      2.2 s cold, a proxy log of 12 stats calls and 1 list call without a
+      single request to the secret-bearing route, and the console from the
+      `-admin` variant restarted Lidarr through the socket.
 - [ ] Container logs in the watch: to be weighed separately, a log can carry
       credentials (Gluetun writes its configuration at startup).
 - [x] Expose the watch only behind authentication: same password as the

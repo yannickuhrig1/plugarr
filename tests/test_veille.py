@@ -71,7 +71,9 @@ def faux_clients():
     serveur = ThreadingHTTPServer(("127.0.0.1", 0), _Faux)
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
     yield serveur.server_address[1]
+    # `shutdown` arrete la boucle, il ne ferme pas la socket d'ecoute.
     serveur.shutdown()
+    serveur.server_close()
 
 
 def _cfg(tmp_path, services=("sonarr", "qbittorrent", "transmission", "sabnzbd"), port=None):

@@ -364,6 +364,7 @@ def test_la_veille_n_appelle_jamais_la_route_qui_porte_les_secrets(tmp_path, mon
         lignes = veille.conteneurs(cfg, interne=True)
     finally:
         serveur.shutdown()
+        serveur.server_close()
         veille._cache_conteneurs.clear()
 
     assert [ligne["service"] for ligne in lignes] == ["sonarr"]
@@ -439,6 +440,7 @@ def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
         duree = _time.monotonic() - depart
     finally:
         serveur.shutdown()
+        serveur.server_close()
         veille._cache_conteneurs.clear()
 
     assert len(lignes) == NOMBRE
@@ -504,6 +506,7 @@ def test_le_parallelisme_ne_depasse_pas_le_plafond(tmp_path, monkeypatch):
         veille.conteneurs(cfg, interne=True)
     finally:
         serveur.shutdown()
+        serveur.server_close()
         veille._cache_conteneurs.clear()
 
     assert sommet <= 2, f"{sommet} releves en meme temps pour un plafond de 2"

@@ -95,6 +95,7 @@ class WizardInput(BaseModel):
     qbittorrent_ui: str = ""
     veille_enabled: bool = False
     veille_port: int = 7374
+    veille_socket: bool = False
     console_enabled: bool = False
     console_port: int = 7373
     remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
@@ -261,6 +262,7 @@ class WizardState:
                 "qbittorrent_ui": cfg.qbittorrent_ui if cfg else "",
                 "veille_enabled": cfg.veille_enabled if cfg else False,
                 "veille_port": cfg.veille_port if cfg else 7374,
+                "veille_socket": cfg.veille_socket if cfg else False,
                 "console_enabled": cfg.console_enabled if cfg else False,
                 "console_port": cfg.console_port if cfg else 7373,
                 "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
@@ -393,6 +395,7 @@ class WizardState:
             raise ValueError("Port de la veille invalide.")
         cfg.veille_enabled = form.veille_enabled
         cfg.veille_port = form.veille_port
+        cfg.veille_socket = form.veille_socket
         if not 1 <= form.console_port <= 65535:
             raise ValueError("Port de la console invalide.")
         if form.console_enabled and form.console_port == form.veille_port:
@@ -433,6 +436,7 @@ class WizardState:
                     # formulaire, pas un oubli a completer par l'ancienne.
                     "veille_enabled",
                     "veille_port",
+                    "veille_socket",
                     "console_enabled",
                     "console_port",
                     *(("client_prefere",) if form.client_prefere else ()),
@@ -1109,6 +1113,7 @@ class WizardState:
                 "qbittorrent_ui": cfg.qbittorrent_ui,
                 "veille_enabled": cfg.veille_enabled,
                 "veille_port": cfg.veille_port,
+                "veille_socket": cfg.veille_socket,
                 "console_enabled": cfg.console_enabled,
                 "console_port": cfg.console_port,
                 "client_prefere": next(

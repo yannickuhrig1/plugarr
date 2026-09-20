@@ -163,7 +163,10 @@ def _veille_block(cfg: StackConfig) -> dict:
     - il tourne sous PUID:PGID, jamais en root ;
     - ses montages sont en lecture seule, y compris son propre systeme de
       fichiers ;
-    - aucun socket Docker : la section des conteneurs disparait d'elle-meme.
+    - aucun socket Docker. En option (`veille_socket`), elle recoit une vue
+      LECTURE SEULE par un proxy qui refuse tout POST, sur un reseau interne
+      qu'elle est seule a joindre. Sans cette option, la section des
+      conteneurs disparait d'elle-meme.
 
     Les racines sont montees a LEUR chemin de l'hote, et non sous `/config` :
     la veille mesure la place libre des dossiers que la configuration nomme.
@@ -184,16 +187,70 @@ def _veille_block(cfg: StackConfig) -> dict:
             f"--port={interne}",
             "--interne",
         ],
-        "environment": {"TZ": "${TZ}"},
+        "environment": {
+            "TZ": "${TZ}",
+            # Avec la vue Docker : l'adresse du proxy, et rien d'autre. Sans
+            # elle, la veille ne cherche meme pas.
+            **({"PLUGARR_DOCKER_API": f"http://{cfg.project_name}-docker-proxy:2375"}
+               if cfg.veille_socket else {}),
+        },
         "volumes": [
             "${CONFIG_ROOT}:${CONFIG_ROOT}:ro",
             "${DATA_ROOT}:${DATA_ROOT}:ro",
         ],
         "ports": [f"{cfg.veille_port}:{interne}"],
-        "networks": [NETWORK_NAME],
+        "networks": [NETWORK_NAME] + ([DOCKER_NETWORK] if cfg.veille_socket else []),
         "read_only": True,
         # Une page joignable depuis le reseau local, voire le telephone : rien
         # de ce qu'elle lance ne doit pouvoir gagner de droits.
+        "security_opt": ["no-new-privileges:true"],
+    }
+
+
+#: Reseau du proxy de socket : INTERNE, donc sans route vers l'exterieur, et
+#: joint par la seule veille. Sur le reseau de la pile, n'importe quel service
+#: pourrait interroger le proxy ; ici, non.
+DOCKER_NETWORK = "plugarr-docker"
+
+
+def _socket_proxy_block(cfg: StackConfig) -> dict:
+    """Vue LECTURE SEULE de Docker pour la veille en conteneur.
+
+    Le socket ne se monte pas « en lecture seule » : le drapeau `ro` empeche
+    d'ecrire DANS le fichier de socket, pas d'envoyer `POST /containers/create`
+    au demon derriere. Seul un proxy qui filtre les routes enferme quelque
+    chose, d'ou celui-ci : `CONTAINERS=1` ouvre la liste et les statistiques,
+    `POST=0` refuse tout ce qui change.
+
+    Mesure sur le banc le 2026-09-20, depuis le reseau interne : la liste et
+    les statistiques repondent 200 ; `POST /containers/{id}/stop` et
+    `POST /containers/create` repondent 403 ; `GET /images/json`, hors filtre,
+    repond 403 ; et le reseau n'a aucune sortie.
+
+    Un point a ne pas se raconter : `CONTAINERS=1` ouvre AUSSI
+    `GET /containers/{id}/json` — mesure, 200 — qui rend les variables
+    d'environnement RESOLUES, donc la cle privee WireGuard et les cles API. Ce
+    n'est donc pas le proxy qui protege la, c'est PlugArr : `veille.py` ne
+    demande que la liste et les statistiques. Les redemarrages et les kills OOM
+    ne vivent que dans cette inspection : ils restent lisibles sur l'hote, par
+    la console, et absents en conteneur. Mieux vaut une colonne absente qu'un
+    secret de plus dans un processus joignable depuis le reseau.
+    """
+    return {
+        "image": catalog.SOCKET_PROXY_IMAGE,
+        "container_name": f"{cfg.project_name}-docker-proxy",
+        "restart": "unless-stopped",
+        "labels": {"plugarr.managed": "true", "plugarr.service": "docker-proxy"},
+        "environment": {
+            # Liste des conteneurs et leurs statistiques : tout ce que la veille
+            # lit. Le reste du filtre reste a son defaut, c'est-a-dire refuse.
+            "CONTAINERS": "1",
+            # Explicite, meme si c'est deja le defaut : c'est LA ligne qui fait
+            # qu'un proxy de socket protege quelque chose.
+            "POST": "0",
+        },
+        "volumes": ["/var/run/docker.sock:/var/run/docker.sock:ro"],
+        "networks": [DOCKER_NETWORK],
         "security_opt": ["no-new-privileges:true"],
     }
 
@@ -604,13 +661,20 @@ def build_compose(cfg: StackConfig) -> dict:
         services = {"gluetun": _gluetun_block(cfg), **services}
     if cfg.veille_enabled:
         # En dernier : elle regarde les autres, rien ne depend d'elle.
+        if cfg.veille_socket:
+            services["docker-proxy"] = _socket_proxy_block(cfg)
         services["veille"] = _veille_block(cfg)
     if cfg.console_enabled:
         services["console"] = _console_block(cfg)
+    reseaux: dict[str, Any] = {NETWORK_NAME: {"driver": "bridge"}}
+    if cfg.veille_enabled and cfg.veille_socket:
+        # `internal` : aucune route vers l'exterieur. Le proxy n'a rien a
+        # joindre, et personne hors de ce reseau ne le joint.
+        reseaux[DOCKER_NETWORK] = {"driver": "bridge", "internal": True}
     doc: dict[str, Any] = {
         "name": cfg.project_name,
         "services": services,
-        "networks": {NETWORK_NAME: {"driver": "bridge"}},
+        "networks": reseaux,
     }
     # Les volumes nommes, deduits du catalogue. Compose prefixe leur nom par
     # celui du projet : deux installations ne se marchent pas dessus.

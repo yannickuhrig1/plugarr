@@ -75,6 +75,8 @@ class PlugArrApp(App):
         #: chemins pre-coche alors ce que porte l'installation en place.
         self.veille_enabled: bool | None = None
         self.veille_port: int = 7374
+        #: Vue Docker en lecture seule de la veille, par un proxy.
+        self.veille_socket: bool = False
         #: Console d'administration en conteneur. Elle exige le socket Docker :
         #: reservee aux hotes sans systemd.
         self.console_enabled: bool | None = None
@@ -151,6 +153,7 @@ class PlugArrApp(App):
         if self.veille_enabled is not None:
             cfg.veille_enabled = self.veille_enabled
             cfg.veille_port = self.veille_port
+            cfg.veille_socket = self.veille_socket
         if self.console_enabled is not None:
             cfg.console_enabled = self.console_enabled
             cfg.console_port = self.console_port
@@ -188,7 +191,7 @@ class PlugArrApp(App):
                     | ({"qbittorrent_ui"} if self.qbittorrent_ui is not None else set())
                     # Meme raison : decocher la veille est un choix.
                     | (
-                        {"veille_enabled", "veille_port"}
+                        {"veille_enabled", "veille_port", "veille_socket"}
                         if self.veille_enabled is not None
                         else set()
                     )

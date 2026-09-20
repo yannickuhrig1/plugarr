@@ -192,6 +192,7 @@ _REGLAGES: tuple[tuple[str, str], ...] = (
     ("veille_port", "port de la veille"),
     ("console_enabled", "console en conteneur"),
     ("console_port", "port de la console"),
+    ("veille_socket", "vue Docker de la veille"),
 )
 
 

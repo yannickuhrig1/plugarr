@@ -50,6 +50,14 @@ CONSOLE_IMAGE = (
     "@sha256:4bff7797d6e3bd8f471d6ed58e960197245cee4babcce4bdd4d3d395281023a0"
 )
 
+#: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et
+#: REFUSE tout POST, donc creer, demarrer ou arreter quoi que ce soit. Epingle
+#: tag ET condensat, comme le reste. v0.5.0 du 2026-07-27, multi architecture.
+SOCKET_PROXY_IMAGE = (
+    "tecnativa/docker-socket-proxy:v0.5.0"
+    "@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459"
+)
+
 #: Silo s'epingle autrement : il ne publie pas de version au sens habituel, mais
 #: un numero de construction monotone. `build-522` porte l'etiquette
 #: `org.opencontainers.image.version` de l'image, relevee dans l'image elle-meme.

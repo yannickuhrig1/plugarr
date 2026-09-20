@@ -11,6 +11,7 @@ const E = (tag, text, cls) => {
 const EN = {
   qbUiTitle:'qBittorrent web interface', qbUiHelp:'VueTorrent replaces the qBittorrent interface with a more modern one, also handy on a phone. Sonarr, Radarr and mobile apps are not affected.', qbUiOrigin:'Original interface', qbUiVue:'VueTorrent', qbUiTradeoff:'The first qBittorrent start needs Internet to download VueTorrent (version pinned by PlugArr). It is then kept in the qBittorrent folder and survives restarts without Internet. To go back, choose the original interface and run the installation again.', qbUiShort:'qBittorrent interface',
   veilleTitle:'Watch page', veilleHelp:'A read-only page: free space, throughput, VPN exit, container CPU and memory. It runs inside the stack, survives a reboot even when nobody logs in, and can be read from a phone. It can neither stop nor change anything.', veilleEnable:'Install the watch page', veilleNote:'It asks for the console password. Without a password set, it only listens on this machine.', veillePort:'Watch port', veilleShort:'Watch', veilleOn:'Installed',
+  veilleDocker:'Also show CPU and memory per container', veilleDockerNote:'The watch gets a read-only view of Docker, through a proxy that refuses every POST, on an internal network it alone can reach. Restarts and out-of-memory kills stay absent: they can only be read through a route that also carries your keys.',
   consoleEnable:'Administer this machine remotely, through a container', consoleWarn:'For machines without systemd only (Unraid, Synology). This container gets the Docker socket: it can do anything on the machine, including creating a privileged container. On an ordinary Linux, prefer the system service, which does the same thing without a socket.', consolePort:'Console port', consoleShort:'Console in a container',
   setup:'INSTALLATION', local:'On your computer', localDescription:'Your settings stay in PlugArr.', tui:'Open terminal TUI', quit:'Close wizard', assistant:'Configuration assistant', demoNotice:'Demo mode — no real installation, no Docker calls.', existingNotice:'Existing installation detected: you can resume its settings or start fresh before confirming.', loading:'Loading your assistant…',
   step1:'STEP 01 / 06', step2:'STEP 02 / 06', step3:'STEP 03 / 06', step4:'STEP 04 / 06', step5:'STEP 05 / 06', step6:'STEP 06 / 06',
@@ -352,6 +353,7 @@ function readFields() {
     : '';
   form.veille_enabled = $('veille-enabled').checked;
   form.veille_port = Number($('veille-port').value) || 7374;
+  form.veille_socket = $('veille-docker').checked;
   form.console_enabled = $('console-enabled').checked;
   form.console_port = Number($('console-port').value) || 7373;
   form.client_prefere = competingClients().length
@@ -389,6 +391,7 @@ function fillFields() {
   if (qbUi) qbUi.checked = true;
   $('veille-enabled').checked = !!form.veille_enabled;
   $('veille-port').value = form.veille_port || 7374;
+  $('veille-docker').checked = !!form.veille_socket;
   $('console-enabled').checked = !!form.console_enabled;
   $('console-port').value = form.console_port || 7373;
   $('vpn-provider').value = form.vpn.provider;

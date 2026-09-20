@@ -110,7 +110,7 @@ $('veille-disques').replaceChildren(...d.disques.map(g=>{const b=el('div');b.cla
 const cs=d.conteneurs||[];$('veille-conteneurs-bloc').hidden=cs.length===0;
 $('veille-conteneurs').tBodies[0].replaceChildren(...cs.map(c=>{const r=el('tr');const alerte=c.oom||c.statut!=='running'||c.redemarrages>2;
 const etat=[c.statut,c.sante,c.oom?'arrêté faute de mémoire':'',c.statut!=='running'&&c.code?'code '+c.code:''].filter(Boolean).join(' · ');
-r.append(el('td',c.service),el('td',etat),el('td',c.cpu_pct==null?'—':nb(c.cpu_pct,1)+' %'),el('td',c.memoire==null?'—':octets(c.memoire)+(c.memoire_max?' sur '+octets(c.memoire_max):'')),el('td',String(c.redemarrages)));
+r.append(el('td',c.service),el('td',etat),el('td',c.cpu_pct==null?'—':nb(c.cpu_pct,1)+' %'),el('td',c.memoire==null?'—':octets(c.memoire)+(c.memoire_max?' sur '+octets(c.memoire_max):'')),el('td',c.redemarrages==null?'—':String(c.redemarrages)));
 if(alerte)r.className='veille-alerte';return r}));
 $('veille-etat').textContent='Relevé à '+new Date().toLocaleTimeString()}catch(e){$('veille-etat').textContent='Veille indisponible : '+e.message}finally{veilleEnCours=false}}
 refresh();graph();veille();setInterval(refresh,15000);setInterval(veille,5000);document.addEventListener('visibilitychange',veille);api('status').catch(()=>{});

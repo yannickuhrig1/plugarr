@@ -212,6 +212,16 @@ EN: dict[str, str] = {
     "[b]Console[/b]        en conteneur, port {port} [dim](socket Docker : tous les droits sur la machine)[/dim]": (
         "[b]Console[/b]        in a container, port {port} [dim](Docker socket: every right on the machine)[/dim]"
     ),
+    "Donner a la veille une vue LECTURE SEULE de Docker, par un proxy qui refuse tout POST : elle affiche alors processeur et memoire par conteneur.": (
+        "Give the watch a READ-ONLY view of Docker, through a proxy that refuses every POST: it then shows CPU and memory per container."
+    ),
+    "vue Docker de la veille": "watch's Docker view",
+    "Montrer aussi processeur et memoire par conteneur (vue Docker en lecture seule, par un proxy qui refuse tout POST)": (
+        "Also show CPU and memory per container (read-only Docker view, through a proxy that refuses every POST)"
+    ),
+    "[b]              [/b] processeur et memoire par conteneur, par un proxy qui refuse tout POST": (
+        "[b]              [/b] CPU and memory per container, through a proxy that refuses every POST"
+    ),
     "Port de la veille": "Watch port",
     "[b]Veille[/b]         page en lecture seule sur le port "
     "{port} [dim](mot de passe de la console)[/dim]": (

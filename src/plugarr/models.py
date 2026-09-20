@@ -347,7 +347,7 @@ INTERFACES_QBITTORRENT = ("", "vuetorrent")
 class StackConfig(BaseModel):
     """Etat canonique versionnable (stack.yml)."""
 
-    version: int = 6
+    version: int = 7
     project_name: str = "plugarr"
     platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
 
@@ -413,6 +413,10 @@ class StackConfig(BaseModel):
     veille_enabled: bool = False
     #: Port publie sur l'hote. 7374 par defaut, comme `plugarr veille`.
     veille_port: int = 7374
+    #: Donner a la veille en conteneur une vue LECTURE SEULE de Docker, par un
+    #: proxy qui refuse tout POST. Sans cela, elle ne montre ni processeur ni
+    #: memoire par conteneur : la section disparait au lieu de mentir.
+    veille_socket: bool = False
     #: Console d'administration DANS un conteneur. Elle exige le socket Docker,
     #: donc les pleins pouvoirs sur la machine : reservee aux hotes sans
     #: systemd, ou `plugarr autostart --systeme` ne peut rien.

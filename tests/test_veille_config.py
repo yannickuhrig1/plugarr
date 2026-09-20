@@ -231,3 +231,146 @@ def test_le_repertoire_du_projet_est_donne_au_env(tmp_path):
 
     assert f"PROJECT_DIR='{(tmp_path / 'projet').resolve()}'" in env
     assert "PROJECT_DIR" not in compose.render_env(_cfg(tmp_path))
+
+
+# ------------------------------------------- vue Docker en lecture seule
+
+
+def test_le_proxy_refuse_tout_post_et_vit_sur_un_reseau_interne(tmp_path):
+    """Monter le socket « en lecture seule » n'enferme RIEN : le drapeau `ro`
+    empeche d'ecrire dans le fichier, pas d'envoyer POST /containers/create au
+    demon derriere. Seul le filtre du proxy protege quelque chose."""
+    from plugarr import compose
+
+    cfg = _cfg(tmp_path)
+    cfg.veille_enabled = True
+    cfg.veille_socket = True
+    doc = compose.build_compose(cfg)
+
+    proxy = doc["services"]["docker-proxy"]
+    assert proxy["environment"]["POST"] == "0"
+    assert proxy["environment"]["CONTAINERS"] == "1"
+    assert proxy["networks"] == [compose.DOCKER_NETWORK]
+    assert "ports" not in proxy, "le proxy ne se publie jamais sur l'hote"
+    assert doc["networks"][compose.DOCKER_NETWORK]["internal"] is True
+    # La veille le joint, et elle seule : elle est sur les deux reseaux.
+    assert doc["services"]["veille"]["networks"] == [compose.NETWORK_NAME, compose.DOCKER_NETWORK]
+    assert "docker.sock" not in str(doc["services"]["veille"])
+
+
+def test_sans_l_option_ni_proxy_ni_reseau_ni_variable(tmp_path):
+    from plugarr import compose, veille
+
+    cfg = _cfg(tmp_path)
+    cfg.veille_enabled = True
+    doc = compose.build_compose(cfg)
+
+    assert "docker-proxy" not in doc["services"]
+    assert compose.DOCKER_NETWORK not in doc["networks"]
+    assert veille.VAR_API_DOCKER not in doc["services"]["veille"]["environment"]
+
+
+def test_dans_un_conteneur_sans_adresse_de_proxy_rien_n_est_lu(tmp_path, monkeypatch):
+    from plugarr import veille
+
+    monkeypatch.delenv(veille.VAR_API_DOCKER, raising=False)
+    monkeypatch.setattr(veille, "_conteneurs_par_api", lambda *a: pytest.fail("appel inutile"))
+
+    assert veille.conteneurs(_cfg(tmp_path), interne=True) == []
+
+
+def test_le_processeur_se_calcule_comme_docker_stats():
+    """L'API ne rend pas un pourcentage mais des compteurs. Valeurs prises sur
+    une reponse reelle : 2 coeurs, 1 % d'un coeur consomme."""
+    from plugarr import veille
+
+    stats = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 200_000_000},
+            "system_cpu_usage": 20_000_000_000,
+            "online_cpus": 2,
+        },
+        "precpu_stats": {
+            "cpu_usage": {"total_usage": 100_000_000},
+            "system_cpu_usage": 10_000_000_000,
+        },
+    }
+
+    assert veille._pourcent_cpu(stats) == 2.0
+    # Un premier releve sans mesure precedente ne donne rien plutot qu'un zero.
+    assert veille._pourcent_cpu({"cpu_stats": {}, "precpu_stats": {}}) is None
+
+
+def test_le_cache_de_fichiers_ne_compte_pas_comme_memoire_utilisee():
+    """Sans cela, un conteneur qui a lu un gros fichier parait saturer sa
+    limite, comme le montrerait `docker stats` sans la meme soustraction."""
+    from plugarr import veille
+
+    utilisee, limite = veille._memoire(
+        {"memory_stats": {"usage": 500, "limit": 4096, "stats": {"inactive_file": 200}}}
+    )
+
+    assert (utilisee, limite) == (300, 4096)
+
+
+def test_la_veille_n_appelle_jamais_la_route_qui_porte_les_secrets(tmp_path, monkeypatch):
+    """`GET /containers/{id}/json` rend les variables d'environnement RESOLUES.
+    Les redemarrages et les kills OOM ne vivent que la : ils restent donc
+    absents en conteneur, plutot que d'amener la cle du VPN dans un processus
+    joignable depuis le reseau."""
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from plugarr import veille
+
+    demandes = []
+
+    class _FauxDocker(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            demandes.append(self.path.split("?")[0])
+            if self.path.startswith("/containers/json"):
+                corps = [{"Id": "abc", "Names": ["/plugarr-sonarr"], "State": "running",
+                          "Status": "Up 2 hours (healthy)"}]
+            elif self.path.startswith("/containers/abc/stats"):
+                corps = {
+                    "cpu_stats": {"cpu_usage": {"total_usage": 200_000_000},
+                                  "system_cpu_usage": 20_000_000_000, "online_cpus": 2},
+                    "precpu_stats": {"cpu_usage": {"total_usage": 100_000_000},
+                                     "system_cpu_usage": 10_000_000_000},
+                    "memory_stats": {"usage": 500, "limit": 4096,
+                                     "stats": {"inactive_file": 200}},
+                }
+            else:
+                corps = {"Config": {"Env": ["WIREGUARD_PRIVATE_KEY=secret"]}}
+            brut = _json.dumps(corps).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(brut)))
+            self.end_headers()
+            self.wfile.write(brut)
+
+    serveur = ThreadingHTTPServer(("127.0.0.1", 0), _FauxDocker)
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    try:
+        cfg = _cfg(tmp_path)
+        monkeypatch.setenv(
+            veille.VAR_API_DOCKER, f"http://127.0.0.1:{serveur.server_address[1]}"
+        )
+        veille._cache_conteneurs.clear()
+        lignes = veille.conteneurs(cfg, interne=True)
+    finally:
+        serveur.shutdown()
+        veille._cache_conteneurs.clear()
+
+    assert [ligne["service"] for ligne in lignes] == ["sonarr"]
+    assert lignes[0]["cpu_pct"] == 2.0
+    assert (lignes[0]["memoire"], lignes[0]["memoire_max"]) == (300, 4096)
+    assert lignes[0]["sante"] == "healthy"
+    # Les colonnes que seule l'inspection complete porterait restent vides.
+    assert lignes[0]["redemarrages"] is None and lignes[0]["oom"] is None
+    assert "/containers/abc/json" not in demandes, demandes
+    assert "secret" not in _json.dumps(lignes)

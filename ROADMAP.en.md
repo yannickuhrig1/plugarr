@@ -460,10 +460,20 @@ Dozzle reads logs and asks for the socket.
       (`docker stats` takes two spaced samples), hence a 10 s cache for a page
       that refreshes every 5 s. Table checked in a real browser, both in the
       console and on the standalone page.
-- [ ] Level 2 in a CONTAINER: read-only socket behind a proxy (POST refused),
-      as an explicit option, for the watch running inside the stack. Without
-      it, the watch stays socket-free and the section disappears rather than
-      lie. Waits for the watch to be wired into the compose file.
+- [x] Level 2 in a CONTAINER: read-only Docker view behind a proxy
+      (`tecnativa/docker-socket-proxy` v0.5.0, pinned by tag and digest), as an
+      explicit option (`--veille-docker`, a question in both wizards). The
+      proxy sits on an **internal** network, with no way out, that the watch
+      alone can reach. Measured on the bench on 2026-09-20: the list and the
+      stats answer 200, `POST .../stop` and `POST /containers/create` answer
+      403, `GET /images/json` answers 403, and the network has no outbound
+      route. **What the proxy does not protect**: `CONTAINERS=1` also opens
+      `GET /containers/{id}/json`, which returns the RESOLVED environment
+      variables — measured, 200. The restraint therefore lives in `veille.py`,
+      which asks only for the list and the stats. Restart counts and OOM kills
+      exist only in that inspection: they stay readable on the host and absent
+      in the container, an empty column rather than one more secret inside a
+      reachable process.
 - [ ] Container logs in the watch: to be weighed separately, a log can carry
       credentials (Gluetun writes its configuration at startup).
 - [x] Expose the watch only behind authentication: same password as the

@@ -471,10 +471,20 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       mesures espacées), d'où un cache de 10 s pour une page rafraîchie toutes
       les 5 s. Tableau vérifié dans un vrai navigateur, console et page
       autonome.
-- [ ] Niveau 2 dans un CONTENEUR : socket en lecture seule derrière un proxy
-      (POST refusé), en option explicite, pour la veille qui tourne dans la
-      pile. Sans lui, elle reste sans socket et la section disparaît au lieu de
-      mentir. Attend que la veille soit branchée dans le compose.
+- [x] Niveau 2 dans un CONTENEUR : vue Docker en lecture seule derrière un
+      proxy (`tecnativa/docker-socket-proxy` v0.5.0, épinglé tag et condensat),
+      en option explicite (`--veille-docker`, question dans les deux
+      assistants). Le proxy vit sur un réseau **interne**, sans sortie, que la
+      veille est seule à joindre. Mesuré sur le banc le 2026-09-20 : la liste
+      et les statistiques répondent 200, `POST .../stop` et
+      `POST /containers/create` répondent 403, `GET /images/json` répond 403,
+      et le réseau n'a aucune sortie. **Ce que le proxy ne protège pas** :
+      `CONTAINERS=1` ouvre aussi `GET /containers/{id}/json`, qui rend les
+      variables d'environnement RÉSOLUES — mesuré, 200. La retenue est donc
+      dans `veille.py`, qui ne demande que la liste et les statistiques. Les
+      redémarrages et les kills OOM ne vivent que dans cette inspection : ils
+      restent lisibles sur l'hôte et absents en conteneur, colonne vide plutôt
+      qu'un secret de plus dans un processus joignable.
 - [ ] Journaux des conteneurs dans la veille : à peser à part, un journal peut
       porter des identifiants (Gluetun écrit sa configuration au démarrage).
 - [x] N'exposer la veille qu'authentifiée : même mot de passe que la console

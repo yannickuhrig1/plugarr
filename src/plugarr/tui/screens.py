@@ -677,6 +677,12 @@ class PathsScreen(WizardScreen):
             )
             yield Label("Port de la veille", classes="group-title")
             yield Input(value=str(self.app.veille_port), id="veille-port")
+            yield Checkbox(
+                "Montrer aussi processeur et memoire par conteneur "
+                "(vue Docker en lecture seule, par un proxy qui refuse tout POST)",
+                value=self.app.veille_socket,
+                id="veille-docker",
+            )
 
             # La console en conteneur exige le socket Docker : elle ne se pose
             # pas au meme rang que la veille, et la question le dit.
@@ -804,6 +810,7 @@ class PathsScreen(WizardScreen):
         self.app.veille_enabled = bool(self.query_one("#veille", Checkbox).value)
         port = self.query_one("#veille-port", Input).value.strip()
         self.app.veille_port = int(port) if port.isdigit() and 0 < int(port) < 65536 else 7374
+        self.app.veille_socket = bool(self.query_one("#veille-docker", Checkbox).value)
         self.app.console_enabled = bool(self.query_one("#console-conteneur", Checkbox).value)
         port = self.query_one("#console-port", Input).value.strip()
         self.app.console_port = int(port) if port.isdigit() and 0 < int(port) < 65536 else 7373
@@ -1507,6 +1514,13 @@ class SummaryScreen(WizardScreen):
                     port=cfg.veille_port,
                 )
             )
+            if cfg.veille_socket:
+                lignes.append(
+                    t(
+                        "[b]              [/b] processeur et memoire par conteneur, "
+                        "par un proxy qui refuse tout POST"
+                    )
+                )
         if cfg.console_enabled:
             lignes.append(
                 t(

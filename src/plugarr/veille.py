@@ -22,8 +22,11 @@ Deux emplacements, un seul code :
   `docker exec` ;
 - dans un CONTENEUR de la pile (`interne=True`, `plugarr veille --interne`) :
   les services par leur nom sur le reseau compose, Gluetun par HTTP. Aucun
-  socket Docker, donc aucun droit sur les conteneurs, et pas de CPU ni de
-  memoire par conteneur : la section disparait au lieu de mentir.
+  socket Docker par defaut : la section des conteneurs disparait au lieu de
+  mentir. En option, une vue LECTURE SEULE passe par un proxy qui refuse tout
+  POST (`PLUGARR_DOCKER_API`), et rend alors processeur et memoire — mais
+  jamais les redemarrages ni les kills OOM : ils ne vivent que dans
+  l'inspection complete, qui porte les secrets.
 """
 
 from __future__ import annotations
@@ -247,6 +250,101 @@ def _noms_conteneurs(cfg: StackConfig) -> list[str]:
     return noms
 
 
+#: Adresse du proxy de socket, posee par le compose quand l'option est active.
+#: Absente, la veille en conteneur ne cherche meme pas.
+VAR_API_DOCKER = "PLUGARR_DOCKER_API"
+
+
+def _pourcent_cpu(stats: dict) -> float | None:
+    """Pourcentage de processeur, calcule comme le fait `docker stats`.
+
+    L'API ne rend pas un pourcentage mais des compteurs : la part du conteneur
+    et celle de la machine, avant et apres. Le rapport des deux ecarts, ramene
+    au nombre de coeurs, donne le meme chiffre que la ligne de commande.
+    """
+    cpu, avant = stats.get("cpu_stats") or {}, stats.get("precpu_stats") or {}
+    usage = (cpu.get("cpu_usage") or {}).get("total_usage")
+    usage_avant = (avant.get("cpu_usage") or {}).get("total_usage")
+    systeme, systeme_avant = cpu.get("system_cpu_usage"), avant.get("system_cpu_usage")
+    if None in (usage, usage_avant, systeme, systeme_avant):
+        return None
+    ecart_systeme = systeme - systeme_avant
+    if ecart_systeme <= 0:
+        return None
+    coeurs = cpu.get("online_cpus") or len((cpu.get("cpu_usage") or {}).get("percpu_usage") or [1])
+    return round((usage - usage_avant) / ecart_systeme * coeurs * 100, 2)
+
+
+def _memoire(stats: dict) -> tuple[int | None, int | None]:
+    """Memoire utilisee et limite. Le cache de fichiers inactifs est retire,
+    comme le fait `docker stats` : sans cela, un conteneur qui a lu un gros
+    fichier parait saturer sa limite."""
+    memoire = stats.get("memory_stats") or {}
+    utilisee, limite = memoire.get("usage"), memoire.get("limit")
+    if utilisee is None:
+        return None, limite
+    inactif = (memoire.get("stats") or {}).get("inactive_file") or 0
+    return max(0, utilisee - inactif), limite
+
+
+def _conteneurs_par_api(cfg: StackConfig, base: str) -> list[dict]:
+    """Lecture par le proxy : la LISTE et les STATISTIQUES, rien d'autre.
+
+    `GET /containers/{id}/json` porterait les redemarrages et les kills OOM,
+    mais aussi les variables d'environnement RESOLUES : la cle privee
+    WireGuard, les cles API, les mots de passe. Le proxy, lui, la laisse
+    passer — mesure sur le banc, 200 avec `CONTAINERS=1`. La retenue est donc
+    ICI, dans ce code, et nulle part ailleurs : une veille joignable depuis le
+    reseau n'a pas a tenir ces secrets en memoire. Ces deux colonnes restent
+    lisibles sur l'hote, par la console, et absentes ici.
+    """
+    filtre = json.dumps({"label": [f"com.docker.compose.project={cfg.project_name}"]})
+    lignes: list[dict] = []
+    with httpx.Client(base_url=base, timeout=DELAI) as http:
+        liste = http.get("/containers/json", params={"all": "1", "filters": filtre})
+        liste.raise_for_status()
+        for brut in liste.json():
+            nom = (brut.get("Names") or ["/?"])[0].lstrip("/")
+            ligne = {
+                "nom": nom,
+                "service": nom[len(cfg.project_name) + 1:] if nom.startswith(cfg.project_name) else nom,
+                "statut": str(brut.get("State") or ""),
+                # Le compteur de redemarrages ne vit que dans l'inspection
+                # complete, qui porte les secrets : il reste a None ici, et la
+                # page n'affiche pas une colonne inventee.
+                "redemarrages": None,
+                "oom": None,
+                "code": 0,
+                "sante": _sante(str(brut.get("Status") or "")),
+                "cpu_pct": None,
+                "memoire": None,
+                "memoire_max": None,
+            }
+            if ligne["statut"] == "running":
+                try:
+                    mesure = http.get(f"/containers/{brut['Id']}/stats", params={"stream": "false"})
+                    mesure.raise_for_status()
+                    stats = mesure.json()
+                except (httpx.HTTPError, ValueError, KeyError):
+                    stats = {}
+                if stats:
+                    ligne["cpu_pct"] = _pourcent_cpu(stats)
+                    ligne["memoire"], ligne["memoire_max"] = _memoire(stats)
+            lignes.append(ligne)
+    return sorted(lignes, key=lambda ligne: ligne["nom"])
+
+
+def _sante(statut: str) -> str:
+    """La sante telle que la liste la rend : « Up 2 hours (healthy) »."""
+    if "(healthy)" in statut:
+        return "healthy"
+    if "(unhealthy)" in statut:
+        return "unhealthy"
+    if "(health: starting)" in statut:
+        return "starting"
+    return ""
+
+
 def conteneurs(cfg: StackConfig, *, interne: bool = False) -> list[dict]:
     """CPU, memoire, redemarrages et kills OOM, un element par conteneur.
 
@@ -259,7 +357,22 @@ def conteneurs(cfg: StackConfig, *, interne: bool = False) -> list[dict]:
     « en marche » seule ne le dirait pas.
     """
     if interne:
-        return []
+        # Dans un conteneur, seule la vue par le proxy existe — et seulement si
+        # l'installation l'a demandee. Sans elle, rien : la section disparait.
+        base = os.environ.get(VAR_API_DOCKER, "")
+        if not base:
+            return []
+        with _verrou_conteneurs:
+            lu = _cache_conteneurs.get(cfg.project_name)
+            if lu and time.monotonic() - lu[0] < DUREE_CACHE_CONTENEURS:
+                return lu[1]
+        try:
+            lignes = _conteneurs_par_api(cfg, base)
+        except (httpx.HTTPError, ValueError, KeyError):
+            return []
+        with _verrou_conteneurs:
+            _cache_conteneurs[cfg.project_name] = (time.monotonic(), lignes)
+        return lignes
     with _verrou_conteneurs:
         lu = _cache_conteneurs.get(cfg.project_name)
         if lu and time.monotonic() - lu[0] < DUREE_CACHE_CONTENEURS:

@@ -428,6 +428,15 @@ def install(
         "--veille-port",
         help=t("Port de la page de veille sur l'hote. 7374 par defaut."),
     ),
+    veille_socket: bool | None = typer.Option(
+        None,
+        "--veille-docker/--sans-veille-docker",
+        help=t(
+            "Donner a la veille une vue LECTURE SEULE de Docker, par un proxy "
+            "qui refuse tout POST : elle affiche alors processeur et memoire "
+            "par conteneur."
+        ),
+    ),
     console_conteneur: bool | None = typer.Option(
         None,
         "--console-conteneur/--sans-console-conteneur",
@@ -588,6 +597,8 @@ def install(
         cfg.veille_enabled = veille
     if veille_port is not None:
         cfg.veille_port = veille_port
+    if veille_socket is not None:
+        cfg.veille_socket = veille_socket
     if console_conteneur is not None:
         cfg.console_enabled = console_conteneur
     if console_port is not None:
@@ -637,6 +648,7 @@ def install(
                     ("qbittorrent_ui", qbittorrent_ui is not None),
                     ("veille_enabled", veille is not None),
                     ("veille_port", veille_port is not None),
+                    ("veille_socket", veille_socket is not None),
                     ("console_enabled", console_conteneur is not None),
                     ("console_port", console_port is not None),
                 )

@@ -57,6 +57,21 @@ def _noop(_: Progress) -> None:
     return None
 
 
+def _compose_service_name(service_id: str) -> str:
+    """Nom lisible d'un service genere dans le compose.
+
+    Les applications selectionnables vivent dans le catalogue. Gluetun et les
+    conteneurs techniques ajoutes par `build_compose` n'y vivent pas : leur
+    demander un `ServiceSpec` faisait planter l'installation avant meme le
+    telechargement des images. Un futur conteneur d'appoint doit rester
+    annoncable sans qu'il faille maintenir une seconde liste en parallele.
+    """
+    spec = catalog.CATALOG.get(service_id)
+    if spec is not None:
+        return spec.display_name
+    return "Gluetun" if service_id == "gluetun" else service_id
+
+
 # ----------------------------------------------------------------- construction
 
 
@@ -875,9 +890,7 @@ def install(
         )
 
     images = list(compose.build_compose(cfg)["services"])
-    noms_images = ", ".join(
-        "Gluetun" if sid == "gluetun" else catalog.get(sid).display_name for sid in images
-    )
+    noms_images = ", ".join(_compose_service_name(sid) for sid in images)
     on_progress(
         Progress(
             "images Docker",

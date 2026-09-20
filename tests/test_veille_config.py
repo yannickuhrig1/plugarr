@@ -123,6 +123,30 @@ def test_le_fichier_n_est_lisible_que_par_son_proprietaire(tmp_path):
 # ------------------------------------------------------- service du compose
 
 
+def test_l_installation_peut_annoncer_tous_les_services_du_compose(tmp_path):
+    """Les conteneurs techniques ne vivent pas dans le catalogue applicatif.
+
+    La construction du compose les accepte deja ; la progression de
+    l'installation doit accepter exactement les memes identifiants avant le
+    telechargement des images.
+    """
+    from plugarr import compose
+
+    cfg = _cfg(tmp_path)
+    cfg.veille_enabled = True
+    cfg.veille_socket = True
+    cfg.console_enabled = True
+    services = compose.build_compose(cfg)["services"]
+
+    noms = {sid: orchestrator._compose_service_name(sid) for sid in services}
+
+    assert noms["sonarr"] == "Sonarr"
+    assert noms["gluetun"] == "Gluetun"
+    assert noms["docker-proxy"] == "docker-proxy"
+    assert noms["veille"] == "veille"
+    assert noms["console"] == "console"
+
+
 def test_le_service_de_veille_ne_peut_rien_changer(tmp_path):
     """Sa declaration doit porter les limites : pas de root, pas de socket,
     rien d'accessible en ecriture."""

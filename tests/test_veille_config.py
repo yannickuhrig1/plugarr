@@ -175,3 +175,59 @@ def test_le_pre_semis_ecrit_la_configuration_reduite_seulement_si_demandee(tmp_p
 
     assert veille_config.chemin(avec).exists()
     assert not veille_config.chemin(sans).exists()
+
+
+# --------------------------------------------- console en conteneur (option)
+
+
+def test_la_console_en_conteneur_dit_ce_qu_elle_prend(tmp_path):
+    """Elle cree et recree des conteneurs : sans le socket elle ne sert a rien,
+    et avec lui elle peut tout faire sur la machine. Sa declaration ne doit
+    donc pas faire croire le contraire — pas de faux compte sans privilege,
+    pas de montage en lecture seule qui donnerait le change."""
+    from plugarr import compose
+
+    cfg = _cfg(tmp_path)
+    cfg.console_enabled = True
+
+    bloc = compose.build_compose(cfg)["services"]["console"]
+
+    assert "/var/run/docker.sock:/var/run/docker.sock" in bloc["volumes"]
+    assert bloc["user"] == "0:0"
+    # Le projet et les configurations sont en ECRITURE : faire tourner une cle
+    # reecrit stack.yml. Les donnees, non : la console n'y touche jamais.
+    assert "${PROJECT_DIR}:${PROJECT_DIR}" in bloc["volumes"]
+    assert "${DATA_ROOT}:${DATA_ROOT}:ro" in bloc["volumes"]
+    assert bloc["command"][0] == "serve"
+
+
+def test_l_image_de_la_console_est_une_autre_que_celle_de_la_veille(tmp_path):
+    """Celle de la veille n'a AUCUN client Docker : les confondre reviendrait a
+    donner le socket a un service qui n'en a pas besoin."""
+    from plugarr import catalog, compose
+
+    cfg = _cfg(tmp_path)
+    cfg.console_enabled = True
+    cfg.veille_enabled = True
+    services = compose.build_compose(cfg)["services"]
+
+    assert services["console"]["image"] != services["veille"]["image"]
+    assert services["console"]["image"] == catalog.CONSOLE_IMAGE
+    assert catalog.CONSOLE_IMAGE.endswith("-admin") or "-admin@" in catalog.CONSOLE_IMAGE
+
+
+def test_sans_l_option_aucune_console_en_conteneur(tmp_path):
+    from plugarr import compose
+
+    assert "console" not in compose.build_compose(_cfg(tmp_path))["services"]
+
+
+def test_le_repertoire_du_projet_est_donne_au_env(tmp_path):
+    """La console monte le projet a SON chemin de l'hote : le compose qu'elle
+    lance porte des chemins de l'hote, executes par le demon de l'hote."""
+    from plugarr import compose
+
+    env = compose.render_env(_cfg(tmp_path), tmp_path / "projet")
+
+    assert f"PROJECT_DIR='{(tmp_path / 'projet').resolve()}'" in env
+    assert "PROJECT_DIR" not in compose.render_env(_cfg(tmp_path))

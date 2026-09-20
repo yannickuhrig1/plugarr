@@ -190,6 +190,8 @@ _REGLAGES: tuple[tuple[str, str], ...] = (
     ("qbittorrent_ui", "interface de qBittorrent"),
     ("veille_enabled", "veille en conteneur"),
     ("veille_port", "port de la veille"),
+    ("console_enabled", "console en conteneur"),
+    ("console_port", "port de la console"),
 )
 
 

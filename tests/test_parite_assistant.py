@@ -47,6 +47,8 @@ COUVERTES = {
     "qbittorrent_ui": "VpnScreen",
     "veille": "PathsScreen",
     "veille_port": "PathsScreen",
+    "console_conteneur": "PathsScreen",
+    "console_port": "PathsScreen",
     "recyclarr_sonarr": "TemplatesScreen",
     "recyclarr_radarr": "TemplatesScreen",
     "reset_config": "ExistingConfigScreen",

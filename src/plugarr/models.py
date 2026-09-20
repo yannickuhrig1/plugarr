@@ -347,7 +347,7 @@ INTERFACES_QBITTORRENT = ("", "vuetorrent")
 class StackConfig(BaseModel):
     """Etat canonique versionnable (stack.yml)."""
 
-    version: int = 5
+    version: int = 6
     project_name: str = "plugarr"
     platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
 
@@ -413,6 +413,12 @@ class StackConfig(BaseModel):
     veille_enabled: bool = False
     #: Port publie sur l'hote. 7374 par defaut, comme `plugarr veille`.
     veille_port: int = 7374
+    #: Console d'administration DANS un conteneur. Elle exige le socket Docker,
+    #: donc les pleins pouvoirs sur la machine : reservee aux hotes sans
+    #: systemd, ou `plugarr autostart --systeme` ne peut rien.
+    console_enabled: bool = False
+    #: Port publie sur l'hote. 7373 par defaut, comme `plugarr serve`.
+    console_port: int = 7373
     #: Repertoire des artefacts, necessaire pour lancer une commande ponctuelle.
     #: Renseigne a l'execution, pas persiste : il depend d'ou l'on se trouve.
     project_dir: object | None = Field(default=None, exclude=True)

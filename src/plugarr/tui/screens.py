@@ -678,6 +678,22 @@ class PathsScreen(WizardScreen):
             yield Label("Port de la veille", classes="group-title")
             yield Input(value=str(self.app.veille_port), id="veille-port")
 
+            # La console en conteneur exige le socket Docker : elle ne se pose
+            # pas au meme rang que la veille, et la question le dit.
+            yield Label(
+                "Administrer cette machine a distance, par un conteneur "
+                "[dim](machines sans systemd : Unraid, Synology)[/dim]",
+                classes="group-title",
+            )
+            yield Checkbox(
+                "Installer la console dans un conteneur "
+                "(il recoit le socket Docker, donc tous les droits)",
+                value=_console_en_place(self.app),
+                id="console-conteneur",
+            )
+            yield Label("Port de la console", classes="group-title")
+            yield Input(value=str(self.app.console_port), id="console-port")
+
             yield Rule()
             yield Static(id="paths-check")
         yield Horizontal(
@@ -788,6 +804,9 @@ class PathsScreen(WizardScreen):
         self.app.veille_enabled = bool(self.query_one("#veille", Checkbox).value)
         port = self.query_one("#veille-port", Input).value.strip()
         self.app.veille_port = int(port) if port.isdigit() and 0 < int(port) < 65536 else 7374
+        self.app.console_enabled = bool(self.query_one("#console-conteneur", Checkbox).value)
+        port = self.query_one("#console-port", Input).value.strip()
+        self.app.console_port = int(port) if port.isdigit() and 0 < int(port) < 65536 else 7373
         self.app.platform = self.platform()
         # Le VPN d'abord, s'il y a un trafic a proteger. Puis les profils de
         # qualite, s'ils ont un sens. Chaque ecran facultatif sait s'effacer.
@@ -1371,6 +1390,19 @@ def _interface_qbittorrent_en_place(app) -> str:
     return trouvee.cfg.qbittorrent_ui if trouvee else ""
 
 
+def _console_en_place(app) -> bool:
+    """La console en conteneur de l'installation en place, pour pre-cocher."""
+    from .. import reprise
+
+    if app.console_enabled is not None:
+        return app.console_enabled
+    try:
+        trouvee = reprise.trouver(Path(app.project_dir or "."), app.config_root)
+    except Exception:  # noqa: BLE001 - version future, fichier illisible
+        return False
+    return bool(trouvee.cfg.console_enabled) if trouvee else False
+
+
 def _veille_en_place(app) -> bool:
     """La veille de l'installation en place, pour pre-cocher la case.
 
@@ -1473,6 +1505,14 @@ class SummaryScreen(WizardScreen):
                     "[b]Veille[/b]         page en lecture seule sur le port "
                     "{port} [dim](mot de passe de la console)[/dim]",
                     port=cfg.veille_port,
+                )
+            )
+        if cfg.console_enabled:
+            lignes.append(
+                t(
+                    "[b]Console[/b]        en conteneur, port {port} "
+                    "[dim](socket Docker : tous les droits sur la machine)[/dim]",
+                    port=cfg.console_port,
                 )
             )
         # Un VPN configure ajoute un conteneur que le tableau ci-dessus ne montre

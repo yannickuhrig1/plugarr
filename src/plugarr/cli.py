@@ -428,6 +428,21 @@ def install(
         "--veille-port",
         help=t("Port de la page de veille sur l'hote. 7374 par defaut."),
     ),
+    console_conteneur: bool | None = typer.Option(
+        None,
+        "--console-conteneur/--sans-console-conteneur",
+        help=t(
+            "Console d'administration DANS un conteneur, pour les hotes sans "
+            "systemd. Elle exige le socket Docker, donc les pleins pouvoirs "
+            "sur la machine. Sur un Linux, preferez `plugarr autostart "
+            "--systeme`."
+        ),
+    ),
+    console_port: int | None = typer.Option(
+        None,
+        "--console-port",
+        help=t("Port de la console en conteneur sur l'hote. 7373 par defaut."),
+    ),
 ) -> None:
     """Deploie et cable la stack de bout en bout, sans interaction."""
     selection = [s.strip() for s in services.split(",") if s.strip()]
@@ -573,6 +588,10 @@ def install(
         cfg.veille_enabled = veille
     if veille_port is not None:
         cfg.veille_port = veille_port
+    if console_conteneur is not None:
+        cfg.console_enabled = console_conteneur
+    if console_port is not None:
+        cfg.console_port = console_port
 
     # Reprendre AVANT le recapitulatif : c'est lui qui doit montrer ce qui sera
     # reellement pose. Reprendre apres reviendrait a annoncer une chose et a en
@@ -618,6 +637,8 @@ def install(
                     ("qbittorrent_ui", qbittorrent_ui is not None),
                     ("veille_enabled", veille is not None),
                     ("veille_port", veille_port is not None),
+                    ("console_enabled", console_conteneur is not None),
+                    ("console_port", console_port is not None),
                 )
                 if donne
             }

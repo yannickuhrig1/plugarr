@@ -45,6 +45,24 @@ jobs:
           test "$obtenue" = "plugarr $attendue"
           # Compte sans privilege, jamais root.
           test "$(docker run --rm --entrypoint id plugarr:essai -u)" = "1000"
+          # La veille n'a AUCUN client Docker : meme avec le socket, elle ne
+          # saurait pas s'en servir. C'est la garantie qui la rend exposable.
+          ! docker run --rm --entrypoint sh plugarr:essai -c "command -v docker"
+
+      - name: Construire la variante admin (amd64) pour l'essai
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: admin
+          platforms: linux/amd64
+          load: true
+          tags: plugarr:essai-admin
+
+      - name: La variante admin sait piloter Docker, et reste sans privilege
+        run: |
+          docker run --rm --entrypoint docker plugarr:essai-admin --version
+          docker run --rm --entrypoint docker plugarr:essai-admin compose version
+          test "$(docker run --rm --entrypoint id plugarr:essai-admin -u)" = "1000"
 
       - name: Tags de publication
         id: meta
@@ -72,3 +90,27 @@ jobs:
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags || 'plugarr:multi' }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # La console en conteneur, sous un tag distinct : elle porte le client
+      # Docker, donc elle ne doit jamais etre prise pour la veille.
+      - name: Tags de publication, variante admin
+        id: meta-admin
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+            suffix=-admin
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Construire et publier la variante admin
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: admin
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta-admin.outputs.tags || 'plugarr:multi-admin' }}
+          labels: ${{ steps.meta-admin.outputs.labels }}

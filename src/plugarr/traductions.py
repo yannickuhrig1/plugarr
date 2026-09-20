@@ -194,6 +194,24 @@ EN: dict[str, str] = {
         "Watch page [dim](read-only: disks, throughput, VPN, containers)[/dim]"
     ),
     "Installer la page de veille dans la pile": "Install the watch page in the stack",
+    "Console d'administration DANS un conteneur, pour les hotes sans systemd. Elle exige le socket Docker, donc les pleins pouvoirs sur la machine. Sur un Linux, preferez `plugarr autostart --systeme`.": (
+        "Administration console INSIDE a container, for hosts without systemd. It needs the Docker socket, hence full power over the machine. On Linux, prefer `plugarr autostart --systeme`."
+    ),
+    "Port de la console en conteneur sur l'hote. 7373 par defaut.": (
+        "Host port of the console in a container. 7373 by default."
+    ),
+    "console en conteneur": "console in a container",
+    "port de la console": "console port",
+    "Administrer cette machine a distance, par un conteneur [dim](machines sans systemd : Unraid, Synology)[/dim]": (
+        "Administer this machine remotely, through a container [dim](machines without systemd: Unraid, Synology)[/dim]"
+    ),
+    "Installer la console dans un conteneur (il recoit le socket Docker, donc tous les droits)": (
+        "Install the console in a container (it gets the Docker socket, hence every right)"
+    ),
+    "Port de la console": "Console port",
+    "[b]Console[/b]        en conteneur, port {port} [dim](socket Docker : tous les droits sur la machine)[/dim]": (
+        "[b]Console[/b]        in a container, port {port} [dim](Docker socket: every right on the machine)[/dim]"
+    ),
     "Port de la veille": "Watch port",
     "[b]Veille[/b]         page en lecture seule sur le port "
     "{port} [dim](mot de passe de la console)[/dim]": (

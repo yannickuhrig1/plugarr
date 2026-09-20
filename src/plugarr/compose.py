@@ -198,6 +198,58 @@ def _veille_block(cfg: StackConfig) -> dict:
     }
 
 
+def _console_block(cfg: StackConfig) -> dict:
+    """La console d'administration, dans un conteneur. Option explicite.
+
+    Ce n'est PAS le chemin recommande, et ce qui suit doit rester lisible par
+    celui qui l'active. La console cree, demarre et recree des conteneurs :
+    elle exige donc le socket Docker. Or un conteneur qui peut en creer
+    d'autres peut en creer un privilegie, qui monte la racine de l'hote. Ce
+    conteneur a donc, en pratique, les pleins pouvoirs sur la machine, et lui
+    donner un compte sans privilege ne changerait rien : ce serait du theatre.
+    Il tourne en root, et c'est dit.
+
+    Sur un Linux avec systemd, `plugarr autostart --systeme` fait la meme
+    chose SANS socket, en lancant la console sur l'hote. Ce bloc existe pour
+    les machines qui n'ont pas systemd : Unraid, Synology, un BSD.
+
+    Le repertoire du projet et CONFIG_ROOT sont montes en ECRITURE : faire
+    tourner une cle reecrit `stack.yml`, et un pre-semis ecrit dans les
+    configurations. Les donnees, elles, restent en lecture seule : la console
+    n'a aucune raison d'y toucher.
+    """
+    interne = 7373
+    return {
+        "image": catalog.CONSOLE_IMAGE,
+        "container_name": f"{cfg.project_name}-console",
+        "restart": "unless-stopped",
+        "labels": {"plugarr.managed": "true", "plugarr.service": "console"},
+        # Le socket appartient a root sur la plupart des hotes, et le pouvoir
+        # qu'il donne est deja celui de root. Voir la docstring.
+        "user": "0:0",
+        "command": [
+            "serve",
+            "--project-dir",
+            "${PROJECT_DIR}",
+            "--host",
+            "0.0.0.0",
+            f"--port={interne}",
+            "--no-open",
+        ],
+        "environment": {"TZ": "${TZ}"},
+        "volumes": [
+            "/var/run/docker.sock:/var/run/docker.sock",
+            # A LEUR chemin de l'hote : le compose que la console lance porte
+            # des chemins de l'hote, et c'est le demon de l'hote qui l'execute.
+            "${PROJECT_DIR}:${PROJECT_DIR}",
+            "${CONFIG_ROOT}:${CONFIG_ROOT}",
+            "${DATA_ROOT}:${DATA_ROOT}:ro",
+        ],
+        "ports": [f"{cfg.console_port}:{interne}"],
+        "networks": [NETWORK_NAME],
+    }
+
+
 #: Nom du script de synchronisation, depose dans `${CONFIG_ROOT}/gluetun` — le
 #: seul dossier que Gluetun monte deja. Un script plutot qu'une commande en
 #: ligne : le YAML devrait sinon imbriquer trois niveaux de guillemets (shell,
@@ -553,6 +605,8 @@ def build_compose(cfg: StackConfig) -> dict:
     if cfg.veille_enabled:
         # En dernier : elle regarde les autres, rien ne depend d'elle.
         services["veille"] = _veille_block(cfg)
+    if cfg.console_enabled:
+        services["console"] = _console_block(cfg)
     doc: dict[str, Any] = {
         "name": cfg.project_name,
         "services": services,
@@ -596,7 +650,7 @@ def _env_value(value: object) -> str:
     return "'" + text.replace("'", "'\\''") + "'"
 
 
-def render_env(cfg: StackConfig) -> str:
+def render_env(cfg: StackConfig, project_dir: str | Path = "") -> str:
     lines = [
         t("# Genere par plugarr. Contient des secrets : ne JAMAIS commiter."),
         f"COMPOSE_PROJECT_NAME={_env_value(cfg.project_name)}",
@@ -608,6 +662,10 @@ def render_env(cfg: StackConfig) -> str:
         f"PGID={_env_value(cfg.pgid)}",
         f"TZ={_env_value(cfg.timezone)}",
         f"UMASK={_env_value(cfg.umask)}",
+        # Le repertoire du projet, pour la console en conteneur : elle le monte
+        # a SON chemin de l'hote, parce que le compose qu'elle lance porte des
+        # chemins de l'hote et qu'il est execute par le demon de l'hote.
+        *([f"PROJECT_DIR={_env_value(Path(project_dir).resolve())}"] if project_dir else []),
         "",
         t("# Cles API pre-semees - utilisees par le cablage automatique."),
     ]
@@ -748,7 +806,7 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     written.append(compose_path)
 
     env_path = target_dir / ".env"
-    env_path.write_text(render_env(cfg), encoding="utf-8")
+    env_path.write_text(render_env(cfg, target_dir), encoding="utf-8")
     _restrict(env_path)
     written.append(env_path)
 

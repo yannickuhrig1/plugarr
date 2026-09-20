@@ -95,6 +95,8 @@ class WizardInput(BaseModel):
     qbittorrent_ui: str = ""
     veille_enabled: bool = False
     veille_port: int = 7374
+    console_enabled: bool = False
+    console_port: int = 7373
     remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
 
 
@@ -259,6 +261,8 @@ class WizardState:
                 "qbittorrent_ui": cfg.qbittorrent_ui if cfg else "",
                 "veille_enabled": cfg.veille_enabled if cfg else False,
                 "veille_port": cfg.veille_port if cfg else 7374,
+                "console_enabled": cfg.console_enabled if cfg else False,
+                "console_port": cfg.console_port if cfg else 7373,
                 "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
                 "reprendre": cfg is not None,
                 "reset_config": False,
@@ -389,6 +393,12 @@ class WizardState:
             raise ValueError("Port de la veille invalide.")
         cfg.veille_enabled = form.veille_enabled
         cfg.veille_port = form.veille_port
+        if not 1 <= form.console_port <= 65535:
+            raise ValueError("Port de la console invalide.")
+        if form.console_enabled and form.console_port == form.veille_port:
+            raise ValueError("La console et la veille ne peuvent pas partager un port.")
+        cfg.console_enabled = form.console_enabled
+        cfg.console_port = form.console_port
         cfg.recyclarr_templates = form.recyclarr_templates
         if form.recyclarr_templates:
             if self.demo:
@@ -423,6 +433,8 @@ class WizardState:
                     # formulaire, pas un oubli a completer par l'ancienne.
                     "veille_enabled",
                     "veille_port",
+                    "console_enabled",
+                    "console_port",
                     *(("client_prefere",) if form.client_prefere else ()),
                     *(("vpn",) if cfg.vpn.enabled else ()),
                 },
@@ -1097,6 +1109,8 @@ class WizardState:
                 "qbittorrent_ui": cfg.qbittorrent_ui,
                 "veille_enabled": cfg.veille_enabled,
                 "veille_port": cfg.veille_port,
+                "console_enabled": cfg.console_enabled,
+                "console_port": cfg.console_port,
                 "client_prefere": next(
                     (
                         sid

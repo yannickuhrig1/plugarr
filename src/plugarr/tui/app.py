@@ -75,6 +75,10 @@ class PlugArrApp(App):
         #: chemins pre-coche alors ce que porte l'installation en place.
         self.veille_enabled: bool | None = None
         self.veille_port: int = 7374
+        #: Console d'administration en conteneur. Elle exige le socket Docker :
+        #: reservee aux hotes sans systemd.
+        self.console_enabled: bool | None = None
+        self.console_port: int = 7373
         self.platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
         #: Template TRaSH choisi par service. Vide = celui par defaut.
         self.recyclarr_templates: dict[str, str] = {}
@@ -147,6 +151,9 @@ class PlugArrApp(App):
         if self.veille_enabled is not None:
             cfg.veille_enabled = self.veille_enabled
             cfg.veille_port = self.veille_port
+        if self.console_enabled is not None:
+            cfg.console_enabled = self.console_enabled
+            cfg.console_port = self.console_port
 
         # Une installation deja presente : on reprend ce qu'elle portait plutot
         # que de l'effacer. Le VPN est le cas grave — sans cela il disparait en
@@ -183,6 +190,11 @@ class PlugArrApp(App):
                     | (
                         {"veille_enabled", "veille_port"}
                         if self.veille_enabled is not None
+                        else set()
+                    )
+                    | (
+                        {"console_enabled", "console_port"}
+                        if self.console_enabled is not None
                         else set()
                     ),
                 )

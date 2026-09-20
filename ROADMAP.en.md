@@ -443,7 +443,16 @@ Dozzle reads logs and asks for the socket.
       tunnel test gets its own key. Tried on the test bench: 401 without the
       key, 200 for the watch (host and container) and the forwarded port.
 - [ ] Add the watch to the compose file (`user: PUID:PGID`, `stack.yml` and
-      roots read-only, the stack's network) once the image is published.
+      roots read-only, the stack's network). The image is published:
+      `ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.1`, amd64 and arm64,
+      readable without authentication (verified). **What running the published
+      image taught, and what has to be settled here: `stack.yml` is root 600,
+      since it carries the passwords and API keys, and the watch, running as
+      PUID:PGID, cannot read it** (`PermissionError`, seen on the bench on
+      2026-09-20). With a copy owned by PUID:PGID everything works: login page,
+      401 without a session, then 9 services out of 9, the three download
+      clients, one disk, and the containers section empty as intended, with no
+      socket.
 - [ ] Put it in the wizard, with the choice of which roots to watch. No option
       reserved for the command line.
 - [x] Refresh settled: **5 seconds, by polling**, no SSE stream. Measured on

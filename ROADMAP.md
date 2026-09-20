@@ -452,7 +452,16 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       sur le banc : 401 sans clé, 200 pour la veille (hôte et conteneur) et le
       port entrant.
 - [ ] Ajouter la veille au compose (`user: PUID:PGID`, `stack.yml` et racines
-      en lecture seule, réseau de la pile) quand l'image est publiée.
+      en lecture seule, réseau de la pile). L'image est publiée :
+      `ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.1`, amd64 et arm64,
+      lisible sans authentification (vérifié). **Ce que l'essai de l'image
+      publiée a appris, et qu'il faut trancher ici : `stack.yml` est en 600
+      root, puisqu'il porte les mots de passe et les clés API, et la veille,
+      sous PUID:PGID, ne peut pas le lire** (`PermissionError` constatée sur le
+      banc le 2026-09-20). Avec une copie appartenant à PUID:PGID, tout marche :
+      page de connexion, 401 sans session, puis 9 services sur 9, les trois
+      clients de téléchargement, un disque, et la section des conteneurs vide
+      comme prévu, faute de socket.
 - [ ] L'entrer dans l'assistant, avec le choix des racines à surveiller. Aucune
       option réservée à la ligne de commande.
 - [x] Rafraîchissement tranché : **5 secondes, en interrogeant**, pas de flux

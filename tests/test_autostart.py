@@ -12,8 +12,6 @@ et reste hors du reseau Docker. Le confort recherche est le meme.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from plugarr import autostart
@@ -38,9 +36,24 @@ def test_la_commande_reprend_l_interpreteur_courant(tmp_path):
     PATH : lui dire « lancez plugarr serve » ne l'avance a rien."""
     import sys
 
-    assert str(Path(sys.executable).resolve()) in autostart.commande(
-        tmp_path, host="127.0.0.1", port=7373
-    )
+    assert sys.executable in autostart.commande(tmp_path, host="127.0.0.1", port=7373)
+
+
+def test_l_interpreteur_d_un_environnement_virtuel_n_est_pas_resolu(tmp_path, monkeypatch):
+    """Dans un venv, `bin/python3` est un LIEN vers l'interpreteur du systeme.
+    Le resoudre sort du venv : l'unite lancait `/usr/bin/python3 -m plugarr`,
+    qui repondait « No module named plugarr ». Constate sur le banc, le service
+    redemarrait en boucle."""
+    import sys
+
+    venv = tmp_path / "venv" / "bin" / "python3"
+    venv.parent.mkdir(parents=True)
+    venv.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(venv))
+
+    ligne = autostart.commande(tmp_path, host="127.0.0.1", port=7373)
+
+    assert str(venv) in ligne
 
 
 def test_l_adresse_et_le_port_sont_repris(tmp_path):
@@ -168,3 +181,64 @@ def test_une_plateforme_inconnue_ne_pretend_pas_avoir_installe(tmp_path, monkeyp
 
     assert autostart.status(tmp_path).actif is False
     assert autostart.mecanisme() == "aucun"
+
+
+# ------------------------------------------------------------ portee systeme
+
+
+def test_l_unite_systeme_demarre_avec_la_machine_et_nomme_son_compte(tmp_path):
+    """Une unite utilisateur s'arrete a la deconnexion et ne demarre qu'a
+    l'ouverture de session : elle ne couvre pas un serveur ou personne ne se
+    connecte, qui est justement le cas de l'administration a distance."""
+    unite = autostart._unite_systemd("plugarr serve", tmp_path, "mediatheque")
+
+    assert "WantedBy=multi-user.target" in unite
+    assert "User=mediatheque" in unite
+    # Sans cela, la console demarre avant Docker et ne voit aucun conteneur.
+    assert "After=docker.service" in unite
+
+
+def test_l_unite_utilisateur_ne_nomme_aucun_compte(tmp_path):
+    """Elle tourne deja sous celui qui ouvre la session."""
+    unite = autostart._unite_systemd("plugarr serve", tmp_path)
+
+    assert "User=" not in unite
+    assert "WantedBy=default.target" in unite
+
+
+def test_sans_root_l_installation_systeme_refuse_et_dit_comment(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.setattr(autostart, "mecanisme", lambda portee="utilisateur": "systemd-systeme")
+    monkeypatch.setattr(os, "geteuid", lambda: 1000, raising=False)
+
+    ok, message = autostart.enable(tmp_path, portee="systeme")
+
+    assert ok is False
+    assert "sudo" in message
+
+
+def test_sans_proprietaire_connu_l_unite_n_est_pas_ecrite(tmp_path, monkeypatch):
+    """L'unite tournerait alors sous un compte devine : mieux vaut refuser."""
+    import os
+
+    ecrits = []
+    monkeypatch.setattr(autostart, "mecanisme", lambda portee="utilisateur": "systemd-systeme")
+    monkeypatch.setattr(os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(autostart, "_proprietaire", lambda chemin: "")
+    monkeypatch.setattr(autostart, "_systemctl", lambda *a, **k: ecrits.append(a) or (True, ""))
+
+    ok, message = autostart.enable(tmp_path, portee="systeme")
+
+    assert ok is False and "stack.yml" in message
+    assert ecrits == []
+
+
+def test_la_portee_systeme_n_est_pas_celle_par_defaut(tmp_path, monkeypatch):
+    """Le cas courant reste le poste de travail : rien ne doit demander root
+    sans qu'on l'ait ecrit."""
+    monkeypatch.setattr(autostart.shutil, "which", lambda nom: "/usr/bin/systemctl")
+    monkeypatch.setattr(autostart.sys, "platform", "linux")
+
+    assert autostart.mecanisme() == "systemd-utilisateur"
+    assert autostart.mecanisme("systeme") == "systemd-systeme"

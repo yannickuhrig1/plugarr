@@ -307,6 +307,31 @@ même. Et parce qu'une console qui change des mots de passe doit s'authentifier
 sérieusement, `plugarr admin-password` pose un mot de passe : empreinte seule
 dans `stack.yml`, sessions expirables, tentatives limitées.
 
+**Administrer une machine distante.** Demandé à l'usage. Le trou n'était pas
+l'écoute — `plugarr serve --host` existait — mais le DÉMARRAGE : le lancement
+automatique ne connaissait que Windows et systemd *utilisateur*, qui attend
+une ouverture de session. Sur un serveur ou un LXC où personne ne se connecte,
+il n'y avait rien.
+
+- [x] `plugarr autostart --systeme` : une unité systemd SYSTÈME, qui démarre
+      avec la machine. Elle tourne sous le compte qui possède `stack.yml`, pas
+      sous root par commodité, et la commande refuse d'écouter hors de
+      `127.0.0.1` sans mot de passe posé. Vérifié sur le banc le 2026-09-20 :
+      unité installée, console jointe **depuis une autre machine** en 401 avec
+      son formulaire, puis **le LXC redémarré pour de vrai** — sans aucune
+      session, la console est revenue et les 9 conteneurs avec elle.
+- [x] Au passage, un défaut ancien : la commande écrite dans l'unité résolvait
+      le lien symbolique de l'interpréteur, ce qui fait sortir d'un
+      environnement virtuel. Le service lançait `/usr/bin/python3 -m plugarr`
+      et répondait « No module named plugarr », en boucle. Il touchait aussi le
+      lancement automatique par session.
+- [ ] Conteneur d'administration, en option explicite : même image, avec le
+      socket Docker, le vrai `stack.yml` en écriture et root. Il couvre les
+      machines sans systemd (Unraid, Synology, BSD). À présenter pour ce qu'il
+      est : ce conteneur peut tout faire sur la machine.
+- [ ] Marche à suivre pour Unraid et Synology, qui ont leurs propres
+      mécanismes de démarrage.
+
 ---
 
 ## Une veille en continu, dans un conteneur

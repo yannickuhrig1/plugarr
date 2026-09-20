@@ -304,6 +304,28 @@ a console that changes passwords must authenticate itself seriously, `plugarr
 admin-password` sets a password: hash only in `stack.yml`, expiring sessions,
 rate-limited attempts.
 
+**Administering a remote machine.** Asked for in use. The gap was not the
+listening — `plugarr serve --host` already existed — but the STARTING: autostart
+only knew Windows and *user* systemd, which waits for a login. On a server or an
+LXC where nobody logs in, there was nothing.
+
+- [x] `plugarr autostart --systeme`: a SYSTEM systemd unit, started with the
+      machine. It runs as the account that owns `stack.yml`, not as root for
+      convenience, and the command refuses to listen outside `127.0.0.1`
+      without a password set. Checked on the bench on 2026-09-20: unit
+      installed, console reached **from another machine** with a 401 and its
+      form, then **the LXC really rebooted** — with no session at all, the
+      console came back, and the 9 containers with it.
+- [x] Along the way, an old defect: the command written into the unit resolved
+      the interpreter's symlink, which steps out of a virtual environment. The
+      service ran `/usr/bin/python3 -m plugarr` and answered "No module named
+      plugarr", in a loop. It affected the per-session autostart too.
+- [ ] Administration container, as an explicit option: same image, with the
+      Docker socket, the real `stack.yml` writable and root. It covers machines
+      without systemd (Unraid, Synology, BSD). To be presented for what it is:
+      that container can do anything on the machine.
+- [ ] Steps for Unraid and Synology, which have their own boot mechanisms.
+
 ---
 
 ## Continuous watch, in a container

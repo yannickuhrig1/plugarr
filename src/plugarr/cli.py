@@ -1184,6 +1184,14 @@ def autostart(
     disable: bool = typer.Option(False, "--disable", help=t("Retirer le lancement automatique.")),
     host: str = typer.Option("127.0.0.1", help=t("Adresse d'ecoute de la console.")),
     port: int = typer.Option(7373, help=t("Port d'ecoute de la console.")),
+    systeme: bool = typer.Option(
+        False,
+        "--systeme",
+        help=t(
+            "Lancer avec la MACHINE et non a l'ouverture de session, pour "
+            "administrer un serveur a distance. Demande root."
+        ),
+    ),
 ) -> None:
     """Lance la console d'administration a chaque ouverture de session.
 
@@ -1196,10 +1204,11 @@ def autostart(
     reseau Docker.
     """
     cfg = _load_config(project_dir)
-    etat = autostart_mod.status(project_dir)
+    portee = "systeme" if systeme else "utilisateur"
+    etat = autostart_mod.status(project_dir, portee)
 
     if disable:
-        ok, message = autostart_mod.disable(project_dir)
+        ok, message = autostart_mod.disable(project_dir, portee)
         console.print(message if ok else f"[red]{message}[/red]")
         raise typer.Exit(0 if ok else 1)
 
@@ -1220,21 +1229,41 @@ def autostart(
             t("[dim]Deja installe : {chemin}. Reecriture.[/dim]", chemin=etat.chemin)
         )
 
-    ok, message = autostart_mod.enable(project_dir, host=host, port=port)
+    # Une console lancee sans session et joignable depuis le reseau n'a que le
+    # mot de passe pour la garder : le jeton, lui, n'est lu par personne.
+    if systeme and host not in ("127.0.0.1", "localhost", "::1") and not cfg.admin_password_hash:
+        console.print(
+            "[red]Ecoute sur le reseau sans mot de passe : refuse.[/red]"
+        )
+        console.print("[dim]Posez-en un d'abord :[/dim]")
+        console.print("  plugarr admin-password")
+        raise typer.Exit(1)
+
+    ok, message = autostart_mod.enable(project_dir, host=host, port=port, portee=portee)
     if not ok:
         console.print(f"[yellow]{message}[/yellow]")
         raise typer.Exit(1)
 
     console.print(message)
-    console.print(
-        t(
-            "[dim]Console : http://{hote}:{port} — au prochain demarrage "
-            "de session.[/dim]",
-            hote=host,
-            port=port,
+    if systeme:
+        console.print(
+            t(
+                "[dim]Console : http://{hote}:{port} — au prochain demarrage "
+                "de la machine.[/dim]",
+                hote=host,
+                port=port,
+            )
         )
-    )
-    if autostart_mod.mecanisme() == "systemd-utilisateur":
+    else:
+        console.print(
+            t(
+                "[dim]Console : http://{hote}:{port} — au prochain demarrage "
+                "de session.[/dim]",
+                hote=host,
+                port=port,
+            )
+        )
+    if not systeme and autostart_mod.mecanisme() == "systemd-utilisateur":
         console.print(
             "[dim]Une unite utilisateur s'arrete a la deconnexion. Pour qu'elle "
             "survive :[/dim]"

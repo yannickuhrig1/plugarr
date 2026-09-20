@@ -609,6 +609,15 @@ EN: dict[str, str] = {
     "[red]Impossible d'ecouter sur {hote}:{port} : {erreur}[/red]": '[red]Cannot listen on {hote}:{port}: {erreur}[/red]',
     'Nouveau mot de passe': 'New password',
     '[dim]Deja installe : {chemin}. Reecriture.[/dim]': '[dim]Already installed: {chemin}. Rewriting.[/dim]',
+    '[dim]Console : http://{hote}:{port} — au prochain demarrage de la machine.[/dim]': "[dim]Console: http://{hote}:{port} — at the machine's next boot.[/dim]",
+    "Lancer avec la MACHINE et non a l'ouverture de session, pour administrer un serveur a distance. Demande root.": 'Start with the MACHINE rather than at login, to administer a server remotely. Needs root.',
+    "[dim]Posez-en un d'abord :[/dim]": '[dim]Set one first:[/dim]',
+    '[red]Ecoute sur le reseau sans mot de passe : refuse.[/red]': '[red]Listening on the network with no password: refused.[/red]',
+    "une unite systeme s'installe en root. Relancez avec sudo :\n  sudo {commande}": (
+        'a system unit is installed as root. Run it again with sudo:\n  sudo {commande}'
+    ),
+    'une unite systeme se retire en root. Relancez avec sudo.': 'a system unit is removed as root. Run it again with sudo.',
+    "impossible de savoir a quel compte appartient stack.yml : l'unite tournerait sous un compte devine.": 'cannot tell which account owns stack.yml: the unit would run as a guessed account.',
     '[dim]Console : http://{hote}:{port} — au prochain demarrage de session.[/dim]': '[dim]Console: http://{hote}:{port} — at your next login session.[/dim]',
     "[dim]Vos medias dans {racine} ne sont PAS dedans, et c'est voulu.[/dim]": '[dim]Your media in {racine} is NOT in it, and that is deliberate.[/dim]',
     'Ecraser la configuration dans {config} et le projet dans {projet} ?': 'Overwrite the configuration in {config} and the project in {projet}?',

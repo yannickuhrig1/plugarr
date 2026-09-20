@@ -38,8 +38,8 @@ VUETORRENT_MOD = (
 #: les pieds de celui qui la regarde. Le digest est celui de l'INDEX multi
 #: architecture, donc valable pour amd64 comme pour arm64.
 VEILLE_IMAGE = (
-    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.1"
-    "@sha256:0c7ea227f33ecbe43c8153a0a43895477ad7e250f55fbcdd9639c562657fa200"
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.2"
+    "@sha256:eab34e911492e899a80fe10a02ac5409cbb13a9fe02504a9b6cd29c9cbdfb551"
 )
 
 #: Silo s'epingle autrement : il ne publie pas de version au sens habituel, mais

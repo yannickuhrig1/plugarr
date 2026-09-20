@@ -451,19 +451,28 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       la clé sur place. L'essai de tunnel jetable reçoit sa propre clé. Essayé
       sur le banc : 401 sans clé, 200 pour la veille (hôte et conteneur) et le
       port entrant.
-- [ ] Ajouter la veille au compose (`user: PUID:PGID`, `stack.yml` et racines
-      en lecture seule, réseau de la pile). L'image est publiée :
-      `ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.1`, amd64 et arm64,
-      lisible sans authentification (vérifié). **Ce que l'essai de l'image
-      publiée a appris, et qu'il faut trancher ici : `stack.yml` est en 600
-      root, puisqu'il porte les mots de passe et les clés API, et la veille,
-      sous PUID:PGID, ne peut pas le lire** (`PermissionError` constatée sur le
-      banc le 2026-09-20). Avec une copie appartenant à PUID:PGID, tout marche :
-      page de connexion, 401 sans session, puis 9 services sur 9, les trois
-      clients de téléchargement, un disque, et la section des conteneurs vide
-      comme prévu, faute de socket.
-- [ ] L'entrer dans l'assistant, avec le choix des racines à surveiller. Aucune
-      option réservée à la ligne de commande.
+- [x] La veille est dans le compose (`veille_config.py`, `compose._veille_block`).
+      `stack.yml` est en 600 pour le compte qui installe : la veille, sous
+      PUID:PGID, ne pouvait pas le lire (`PermissionError` constatée sur le banc
+      le 2026-09-20, en lançant l'image publiée). Plutôt que d'ouvrir ce fichier
+      ou de faire tourner ce conteneur en root, PlugArr écrit une configuration
+      **réduite** dans `CONFIG_ROOT/veille/`, qui lui appartient : ni clé privée
+      WireGuard, ni identifiants OpenVPN, ni clés API des services dont la
+      veille ne lit que l'état. Le service dit ses limites : `user: PUID:PGID`,
+      montages et racine en lecture seule, `no-new-privileges`, aucun socket,
+      image épinglée par tag et condensat. Vérifié sur le banc contre la vraie
+      installation : page 200, 401 sans session, 9 services sur 9, les trois
+      clients lus par le réseau de la pile, un disque, et zéro conteneur, faute
+      de socket. Au passage, la protection de version a fait son travail :
+      l'image de la première avant-première lisait `stack.yml` jusqu'à la 4 et a
+      refusé la 5, d'où une seconde image.
+- [x] Entrée dans l'assistant : la question et le port dans l'assistant web et
+      dans le TUI, `--veille/--sans-veille` et `--veille-port` en ligne de
+      commande, la ligne au récapitulatif des deux, et la reprise à la
+      réinstallation. Chaîne vérifiée dans un vrai navigateur, en pilotant
+      Chrome : la case cochée et le port saisi arrivent au récapitulatif. Le
+      choix des racines à surveiller reste à faire : aujourd'hui, ce sont celles
+      de l'installation.
 - [x] Rafraîchissement tranché : **5 secondes, en interrogeant**, pas de flux
       SSE. Mesuré sur le banc le 2026-09-20 : une réponse fait 3,3 Ko, et le
       relevé coûte 0,3 s quand les conteneurs sont en cache, 2,1 s sinon — dont

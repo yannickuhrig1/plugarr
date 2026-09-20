@@ -442,19 +442,27 @@ Dozzle reads logs and asks for the socket.
       read it; what runs inside Gluetun reads the key there. The disposable
       tunnel test gets its own key. Tried on the test bench: 401 without the
       key, 200 for the watch (host and container) and the forwarded port.
-- [ ] Add the watch to the compose file (`user: PUID:PGID`, `stack.yml` and
-      roots read-only, the stack's network). The image is published:
-      `ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.1`, amd64 and arm64,
-      readable without authentication (verified). **What running the published
-      image taught, and what has to be settled here: `stack.yml` is root 600,
-      since it carries the passwords and API keys, and the watch, running as
-      PUID:PGID, cannot read it** (`PermissionError`, seen on the bench on
-      2026-09-20). With a copy owned by PUID:PGID everything works: login page,
-      401 without a session, then 9 services out of 9, the three download
-      clients, one disk, and the containers section empty as intended, with no
-      socket.
-- [ ] Put it in the wizard, with the choice of which roots to watch. No option
-      reserved for the command line.
+- [x] The watch is in the compose file (`veille_config.py`,
+      `compose._veille_block`). `stack.yml` is 600 for the account that
+      installs: the watch, running as PUID:PGID, could not read it
+      (`PermissionError`, seen on the bench on 2026-09-20 while running the
+      published image). Rather than opening that file or running this container
+      as root, PlugArr writes a **reduced** configuration in
+      `CONFIG_ROOT/veille/`, owned by it: no WireGuard private key, no OpenVPN
+      credentials, no API keys of the services whose state alone is read. The
+      service states its limits: `user: PUID:PGID`, read-only mounts and root
+      filesystem, `no-new-privileges`, no socket, image pinned by tag and
+      digest. Checked on the bench against the real installation: page 200, 401
+      without a session, 9 services out of 9, the three clients read over the
+      stack network, one disk, and zero containers, with no socket. The version
+      guard did its job along the way: the first preview image read `stack.yml`
+      up to 4 and refused 5, hence a second image.
+- [x] In the wizard: the question and the port in the web wizard and in the
+      TUI, `--veille/--sans-veille` and `--veille-port` on the command line, the
+      line in both summaries, and carry-over on reinstall. Chain checked in a
+      real browser, driving Chrome: the ticked box and the typed port reach the
+      summary. Choosing which roots to watch is still to do: for now they are
+      the installation's own.
 - [x] Refresh settled: **5 seconds, by polling**, no SSE stream. Measured on
       the bench on 2026-09-20: a reply is 3.3 KB, and a read costs 0.3 s with
       the containers cached, 2.1 s otherwise — nearly all of it waiting, since

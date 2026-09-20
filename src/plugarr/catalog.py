@@ -24,6 +24,40 @@ _TAGS = {
     "recyclarr": "8.7.1",
 }
 
+#: VueTorrent, interface de remplacement de qBittorrent, pose par le chargeur de
+#: mods des images LinuxServer (`DOCKER_MODS`). Epingle comme Silo : tag lisible
+#: ET digest. Mesure le 2026-09-19 sur qBittorrent 5.2.3 : le chargeur accepte
+#: `depot:tag@sha256:...` et telecharge exactement cette version.
+VUETORRENT_MOD = (
+    "ghcr.io/vuetorrent/vuetorrent-lsio-mod:2.35.0"
+    "@sha256:f6445ce1eefc597650d4f469ad7b18e35451ce79fc9588f4276a2a0221ca793e"
+)
+
+#: PlugArr lui-meme, pour la veille en conteneur. Epingle tag ET digest, comme
+#: tout le reste du catalogue : une page qui surveille ne doit pas changer sous
+#: les pieds de celui qui la regarde. Le digest est celui de l'INDEX multi
+#: architecture, donc valable pour amd64 comme pour arm64.
+VEILLE_IMAGE = (
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.4"
+    "@sha256:063d2344e1b7927348088233a00f0949c31b74aba7fe9d1170241fb27445460c"
+)
+
+#: La meme PlugArr, variante `admin` : elle porte le client Docker et le
+#: greffon compose, que la console appelle. Tag DISTINCT, pour qu'elle ne soit
+#: jamais prise pour celle de la veille, qui n'a aucun client Docker.
+CONSOLE_IMAGE = (
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.4-admin"
+    "@sha256:c656aeb3f5371217965f958423f224dbd256bdea5f17c60309d0b7ccca4be48b"
+)
+
+#: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et
+#: REFUSE tout POST, donc creer, demarrer ou arreter quoi que ce soit. Epingle
+#: tag ET condensat, comme le reste. v0.5.0 du 2026-07-27, multi architecture.
+SOCKET_PROXY_IMAGE = (
+    "tecnativa/docker-socket-proxy:v0.5.0"
+    "@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459"
+)
+
 #: Silo s'epingle autrement : il ne publie pas de version au sens habituel, mais
 #: un numero de construction monotone. `build-522` porte l'etiquette
 #: `org.opencontainers.image.version` de l'image, relevee dans l'image elle-meme.

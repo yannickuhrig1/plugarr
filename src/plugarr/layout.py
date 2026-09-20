@@ -212,6 +212,30 @@ def detect_ids() -> tuple[int, int] | None:
     return getuid(), getgid()
 
 
+def _ids_sudo() -> tuple[int, int] | None:
+    """UID/GID du compte qui a lance `sudo`, s'il y en a un.
+
+    sudo pose `SUDO_UID` et `SUDO_GID` dans l'environnement de la commande
+    elevee. Les deux doivent etre des entiers, et l'uid non nul : `sudo` lance
+    depuis root donne SUDO_UID=0, qui n'apprend rien et ne doit pas faire croire
+    qu'un vrai utilisateur a ete retrouve.
+
+    Le gid manquant ne disqualifie pas l'uid : on retombe alors sur le gid du
+    processus, ce qui vaut mieux que de renoncer au bon uid.
+    """
+    brut_uid, brut_gid = os.environ.get("SUDO_UID", ""), os.environ.get("SUDO_GID", "")
+    if not brut_uid.strip().isdigit():
+        return None
+    uid = int(brut_uid.strip())
+    if uid == 0:
+        return None
+    gid = int(brut_gid.strip()) if brut_gid.strip().isdigit() else None
+    if gid is None:
+        courant = detect_ids()
+        gid = courant[1] if courant else uid
+    return uid, gid
+
+
 def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
     """Determine PUID/PGID pour un profil.
 
@@ -234,8 +258,26 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
         # Constate lors du premier essai sur Linux natif : `sudo plugarr install`
         # detecte 0:0 et fait tourner TOUTE la stack en root, en silence. Les
         # medias telecharges appartiennent alors a root, et l'utilisateur ne peut
-        # plus y toucher sans sudo. On propose la valeur, on ne l'impose pas, mais
-        # on ne la laisse pas passer sans le dire.
+        # plus y toucher sans sudo.
+        #
+        # Sous `sudo`, le vrai utilisateur n'est pourtant pas perdu : sudo pose
+        # SUDO_UID et SUDO_GID. C'est LUI qu'il faut retenir, pas le 0 de
+        # l'elevation. Remonte le 2026-09-20 par un membre sur Synology : son
+        # installation en sudo avait cree les dossiers en root, et Recyclarr,
+        # dont l'image tourne en 1000:1000 et ignore PUID, se faisait jeter a
+        # l'ecriture. Un `sudo` est souvent NECESSAIRE — /volume1 appartient a
+        # root, personne d'autre ne peut y creer un dossier — donc refuser sudo
+        # ne reglerait rien ; garder le bon identifiant, si.
+        sous_sudo = _ids_sudo()
+        if sous_sudo is not None:
+            return (
+                sous_sudo[0],
+                sous_sudo[1],
+                t("detecte sous sudo : votre compte, pas root"),
+                True,
+            )
+        # Root sans sudo : la valeur reste proposee, jamais imposee, mais jamais
+        # passee sous silence non plus.
         return (
             0,
             detected[1],
@@ -245,8 +287,49 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
     return detected[0], detected[1], t("detecte ({origine})", origine=t(defaults.source)), True
 
 
-def create_tree(data_root: str | Path, config_root: str | Path, service_ids: list[str]) -> list[Path]:
-    """Cree l'arborescence. Idempotent."""
+#: Images qui ignorent PUID/PGID et tournent sous l'utilisateur que leur donne
+#: le compose (`user:`). Seerr tourne sinon en `node` (UID 1000) et plante sur
+#: « EACCES: mkdir '/app/config/logs/' » dans un dossier qui n'est pas a lui
+#: (constate sur le banc le 2026-09-19 ; sa documentation Docker demande un
+#: `chown` ou `--user`).
+#:
+#: Recyclarr est dans le meme cas, remonte le 2026-09-20 par un membre sur
+#: Synology : son image tourne en 1000:1000 en dur et ne lit pas PUID. Tant que
+#: l'installation se faisait sous un compte a 1000, la coincidence tenait ; une
+#: installation en `sudo` — obligatoire sous `/volume1`, qui appartient a root —
+#: creait le dossier en root et Recyclarr se faisait jeter a l'ecriture. Il
+#: n'avait alors aucune interface pour le dire : seule une synchronisation en
+#: echec, sans cause lisible.
+SANS_PUID = frozenset({"seerr", "recyclarr"})
+
+
+def create_tree(
+    data_root: str | Path,
+    config_root: str | Path,
+    service_ids: list[str],
+    *,
+    owner: tuple[int, int] | None = None,
+) -> list[Path]:
+    """Cree l'arborescence. Idempotent.
+
+    `owner` (PUID, PGID) : lance en root, PlugArr donne ces identifiants aux
+    dossiers de DONNEES qu'il cree, et au dossier de configuration des images de
+    `SANS_PUID`. Le partage n'est pas arbitraire, il est mesure sur le banc le
+    2026-09-20, image `linuxserver/sonarr:4.0.19`, avec les deux montages
+    appartenant a root et PUID=1000, PGID=10 :
+
+        /config  root:root  ->  1000:10 au demarrage  (l'image s'en charge)
+        /data    root:root  ->  root:root             (personne ne s'en charge)
+        touch /data/torrents/x  sous 1000:10  ->  Permission denied
+
+    Autrement dit une installation en `sudo` — obligatoire sous `/volume1`, qui
+    appartient a root — donnait une pile qui demarre et qui ne telecharge rien.
+    Les images reprennent leur configuration, jamais les donnees.
+
+    Les dossiers DEJA presents ne sont pas repris : un `chown -R` sur une
+    mediatheque de plusieurs tera serait long, et ce n'est pas a une
+    installation de redistribuer ce qu'elle n'a pas cree.
+    """
     created: list[Path] = []
     data_root, config_root = Path(data_root), Path(config_root)
     for sub in DATA_SUBDIRS:
@@ -254,6 +337,10 @@ def create_tree(data_root: str | Path, config_root: str | Path, service_ids: lis
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
             created.append(p)
+            if owner is not None:
+                # Tout juste cree, donc vide : le parcours de `_donner` ne coute
+                # rien et n'atteint aucun fichier de l'utilisateur.
+                _donner(p, owner)
     for sid in service_ids:
         spec = catalog.CATALOG.get(sid)
         # On cree le dossier que le compose MONTE, pas un dossier portant le nom
@@ -268,7 +355,26 @@ def create_tree(data_root: str | Path, config_root: str | Path, service_ids: lis
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
             created.append(p)
+        if sid in SANS_PUID and owner is not None:
+            _donner(p, owner)
     return created
+
+
+def _est_root() -> bool:
+    import os
+
+    return os.name == "posix" and os.geteuid() == 0
+
+
+def _donner(dossier: Path, owner: tuple[int, int]) -> None:
+    """Attribue le dossier et son contenu. Seul root le peut ; hors root, le
+    dossier appartient deja a l'utilisateur qui lance PlugArr."""
+    import os
+
+    if not _est_root():
+        return
+    for chemin in (dossier, *dossier.rglob("*")):
+        os.chown(chemin, *owner, follow_symlinks=False)
 
 
 def _dossiers_absents(chemin: Path) -> list[Path]:

@@ -171,6 +171,16 @@ class SeerrClient:
             corps.pop(cle)
         return self._request("POST", "/auth/jellyfin", json=corps) or {}
 
+    def api_key(self) -> str:
+        """Cle API de Seerr, qu'il cree lui-meme a sa configuration.
+
+        `GET /settings/main` ne la renvoie qu'a un administrateur
+        (`filteredMainSettings`, server/routes/settings/index.ts, v3.4.1) :
+        la session ouverte par `login_jellyfin` en est un, le premier compte
+        Jellyfin recevant les pleins droits.
+        """
+        return str((self._request("GET", "/settings/main") or {}).get("apiKey") or "")
+
     def initialize(self) -> None:
         """Ferme l'accueil. A n'appeler QU'APRES avoir declare les *arr :
         autrement l'instance se croit prete et ne peut rien demander."""

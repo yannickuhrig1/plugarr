@@ -56,7 +56,7 @@ async def test_l_assistant_affiche_la_version(tmp_path):
 
     app = PlugArrApp(project_dir=tmp_path)
     async with app.run_test() as pilot:
-        app.push_screen(ServicesScreen())
+        await app.push_screen(ServicesScreen())
         await pilot.pause()
         bandeau = str(app.screen.query_one("#wizard-header").content)
 

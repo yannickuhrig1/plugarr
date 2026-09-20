@@ -177,8 +177,8 @@ def test_stack_yml_passe_en_version_3():
     effacer le client prefere, champ qu'elle ne connait pas."""
     migre, notes = migrations.migrer({"version": 2})
 
-    assert migre["version"] == 3 == migrations.VERSION_COURANTE
-    assert notes == ["stack.yml migre en version 3"]
+    assert migre["version"] == migrations.VERSION_COURANTE >= 3
+    assert notes[0] == "stack.yml migre en version 3"
 
 
 def test_une_reinstallation_reprend_le_client_prefere():
@@ -246,14 +246,14 @@ async def test_le_tui_ne_pose_la_question_qu_avec_deux_clients_torrent(tmp_path)
     app_tui = PlugArrApp(project_dir=tmp_path)
     async with app_tui.run_test() as pilot:
         pilot.app.selection = ["sonarr", "qbittorrent"]
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         assert not pilot.app.screen.query("#client-prefere"), "question posee sans objet"
         pilot.app.pop_screen()
         await pilot.pause()
 
         pilot.app.selection = DEUX_TORRENTS
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         ecran = pilot.app.screen
         assert ecran.client_prefere_voulu() == "qbittorrent", "defaut different de la regle"

@@ -154,6 +154,101 @@ EN: dict[str, str] = {
         "selection. Possible choices: {choix}[/red]"
     ),
     "aucun, un seul client par type": "none, only one client per type",
+    "Interface web de qBittorrent : origine ou vuetorrent. VueTorrent "
+    "est telecharge au premier demarrage, puis garde en cache.": (
+        "qBittorrent web interface: origine (original) or vuetorrent. VueTorrent "
+        "is downloaded on first start, then kept in a cache."
+    ),
+    "[red]--qbittorrent-ui attend origine ou vuetorrent.[/red]": (
+        "[red]--qbittorrent-ui expects origine or vuetorrent.[/red]"
+    ),
+    "[red]--qbittorrent-ui vuetorrent demande qBittorrent dans la selection.[/red]": (
+        "[red]--qbittorrent-ui vuetorrent requires qBittorrent in the selection.[/red]"
+    ),
+    "interface de qBittorrent inconnue : {valeur}": "unknown qBittorrent interface: {valeur}",
+    "Veille en lecture seule : services, debits, sortie du VPN, disques.": (
+        "Read-only watch: services, throughput, VPN exit, disks."
+    ),
+    "--interne dans un conteneur de la pile : services joints par leur "
+    "nom sur le reseau Docker, sans socket Docker.": (
+        "--interne inside a container of the stack: services reached by their "
+        "name on the Docker network, without the Docker socket."
+    ),
+    "Veille : {url}": "Watch: {url}",
+    "La veille ecoute sur le reseau mais aucun mot de passe n'est pose. "
+    "Lancez d'abord `plugarr admin-password` sur l'hote.": (
+        "The watch listens on the network but no password is set. "
+        "Run `plugarr admin-password` on the host first."
+    ),
+    "Page de veille en lecture seule, dans un conteneur de la pile. "
+    "Elle survit au redemarrage sans qu'une session soit ouverte.": (
+        "Read-only watch page, in a container of the stack. It survives a "
+        "reboot without anyone logging in."
+    ),
+    "Port de la page de veille sur l'hote. 7374 par defaut.": (
+        "Host port of the watch page. 7374 by default."
+    ),
+    "veille en conteneur": "watch in a container",
+    "port de la veille": "watch port",
+    "Page de veille [dim](lecture seule : disques, debits, VPN, conteneurs)[/dim]": (
+        "Watch page [dim](read-only: disks, throughput, VPN, containers)[/dim]"
+    ),
+    "Installer la page de veille dans la pile": "Install the watch page in the stack",
+    "Console d'administration DANS un conteneur, pour les hotes sans systemd. Elle exige le socket Docker, donc les pleins pouvoirs sur la machine. Sur un Linux, preferez `plugarr autostart --systeme`.": (
+        "Administration console INSIDE a container, for hosts without systemd. It needs the Docker socket, hence full power over the machine. On Linux, prefer `plugarr autostart --systeme`."
+    ),
+    "Port de la console en conteneur sur l'hote. 7373 par defaut.": (
+        "Host port of the console in a container. 7373 by default."
+    ),
+    "console en conteneur": "console in a container",
+    "port de la console": "console port",
+    "Administrer cette machine a distance, par un conteneur [dim](machines sans systemd : Unraid, Synology)[/dim]": (
+        "Administer this machine remotely, through a container [dim](machines without systemd: Unraid, Synology)[/dim]"
+    ),
+    "Installer la console dans un conteneur (il recoit le socket Docker, donc tous les droits)": (
+        "Install the console in a container (it gets the Docker socket, hence every right)"
+    ),
+    "Port de la console": "Console port",
+    "[b]Console[/b]        en conteneur, port {port} [dim](socket Docker : tous les droits sur la machine)[/dim]": (
+        "[b]Console[/b]        in a container, port {port} [dim](Docker socket: every right on the machine)[/dim]"
+    ),
+    "Donner a la veille une vue LECTURE SEULE de Docker, par un proxy qui refuse tout POST : elle affiche alors processeur et memoire par conteneur.": (
+        "Give the watch a READ-ONLY view of Docker, through a proxy that refuses every POST: it then shows CPU and memory per container."
+    ),
+    "vue Docker de la veille": "watch's Docker view",
+    "Montrer aussi processeur et memoire par conteneur (vue Docker en lecture seule, par un proxy qui refuse tout POST)": (
+        "Also show CPU and memory per container (read-only Docker view, through a proxy that refuses every POST)"
+    ),
+    "[b]              [/b] processeur et memoire par conteneur, par un proxy qui refuse tout POST": (
+        "[b]              [/b] CPU and memory per container, through a proxy that refuses every POST"
+    ),
+    "Port de la veille": "Watch port",
+    "[b]Veille[/b]         page en lecture seule sur le port "
+    "{port} [dim](mot de passe de la console)[/dim]": (
+        "[b]Watch[/b]          read-only page on port "
+        "{port} [dim](console password)[/dim]"
+    ),
+    "interface de qBittorrent": "qBittorrent interface",
+    "Interface web de qBittorrent": "qBittorrent web interface",
+    "Interface d'origine": "Original interface",
+    "VueTorrent": "VueTorrent",
+    "[dim]VueTorrent remplace l'interface de qBittorrent par une "
+    "interface plus moderne, pratique aussi sur telephone. Le premier "
+    "demarrage demande Internet pour le telecharger (version figee par "
+    "PlugArr) ; il est ensuite garde dans le dossier de qBittorrent et "
+    "survit aux redemarrages sans Internet. Pour revenir en arriere, "
+    "choisissez l'interface d'origine et relancez l'installation.[/dim]": (
+        "[dim]VueTorrent replaces the qBittorrent interface with a more modern "
+        "one, also handy on a phone. The first start needs Internet to download "
+        "it (version pinned by PlugArr); it is then kept in the qBittorrent "
+        "folder and survives restarts without Internet. To go back, choose the "
+        "original interface and run the installation again.[/dim]"
+    ),
+    "[b]qBittorrent[/b]    interface VueTorrent [dim](telechargee au "
+    "premier demarrage, puis gardee en cache)[/dim]": (
+        "[b]qBittorrent[/b]    VueTorrent interface [dim](downloaded on "
+        "first start, then kept in a cache)[/dim]"
+    ),
     ", priorite {rang}": ", priority {rang}",
     "priorites realignees : {clients}": "priorities realigned: {clients}",
     "Connexion directe + SSL/TLS (recommande)": "Direct connection + SSL/TLS (recommended)",
@@ -408,6 +503,7 @@ EN: dict[str, str] = {
     'detecte ({origine})': 'detected ({origine})',
     'valeur par defaut : detection impossible sur cette plateforme': 'default value: detection impossible on this platform',
     'lance en root : conteneurs et medias appartiendront a root': 'running as root: containers and media will belong to root',
+    'detecte sous sudo : votre compte, pas root': 'detected under sudo: your account, not root',
     'hardlink OK entre torrents/ et media/': 'hardlink OK between torrents/ and media/',
     "hardlink impossible ({erreur}). Les imports recopieront les fichiers au lieu de les lier. Verifiez que {source} et {cible} sont sur le MEME systeme de fichiers, et que DATA_ROOT est monte d'un seul bloc.": 'hardlink impossible ({erreur}). Imports will copy files instead of linking them. Check that {source} and {cible} are on the SAME filesystem, and that DATA_ROOT is mounted as a single block.',
     # -- format de date --------------------------------------------------------------
@@ -542,6 +638,15 @@ EN: dict[str, str] = {
     "[red]Impossible d'ecouter sur {hote}:{port} : {erreur}[/red]": '[red]Cannot listen on {hote}:{port}: {erreur}[/red]',
     'Nouveau mot de passe': 'New password',
     '[dim]Deja installe : {chemin}. Reecriture.[/dim]': '[dim]Already installed: {chemin}. Rewriting.[/dim]',
+    '[dim]Console : http://{hote}:{port} — au prochain demarrage de la machine.[/dim]': "[dim]Console: http://{hote}:{port} — at the machine's next boot.[/dim]",
+    "Lancer avec la MACHINE et non a l'ouverture de session, pour administrer un serveur a distance. Demande root.": 'Start with the MACHINE rather than at login, to administer a server remotely. Needs root.',
+    "[dim]Posez-en un d'abord :[/dim]": '[dim]Set one first:[/dim]',
+    '[red]Ecoute sur le reseau sans mot de passe : refuse.[/red]': '[red]Listening on the network with no password: refused.[/red]',
+    "une unite systeme s'installe en root. Relancez avec sudo :\n  sudo {commande}": (
+        'a system unit is installed as root. Run it again with sudo:\n  sudo {commande}'
+    ),
+    'une unite systeme se retire en root. Relancez avec sudo.': 'a system unit is removed as root. Run it again with sudo.',
+    "impossible de savoir a quel compte appartient stack.yml : l'unite tournerait sous un compte devine.": 'cannot tell which account owns stack.yml: the unit would run as a guessed account.',
     '[dim]Console : http://{hote}:{port} — au prochain demarrage de session.[/dim]': '[dim]Console: http://{hote}:{port} — at your next login session.[/dim]',
     "[dim]Vos medias dans {racine} ne sont PAS dedans, et c'est voulu.[/dim]": '[dim]Your media in {racine} is NOT in it, and that is deliberate.[/dim]',
     'Ecraser la configuration dans {config} et le projet dans {projet} ?': 'Overwrite the configuration in {config} and the project in {projet}?',
@@ -779,6 +884,27 @@ EN: dict[str, str] = {
     # -- derniers messages du chemin d'echec -----------------------------------------
     ' (deja posee)': ' (already set)',
     'deja configure': 'already configured',
+    # -- import d'indexeurs depuis une sauvegarde Prowlarr ----------------------
+    "client de telechargement {nom} absent : client par defaut de Prowlarr": (
+        "download client {nom} missing: Prowlarr default client"
+    ),
+    "definition absente de ce Prowlarr": "definition missing from this Prowlarr",
+    "etiquettes absentes de ce Prowlarr, retirees : {noms}": (
+        "tags missing from this Prowlarr, removed: {noms}"
+    ),
+    "reglages absents de cette version de la definition, ignores : {noms}": (
+        "settings missing from this version of the definition, ignored: {noms}"
+    ),
+    "Afficher ce qui serait importe, sans rien ecrire.": "Show what would be imported, without writing anything.",
+    "Sauvegarde Prowlarr (.zip), archive PlugArr ou prowlarr.db.": (
+        "Prowlarr backup (.zip), PlugArr archive or prowlarr.db."
+    ),
+    "[dim]Non importes, volontairement : {liste}[/dim]": "[dim]Deliberately not imported: {liste}[/dim]",
+    "[dim]{nom} : deja configure[/dim]": "[dim]{nom}: already configured[/dim]",
+    "[yellow]{nom} : definition absente de ce Prowlarr, ignore[/yellow]": (
+        "[yellow]{nom}: definition missing from this Prowlarr, skipped[/yellow]"
+    ),
+    "{nom} : serait importe": "{nom}: would be imported",
     'introuvable a la relecture': 'not found when read back',
     'la session est-elle bien authentifiee ?': 'is the session properly authenticated?',
     'pas de profil de client de telechargement pour {service}. Connus : {liste}': 'no download client profile for {service}. Known: {liste}',

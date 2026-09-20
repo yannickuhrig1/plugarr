@@ -19,6 +19,7 @@ fonction dans l’assistant web local après la mise à niveau du 11 septembre 2
 | VPN | choix multiples de pays/régions et filtre compatible port entrant | sélecteur multiple filtrable, limité aux emplacements compatibles si nécessaire |
 | VPN | essai réel dans un conteneur jetable | bouton « Tester le tunnel jetable » ; résultat non bloquant |
 | VPN | trajet SABnzbd direct + SSL/TLS recommandé, ou via Gluetun sur demande | choix explicite identique ; activer le trajet VPN active aussi Gluetun |
+| VPN | interface web de qBittorrent : d’origine ou VueTorrent, avec ce que ça implique | même choix, affiché seulement quand qBittorrent est sélectionné, repris au récapitulatif |
 | Recyclarr | profil par défaut ou modèle officiel pour Sonarr/Radarr | catalogue complet, recherche native du sélecteur et ordre de grandeur de taille |
 | Récapitulatif | services, images, URL, chemins, IDs, UMASK/TZ, VPN et nombre de liens | cartes de synthèse et lignes de services avant confirmation |
 | Récapitulatif | reprendre une pile ou repartir de zéro | choix explicite quand une installation a été trouvée |

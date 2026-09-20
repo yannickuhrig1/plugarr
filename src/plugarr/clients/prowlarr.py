@@ -178,6 +178,13 @@ def is_credential(raw: dict) -> bool:
     return raw.get("type") == "textbox" and raw.get("value") in (None, "")
 
 
+#: Duree laissee a Prowlarr pour valider un indexeur. Mesure sur Prowlarr 2.5.2
+#: face a un tracker hors ligne (Cloudflare 522) : il abandonne apres 100 s.
+#: Avec les 20 s par defaut du client, PlugArr coupait avant lui et accusait
+#: Prowlarr d'etre injoignable, au lieu de rapporter la vraie cause.
+INDEXER_SAVE_TIMEOUT = 150.0
+
+
 class ProwlarrIndexers:
     """Recherche et ajout d'indexeurs dans Prowlarr."""
 
@@ -233,6 +240,17 @@ class ProwlarrIndexers:
     def configured(self) -> list[dict]:
         return self._client.get("indexer") or []
 
+    def app_profiles(self) -> list[dict]:
+        return self._client.get("appprofile") or []
+
+    def tags(self) -> list[dict]:
+        return self._client.get("tag") or []
+
+    def download_clients(self) -> list[dict]:
+        """Lecture seule : l'import d'indexeurs ne cree ni ne modifie jamais
+        un client de telechargement."""
+        return self._client.get("downloadclient") or []
+
     def app_profile_id(self) -> int:
         """Prowlarr refuse un indexeur sans appProfileId > 0. L'identifiant n'est
         pas garanti stable : on le resout, on ne le code pas en dur."""
@@ -263,9 +281,12 @@ class ProwlarrIndexers:
         payload["enable"] = True
         payload["appProfileId"] = self.app_profile_id()
         payload.setdefault("tags", [])
+        return self.create(payload)
 
+    def create(self, payload: dict) -> tuple[bool, str]:
+        """Enregistre un indexeur deja rempli. Renvoie (succes, message)."""
         try:
-            self._client.post("indexer", payload)
+            self._client.post("indexer", payload, timeout=INDEXER_SAVE_TIMEOUT)
         except WiringError as exc:
             return False, _readable(str(exc))
         return True, "ajoute et valide par Prowlarr"
@@ -287,9 +308,15 @@ def redact(message: str) -> str:
     return _PARAM_SECRET.sub(lambda m: f"{m.group(1)}...", message)
 
 
+#: Sequences \uXXXX laissees par le JSON de Prowlarr dans ses messages.
+_ECHAPPEMENT_JSON = re.compile(r"[\\]u([0-9a-fA-F]{4})")
+
+
 def _readable(message: str) -> str:
     """Extrait la ligne utile d'une erreur Prowlarr, souvent tres verbeuse."""
-    message = redact(message)
+    # Prowlarr renvoie du JSON : sans ce decodage, l'utilisateur lisait
+    # « indexer\u0027s server » et des URL hachees de « \u0026 ».
+    message = redact(_ECHAPPEMENT_JSON.sub(lambda m: chr(int(m.group(1), 16)), message))
     for marker in ("Unable to connect", "Invalid API Key", "Authentication failed", "errorMessage"):
         if marker in message:
             fragment = message.split(marker, 1)[1][:180].strip(' ":,')

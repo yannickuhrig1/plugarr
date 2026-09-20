@@ -95,9 +95,19 @@ DroppedNeedle.
 
 ## Next up
 
-**Shelfarr and Shelfmark**, the last two services on the list. Their digests are
-already recorded, and Audiobookshelf unblocks them: they deliver into its
-libraries.
+**0.10.0: the watch and qBittorrent themes.** Two requests made in use, studied
+below, and each has a first point to settle before writing a line:
+
+- **the watch**: settled, the console first. Its "Watch" panel is ready
+  (disks, throughput, VPN exit); the container will come later, with the
+  image. For the record: level 1 can live in the console, on the host, with
+  no image. See "Continuous watch, in a container";
+- **qBittorrent themes**: VueTorrent is ready, pinned and offered in the
+  wizard. theme.park is set aside for 0.10.0: measured, it does not survive a
+  restart without Internet. See "Customising the interfaces".
+
+**Shelfarr and Shelfmark** follow: their digests are already recorded, and
+Audiobookshelf unblocks them, since they deliver into its libraries.
 
 ### What the pack update settled — shipped in 0.6.0
 
@@ -154,6 +164,13 @@ startup shipped in 0.1.9. What protects you today: `chmod 600`, a generated
 | **Choosing the download client** | ✅ shipped in 0.9.0 | Two torrent clients installed, and the *arr **alternated** between them: all were declared at `priority: 1`, and Sonarr then applies round-robin. The preferred client goes to 1, the others move down and stay as fallback; qBittorrent by default, as for the incoming port. Asked in the web wizard, the TUI and through `--client-prefere`, only when it means something. An existing installation is only corrected in the faulty state, never over a manual setting. Verified in CI against a real Sonarr after the second wiring pass: qBittorrent at 1, Transmission at 2. `stack.yml` moves to version 3, so that an older version refuses the file instead of erasing this choice. |
 | **Duplicate ports within the stack** | ✅ shipped in 0.9.0 | The preflight probed the **host**, and therefore could not see two PlugArr services on the same port: both "free", then `docker compose up` failed for the whole stack. Reproduced with a Silo stack then Jellyfin added through the web wizard, which published 8096 twice. The cause is fixed, and a blocking check now compares the plan with itself. |
 | **Image download** | ✅ shipped in 0.9.0 | Three attempts instead of one. Recorded in CI: a registry drop (`read: connection reset by peer` at lscr.io) failed the whole installation. `pull` is idempotent, and a definitive error still surfaces with its message. |
+| **Indexers taken from a Prowlarr backup** | ✅ ready for 0.10.0 | In the wizard's indexer panel after installation, or with `plugarr indexers import`. Only the indexer table is read; each one is added through the API, without touching the download client or the applications. Verified on the test bench: client and application fingerprints identical before and after. Prowlarr takes up to 100 s to reject an offline tracker: it now has 150 s. |
+| **Setting up the phone from a file** | ✅ ready for 0.10.0 | Backups to restore in **nzb360** 24.4.1 (Sonarr, Radarr, Lidarr, Seerr, qBittorrent or Transmission, SABnzbd) and **qbRemote** 1.8.0 (AES-256 encrypted). One file for home and away: the app switches to the local address on the home Wi-Fi. Formats read from real backups, then every service validated on a real Android phone, including nzb360's switching toggle, without which the local address is never used. |
+| **Keeping the phone's settings** | ✅ ready for 0.10.0 | Restoring replaces everything. PlugArr therefore starts from the user's backup and only adds its services: a PlugArr server added to qbRemote; in nzb360, a **separate "PlugArr" profile** that replaces nothing. Validated on the phone with real backups: other servers, Tautulli and profiles intact. |
+| **Sending to the phone by QR code** | ✅ ready for 0.10.0 | A one-time link, ten minutes at most, on the server's private address. Validated by scanning with the phone camera. On Windows, the firewall asks for permission the first time, and the wizard says so. |
+| **Watch in the console** | ✅ ready for 0.10.0 | Read-only panel, refreshed every 5 s: free space per disk (a disk shared by several folders is counted once), qBittorrent, Transmission and SABnzbd throughput through their own APIs, VPN exit read from Gluetun's control server. Throughput checked on the test bench with a real download (the Debian image): the figures follow qBittorrent's. VPN exit read on a real ProtonVPN tunnel (WireGuard), different from the home address; a failure is only kept 10 s, since Gluetun reports an empty address for a few seconds at startup. |
+| **VueTorrent for qBittorrent** | ✅ ready for 0.10.0 | Optional in the web wizard, the TUI and `--qbittorrent-ui`. Mod pinned by tag and digest, `/modcache` cache as a volume: VueTorrent survives restarts without Internet. Tried on the test bench both ways: VueTorrent served and wiring intact, then back to the original interface. |
+| **Seerr starts and connects** | ✅ ready for 0.10.0 | First real installation: Seerr restarted in a loop (`EACCES`). Its image ignores PUID/PGID: it now runs as PUID:PGID and is given its folder. Its API key, which it creates itself, is read during wiring for the phone apps. |
 
 ---
 
@@ -205,7 +222,8 @@ a command you have to launch.
 | Rotate an API key, with re-wiring | ✅ |
 | Add a service missing from the installation | ✅ |
 | Automatic startup, without launching a command | ✅ 0.1.9 |
-| Continuous watch, in a read-only container | ⬜ under study |
+| Watch in the console: disks, throughput, VPN exit | ✅ 0.10.0 |
+| Continuous watch, in a read-only container | ⬜ after the console |
 | Gluetun on the page: status, restart, update, server change | ⬜ to do |
 | Console translated into English | ⬜ to do |
 
@@ -286,12 +304,54 @@ a console that changes passwords must authenticate itself seriously, `plugarr
 admin-password` sets a password: hash only in `stack.yml`, expiring sessions,
 rate-limited attempts.
 
+**Administering a remote machine.** Asked for in use. The gap was not the
+listening — `plugarr serve --host` already existed — but the STARTING: autostart
+only knew Windows and *user* systemd, which waits for a login. On a server or an
+LXC where nobody logs in, there was nothing.
+
+- [x] `plugarr autostart --systeme`: a SYSTEM systemd unit, started with the
+      machine. It runs as the account that owns `stack.yml`, not as root for
+      convenience, and the command refuses to listen outside `127.0.0.1`
+      without a password set. Checked on the bench on 2026-09-20: unit
+      installed, console reached **from another machine** with a 401 and its
+      form, then **the LXC really rebooted** — with no session at all, the
+      console came back, and the 9 containers with it.
+- [x] Along the way, an old defect: the command written into the unit resolved
+      the interpreter's symlink, which steps out of a virtual environment. The
+      service ran `/usr/bin/python3 -m plugarr` and answered "No module named
+      plugarr", in a loop. It affected the per-session autostart too.
+- [x] Administration container, as an explicit option (`--console-conteneur`,
+      its own question in both wizards). The image gains a **second target**:
+      by default the watch one, **with no Docker client at all** — even with
+      the socket it could not use it, and the workflow checks that — and
+      `--target admin`, published under a distinct tag, which adds the Docker
+      client 29.8.1 and the compose plugin 5.5.1 (signed apt repo, pinned
+      versions, key fingerprint verified). 263 MB against 393 MB. The container
+      runs as **root** and that is stated everywhere: with the socket you can
+      create a privileged container, so giving it an unprivileged account would
+      be theatre. Checked on the bench on 2026-09-20 against the real
+      installation: console reached with a 401, login, the real state of the 9
+      services read from inside the container, then **Lidarr restarted through
+      the socket**. The bench was put back as it was.
+- [x] Steps written: `docs/ADMIN_DISTANTE.md`, three routes, from the safest to
+      the most permissive. It ALSO says what is not verified: neither Unraid nor
+      Synology is on the bench, so their own mechanisms appear as sourced leads,
+      not as tested steps. On those machines, the verified route remains the
+      console in a container.
+- [ ] Try the Unraid route on a real Unraid: the user has one. That day, the
+      User Scripts plugin becomes either verified steps or nothing at all.
+
 ---
 
 ## Continuous watch, in a container
 
 Requested in use: "to monitor PlugArr, a container that is always up, in real
 time", with disk space, RAM, CPU, GPU and bandwidth on the page.
+
+**Planned for 0.10.0.** The first point to settle is the scope: a container
+first requires a published image, whereas level 1 fits in the console, on the
+host, without one. The former serves NAS boxes where nobody logs in, the
+latter needs no image.
 
 **Watching is not administering, and that is the whole difference.** The refusal
 above is about writing: create, start, recreate. Reading needs none of those
@@ -370,24 +430,118 @@ Dozzle reads logs and asks for the socket.
 
 ### What remains to be done
 
-- [ ] Publish a multi-architecture, pinned `plugarr` image, before anything else.
-- [ ] A `plugarr veille` command serving a READ-ONLY page: no action buttons,
-      reusing `status_payload` and the existing clients.
-- [ ] Level 1, no socket: service status through their own APIs, public IP
-      through Gluetun's control server — already queried by `vpncheck` —, disk
-      through read-only mounts, throughput through the download clients.
-- [ ] Level 2, read-only socket behind a proxy (POST refused), as an explicit
-      option: CPU and RAM per container, restart loops, OOM kills, logs. Its cost
-      belongs on the screen, not in a file: `GET /containers/{id}/json` returns
-      the RESOLVED environment variables — verified — hence the WireGuard private
-      key, the API keys and the passwords `.env` is meant to keep.
-- [ ] Expose the watch only behind authentication. The password already exists
-      (`adminauth`): same model, not a second one.
-- [ ] Put it in the wizard, with the choice of which roots to watch. No option
-      reserved for the command line.
-- [ ] Settle the refresh: 5 seconds like the console, or an SSE stream. The only
-      true real time on the Docker side remains `/events`, and it requires the
-      socket.
+- [x] Settle the scope for 0.10.0: level 1 first, in the console, on the
+      host. The container follows, with the image.
+- [x] Build a multi-architecture, pinned `plugarr` image (`Dockerfile`,
+      `.github/workflows/docker.yml`): Python base by tag and digest,
+      unprivileged account, amd64 and arm64 built on every push, start-up test
+      first. Published to `ghcr.io/yannickuhrig1/plugarr` on the first version
+      tag, never as `latest`. Tried on the test bench: 262 MB, starts, reports
+      its version.
+- [x] A `plugarr veille` command serving a READ-ONLY page
+      (`veille_serveur.py`): no route that changes anything, the only button is
+      "Log out". `--interne` inside a container of the stack: services by name
+      on the Docker network, Gluetun over HTTP, **no Docker socket**. Service
+      status is read at each service's own address (any response below 500
+      proves it runs). Tried on the test bench in the image, `plugarr_plugarr`
+      network, roots mounted read-only: 9 services, 3 throughputs and the disk
+      read.
+- [x] Level 1, no socket, in the console (`veille.py`, `/api/veille`):
+      service status (already there), VPN exit through Gluetun's control
+      server, free space per disk, throughput through the download clients.
+      VPN exit read on a real ProtonVPN tunnel. Still to do: mount the roots
+      read-only once the watch moves into a container.
+- [x] Level 2 on the HOST, through the Docker command line (`runner.py`,
+      `veille.conteneurs`): CPU, memory, restart count, OOM kill, exit code and
+      health, per container. Chosen FIELDS, never the whole `docker inspect`:
+      it returns the RESOLVED environment variables — verified — hence the
+      WireGuard private key, the API keys and the passwords `.env` is meant to
+      keep. Measured on the bench on 2026-09-20: 9 containers, 2.1 s per read
+      (`docker stats` takes two spaced samples), hence a 10 s cache for a page
+      that refreshes every 5 s. Table checked in a real browser, both in the
+      console and on the standalone page.
+- [x] Level 2 in a CONTAINER: read-only Docker view behind a proxy
+      (`tecnativa/docker-socket-proxy` v0.5.0, pinned by tag and digest), as an
+      explicit option (`--veille-docker`, a question in both wizards). The
+      proxy sits on an **internal** network, with no way out, that the watch
+      alone can reach. Measured on the bench on 2026-09-20: the list and the
+      stats answer 200, `POST .../stop` and `POST /containers/create` answer
+      403, `GET /images/json` answers 403, and the network has no outbound
+      route. **What the proxy does not protect**: `CONTAINERS=1` also opens
+      `GET /containers/{id}/json`, which returns the RESOLVED environment
+      variables — measured, 200. The restraint therefore lives in `veille.py`,
+      which asks only for the list and the stats. Restart counts and OOM kills
+      exist only in that inspection: they stay readable on the host and absent
+      in the container, an empty column rather than one more secret inside a
+      reachable process.
+      **End-to-end test on the bench**, with an image built from the branch:
+      eleven containers shown with CPU and memory, figures checked against the
+      host's `docker stats` (jellyfin 156.4 MiB on both sides, sabnzbd
+      75.71 MiB). The proxy's log settles it better than re-reading the code:
+      one request for the list, eleven for the stats, **none for
+      `/containers/{id}/json`**. None of the sixteen secrets in `stack.yml`
+      appear in the response; the reduced file keeps only the five the watch
+      actually uses. Page checked in a real browser: the restart column shows
+      "—", no `null`, no `NaN`, no exception.
+      **A defect this test found, and fixed**: the stats were fetched one after
+      another, and `stream=false` does not return an instant measurement — the
+      daemon waits for its second CPU sample. Eleven containers cost 21.2 s,
+      and the page stayed empty throughout. The stats now go out in parallel
+      (`MESURES_SIMULTANEES`): 2.1 s with a cold daemon, 2.4 s from login to a
+      filled table in the browser. Two tests hold the parallelism and its cap;
+      the first does fail, at 2.7 s, if the code goes back to sequential.
+      **Published images checked** (`preview.4`, both of them, pinned by index
+      digest): the three containers start, 12 containers with CPU and memory,
+      2.2 s cold, a proxy log of 12 stats calls and 1 list call without a
+      single request to the secret-bearing route, and the console from the
+      `-admin` variant restarted Lidarr through the socket.
+- [ ] Container logs in the watch: to be weighed separately, a log can carry
+      credentials (Gluetun writes its configuration at startup).
+- [x] Expose the watch only behind authentication: same password as the
+      console (`adminauth`), same limited sessions. Without a password it
+      refuses to listen anywhere but 127.0.0.1 (checked in the container).
+- [x] Set up an authentication file for Gluetun's control server
+      (`gluetun_auth.py`). Measured on v3.41.3: `GET /v1/publicip/ip` still
+      answered without authentication, but Gluetun warned on every call that
+      the route would become protected, and its documentation says they are all
+      private now. PlugArr sets an API-key role on the two routes it reads
+      (public address, forwarded port) in `CONFIG_ROOT/gluetun/auth/`, already
+      mounted: no compose change. The file belongs to PUID:PGID so the watch can
+      read it; what runs inside Gluetun reads the key there. The disposable
+      tunnel test gets its own key. Tried on the test bench: 401 without the
+      key, 200 for the watch (host and container) and the forwarded port.
+- [x] The watch is in the compose file (`veille_config.py`,
+      `compose._veille_block`). `stack.yml` is 600 for the account that
+      installs: the watch, running as PUID:PGID, could not read it
+      (`PermissionError`, seen on the bench on 2026-09-20 while running the
+      published image). Rather than opening that file or running this container
+      as root, PlugArr writes a **reduced** configuration in
+      `CONFIG_ROOT/veille/`, owned by it: no WireGuard private key, no OpenVPN
+      credentials, no API keys of the services whose state alone is read. The
+      service states its limits: `user: PUID:PGID`, read-only mounts and root
+      filesystem, `no-new-privileges`, no socket, image pinned by tag and
+      digest. Checked on the bench against the real installation: page 200, 401
+      without a session, 9 services out of 9, the three clients read over the
+      stack network, one disk, and zero containers, with no socket. The version
+      guard did its job along the way: the first preview image read `stack.yml`
+      up to 4 and refused 5, hence a second image.
+- [x] In the wizard: the question and the port in the web wizard and in the
+      TUI, `--veille/--sans-veille` and `--veille-port` on the command line, the
+      line in both summaries, and carry-over on reinstall. Chain checked in a
+      real browser, driving Chrome: the ticked box and the typed port reach the
+      summary. Choosing which roots to watch is still to do: for now they are
+      the installation's own.
+- [x] Refresh settled: **5 seconds, by polling**, no SSE stream. Measured on
+      the bench on 2026-09-20: a reply is 3.3 KB, and a read costs 0.3 s with
+      the containers cached, 2.1 s otherwise — nearly all of it waiting, since
+      `docker stats` only burns 30 ms of CPU per call (`times`, 10 calls in
+      0.31 s). An SSE stream would save no work: behind it, the same APIs would
+      still have to be polled, as they push nothing. The only true real time on
+      the Docker side remains `/events`, and it requires the socket. What did
+      get fixed: a read can last longer than the interval, and the page used to
+      start a second one on top. The server does accept concurrent calls
+      (measured: 3 at once), so it is up to the page to wait for the read in
+      flight; the console and the standalone page now do.
 - [ ] Measure it all again on native Linux: the figures above come from Docker
       Desktop.
 
@@ -443,6 +597,13 @@ putting it anywhere else would have nothing to settle.
 Requested in use: being able to replace a service's web interface, or give it a
 theme, without leaving PlugArr.
 
+**Delivered for 0.10.0: VueTorrent on qBittorrent.** theme.park is not
+offered: measured below, it downloads the qBittorrent sources again from
+GitHub every time the container is created, disappears on the first restart
+without Internet even with the cache, and has its stylesheets loaded from
+`theme-park.dev` on every page. The other services will only follow if a mod
+meets these conditions.
+
 Two mechanisms, both carried by linuxserver.io mods — therefore limited to the
 catalogue's `lscr.io/...` images. Gluetun, Recyclarr, Seerr and Silo are not
 among them and will stay out.
@@ -472,6 +633,63 @@ init. Three consequences, none of them harmless:
 The honest route is probably to pin the mod by tag like everything else, to offer
 it as an explicit option rather than a default, and to write in the wizard what
 it implies. Not to enable it silently because it looks nicer.
+
+### Measured on 19 September 2026
+
+On a disposable qBittorrent 5.2.3 on the test bench, `lscr.io/linuxserver/qbittorrent`,
+with an internal Docker network to simulate having no Internet.
+
+- **Pinning: possible for both.** The linuxserver mod loader (`docker-mods.v3`)
+  accepts `repo:tag@sha256:…` and then downloads that exact version. VueTorrent
+  publishes versioned tags (`2.35.0`); theme.park only floating per-app tags
+  (`qbittorrent`), so only the digest freezes it. Verified:
+  `vuetorrent-lsio-mod:2.35.0@sha256:f644…` is downloaded, installed, and
+  qBittorrent serves VueTorrent.
+- **Without Internet, qBittorrent does not break, but loses VueTorrent for good.**
+  Container recreated offline: the mod is skipped ("not found in modcache,
+  skipping"), qBittorrent serves its original interface, and **rewrites
+  `WebUI\AlternativeUIEnabled=false`** since `/vuetorrent` is missing. Once the
+  network is back the mod is there again but the interface stays the original
+  one: a single outage is enough.
+- **Measured fix: mount `/modcache` as a volume.** The loader keeps the mod
+  archive there; recreated offline, the container applies it from that cache
+  ("OFFLINE: … found in modcache") and VueTorrent stays, setting intact.
+- **VueTorrent and theme.park exclude each other.** Together on a clean
+  configuration, qBittorrent serves its original interface, themed: theme.park
+  wins. It is one **or** the other, not both.
+- **Why theme.park wins.** Its script rewrites `WebUI\AlternativeUIEnabled=true`
+  and `WebUI\RootFolder=/themepark` at every start, after a
+  `qBittorrent.conf.bak` copy made only once. It ships no interface: **every
+  time the container is created it clones the qBittorrent sources from GitHub**
+  (branch `release-<version>`, version read from the Alpine edge index, not
+  from the image) and adds two stylesheets that the browser loads from
+  `theme-park.dev` on every page.
+- **Without Internet, theme.park is lost even with `/modcache`.** The mod is
+  taken from the cache, but the clone fails: `/themepark` does not exist,
+  qBittorrent serves its original interface and rewrites
+  `WebUI\AlternativeUIEnabled=false`. The cache only protects VueTorrent.
+- **Removing theme.park gives back the original interface.** Restarted without
+  the mod, qBittorrent sets `AlternativeUIEnabled` to `false` by itself. What
+  remains: `WebUI\RootFolder=/themepark`, inert, and `qBittorrent.conf.bak`.
+
+### What remains to be done for 0.10.0
+
+- [x] Find a pinnable version of each mod: by digest for both, and by
+      versioned tag as well for VueTorrent.
+- [x] Measure what qBittorrent does when it restarts without access to GitHub:
+      see above. Rule kept: `/modcache` as a volume under `CONFIG_ROOT`, so
+      VueTorrent survives an offline restart (theme.park does not, see above).
+- [x] Check VueTorrent and theme.park together: they exclude each other, the
+      wizard will offer one or the other.
+- [x] Find what theme.park changes in `qBittorrent.conf` to win, and whether
+      removing the mod gives back the original interface: yes, see above.
+- [x] Set `WebUI\AlternativeUIEnabled` and `WebUI\RootFolder` when pre-seeding
+      `qBittorrent.conf`. An installation that drops VueTorrent sets
+      `AlternativeUIEnabled` back to `false`; an interface set by hand is left
+      alone.
+- [x] Offer it in the web wizard and the TUI, as an explicit option, with what
+      it implies written on screen, and `--qbittorrent-ui` on the command line.
+      VueTorrent only: theme.park is set aside, see above.
 
 ---
 

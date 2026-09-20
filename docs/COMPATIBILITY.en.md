@@ -19,6 +19,7 @@ Docker Desktop on Windows 11 (WSL2 backend).
 | Jellyfin | `lscr.io/linuxserver/jellyfin` | `10.11.11` | 10.11.11 |
 | Lidarr | `lscr.io/linuxserver/lidarr` | `3.1.0` | 3.1.0.4875 |
 | qBittorrent | `lscr.io/linuxserver/qbittorrent` | `5.2.3` | v5.2.3 |
+| VueTorrent (qBittorrent mod, optional) | `ghcr.io/vuetorrent/vuetorrent-lsio-mod` | `2.35.0@sha256:f6445ce1…` | page served: "VueTorrent" |
 | Flood | `jesec/flood` | `4.16.1` | not tested yet |
 
 ## Findings verified experimentally
@@ -131,6 +132,26 @@ password appears in the logs.
 **Watch the return code**: qBittorrent 5.x returns `204` on success and `200` with the body
 `Fails.` on failure. So it is the presence of the cookie that counts, never the HTTP code
 alone.
+
+### VueTorrent: the mod can be pinned, its cache must be a volume
+
+Measured on 19 September 2026 on qBittorrent 5.2.3, on the test bench:
+
+- the LinuxServer mod loader accepts `repo:tag@sha256:…` in `DOCKER_MODS` and
+  downloads exactly that version;
+- `WebUI\AlternativeUIEnabled=true` and `WebUI\RootFolder=/vuetorrent`, set
+  when pre-seeding, make qBittorrent serve VueTorrent from the first start;
+- recreated without Internet and without a cache, the container skips the mod
+  and qBittorrent rewrites `AlternativeUIEnabled=false`: VueTorrent is lost
+  even once the network is back. `/modcache` mounted as a volume
+  (`CONFIG_ROOT/qbittorrent/modcache`) keeps the archive, and the mod is
+  applied offline;
+- real installation with `plugarr install --qbittorrent-ui vuetorrent` on the
+  test bench stack: VueTorrent served, wiring intact; then
+  `--qbittorrent-ui origine`: original interface back.
+
+theme.park is not offered: it clones the qBittorrent sources from GitHub every
+time the container is created and disappears offline, cache or not.
 
 ### `HostHeaderValidation` must be disabled
 

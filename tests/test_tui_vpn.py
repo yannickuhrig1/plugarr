@@ -24,7 +24,7 @@ def app(tmp_path):
 
 async def _vpn(pilot, selection=("sonarr", "qbittorrent")) -> VpnScreen:
     pilot.app.selection = list(selection)
-    pilot.app.push_screen(VpnScreen())
+    await pilot.app.push_screen(VpnScreen())
     await pilot.pause()
     return pilot.app.screen
 
@@ -36,7 +36,7 @@ async def _vpn(pilot, selection=("sonarr", "qbittorrent")) -> VpnScreen:
 async def test_l_ecran_apparait_avec_un_client_de_telechargement(app, appuyer):
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr", "transmission"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         assert await appuyer(pilot, "#next", lambda: isinstance(pilot.app.screen, VpnScreen))
 
@@ -46,7 +46,7 @@ async def test_il_est_saute_sans_client_de_telechargement(app, appuyer):
     """Sans trafic BitTorrent, Gluetun ne protegerait rien."""
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr", "jellyfin"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         assert await appuyer(
             pilot, "#next", lambda: isinstance(pilot.app.screen, SummaryScreen)
@@ -291,7 +291,7 @@ async def test_l_hote_du_rapport_se_saisit_dans_l_assistant(app, appuyer):
     """
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
 
@@ -306,7 +306,7 @@ async def test_l_hote_du_rapport_se_saisit_dans_l_assistant(app, appuyer):
 async def test_un_hote_vide_retombe_sur_localhost(app, appuyer):
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen.query_one("#host", Input).value = "   "
@@ -322,7 +322,7 @@ async def _recap(pilot, vpn: VpnConfig) -> SummaryScreen:
     pilot.app.selection = ["sonarr", "qbittorrent"]
     pilot.app.config_root, pilot.app.data_root = "/c", "/d"
     pilot.app.vpn = vpn
-    pilot.app.push_screen(SummaryScreen())
+    await pilot.app.push_screen(SummaryScreen())
     await pilot.pause()
     return pilot.app.screen
 

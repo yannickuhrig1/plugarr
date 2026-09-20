@@ -30,6 +30,8 @@ Sonarr.** Seerr le transmet tel quel a Radarr.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from plugarr import catalog, compose, orchestrator
@@ -204,6 +206,31 @@ def test_l_accueil_se_ferme_apres_les_applications():
     assert source.index("ensure_servarr") < source.index("seerr.initialize()")
 
 
+def test_la_cle_api_est_lue_dans_les_reglages_principaux():
+    """Seerr cree sa cle lui-meme. `settings/main` ne la montre qu'a un
+    administrateur : sans elle, nzb360 et Arr Control ne s'y connectent pas."""
+    faux = _Faux(servarrs={"main": {"apiKey": "CLE-SEERR", "applicationTitle": "Seerr"}})
+
+    assert faux.api_key() == "CLE-SEERR"
+    assert faux.corps[-1][0] == "/settings/main"
+
+
+def test_sans_cle_la_lecture_rend_vide():
+    """Un compte sans droits recoit les reglages SANS apiKey."""
+    assert _Faux(servarrs={"main": {"applicationTitle": "Seerr"}}).api_key() == ""
+
+
+def test_l_etape_garde_la_cle_apres_la_session():
+    """La cle se lit une fois la session administrateur ouverte, et ne remplace
+    une cle connue que si Seerr en rend une."""
+    import inspect
+
+    source = inspect.getsource(Wirer.step_seerr_setup)
+
+    assert source.index("login_jellyfin") < source.index("seerr.api_key()")
+    assert "seerr.api_key() or inst.api_key" in source
+
+
 def test_les_identifiants_arr_survivent_a_un_redemarrage():
     """`PUT config/host` repond 202 et n'applique le compte qu'au REDEMARRAGE.
 
@@ -225,3 +252,32 @@ def test_les_identifiants_arr_survivent_a_un_redemarrage():
     assert "_redemarrer" in source, "l'etape abandonne au lieu de redemarrer"
     assert source.index("ensure_web_user") < source.index("_redemarrer")
     assert "wait_ready" in source, "on ne reverifie pas apres le redemarrage"
+
+
+def test_il_tourne_sous_puid_pgid():
+    """L'image ignore PUID/PGID et tourne en `node` (UID 1000) : sans `user`,
+    « EACCES: mkdir '/app/config/logs/' » dans un dossier qui n'est pas a elle.
+    Constate sur le banc (PUID 0), Seerr redemarrait en boucle."""
+    cfg = _cfg()
+    bloc = compose.build_compose(cfg)["services"]["seerr"]
+
+    assert bloc["user"] == f"{cfg.puid}:{cfg.pgid}"
+
+
+def test_lance_en_root_plugarr_lui_donne_son_dossier(tmp_path, monkeypatch):
+    """`sudo plugarr` avec PUID 1000 : le dossier cree par root doit passer a
+    1000, sinon le conteneur lance en 1000 ne peut pas y ecrire."""
+    import os
+
+    from plugarr import layout
+
+    donnes = []
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(os, "chown", lambda p, u, g, **kw: donnes.append((Path(p).name, u, g)), raising=False)
+    config = tmp_path / "config"
+    (config / "seerr" / "logs").mkdir(parents=True)
+
+    layout.create_tree(tmp_path / "data", config, ["seerr", "sonarr"], owner=(1000, 1001))
+
+    assert ("seerr", 1000, 1001) in donnes and ("logs", 1000, 1001) in donnes
+    assert all(nom != "sonarr" for nom, *_ in donnes), "les images LinuxServer s'en chargent"

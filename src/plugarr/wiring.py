@@ -921,6 +921,10 @@ class Wirer:
             if not deja:
                 seerr.initialize()
             pret = seerr.initialized
+            # La cle que Seerr s'est donnee : sans elle, les applications du
+            # telephone (nzb360, Arr Control) ne peuvent pas s'y connecter.
+            # Persistee dans .env et stack.yml comme celle de Jellyfin.
+            inst.api_key = seerr.api_key() or inst.api_key
 
         detail = t("accueil deja termine") if deja else t("accueil execute")
         detail += f", identifiant Jellyfin ({identifiant})"
@@ -1287,9 +1291,10 @@ class Wirer:
                     "recyclarr: profils de qualite",
                     ok=False,
                     detail=t("generation impossible"),
-                    warnings=[
-                        message.splitlines()[-1][:200] if message else t("aucun detail")
-                    ],
+                    # La cause est DANS la sortie : la rendre entiere serait
+                    # illisible, n'en garder que la derniere ligne rendait un
+                    # avertissement vide (la sortie finit par un saut de ligne).
+                    warnings=[recyclarr_cfg.cause(message)],
                 )
 
         filled, kept, warnings = [], [], []
@@ -1384,11 +1389,7 @@ class Wirer:
                     # poser. « synchronise » tout court se lisait comme un succes.
                     parts.append(t("synchronise, aucun profil a creer"))
             else:
-                last = (
-                    message.strip().splitlines()[-1][:200]
-                    if message.strip()
-                    else t("aucun detail")
-                )
+                last = recyclarr_cfg.cause(message)
                 warnings.append(
                     t(
                         "premiere synchronisation echouee ({cause}). La "

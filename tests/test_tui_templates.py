@@ -32,7 +32,7 @@ def _no_network(monkeypatch):
 
 async def _goto_templates(pilot, selection) -> TemplatesScreen:
     pilot.app.selection = selection
-    pilot.app.push_screen(TemplatesScreen())
+    await pilot.app.push_screen(TemplatesScreen())
     # La liste arrive d'un worker en fil separe. Compter les passes d'evenements
     # ne suffit pas : sous charge, deux ne suffisaient pas et un test echouait
     # une fois sur plusieurs dizaines. On attend donc ce que le worker ecrit.
@@ -143,7 +143,7 @@ async def test_l_ecran_est_saute_sans_recyclarr(app, appuyer):
     """L'etape ne doit pas apparaitre pour une stack qui n'en a pas l'usage."""
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr", "radarr"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         assert await appuyer(
             pilot, "#next", lambda: isinstance(pilot.app.screen, SummaryScreen)
@@ -154,7 +154,7 @@ async def test_l_ecran_est_saute_sans_recyclarr(app, appuyer):
 async def test_l_ecran_apparait_avec_recyclarr(app, appuyer):
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr", "recyclarr"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         assert await appuyer(
             pilot, "#next", lambda: isinstance(pilot.app.screen, TemplatesScreen)
@@ -166,7 +166,7 @@ async def test_recyclarr_seul_ne_declenche_pas_l_ecran(app, appuyer):
     """Sans Sonarr ni Radarr, Recyclarr n'a rien a configurer."""
     async with app.run_test() as pilot:
         pilot.app.selection = ["recyclarr", "jellyfin"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         assert await appuyer(
             pilot, "#next", lambda: isinstance(pilot.app.screen, SummaryScreen)

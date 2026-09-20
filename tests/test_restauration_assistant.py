@@ -78,7 +78,7 @@ async def test_le_premier_ecran_propose_la_restauration(assistant):
 async def test_le_bouton_reste_inerte_avant_lecture(assistant, tmp_path):
     """On ne restaure pas a l'aveugle : l'examen remplace la confirmation."""
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(RestaurationScreen())
+        await assistant.push_screen(RestaurationScreen())
         await pilot.pause()
 
         assert assistant.screen.query_one("#poser", Button).disabled
@@ -87,7 +87,7 @@ async def test_le_bouton_reste_inerte_avant_lecture(assistant, tmp_path):
 @pytest.mark.asyncio
 async def test_une_archive_introuvable_est_dite(assistant):
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(RestaurationScreen())
+        await assistant.push_screen(RestaurationScreen())
         await pilot.pause()
         assistant.screen.query_one("#archive", Input).value = "C:/nexiste/pas.zip"
         assistant.screen.query_one("#examiner", Button).press()
@@ -102,7 +102,7 @@ async def test_l_examen_montre_le_contenu(assistant, tmp_path):
     """Ce que l'utilisateur doit voir AVANT d'ecraser sa configuration."""
     archive = _archive(tmp_path)
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(RestaurationScreen())
+        await assistant.push_screen(RestaurationScreen())
         await pilot.pause()
         assistant.screen.query_one("#archive", Input).value = str(archive)
         assistant.screen.query_one("#examiner", Button).press()
@@ -119,7 +119,7 @@ async def test_une_archive_a_chaud_est_signalee(assistant, tmp_path):
     """Ses bases peuvent etre corrompues : le taire serait un piege."""
     archive = _archive(tmp_path, a_chaud=True)
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(RestaurationScreen())
+        await assistant.push_screen(RestaurationScreen())
         await pilot.pause()
         assistant.screen.query_one("#archive", Input).value = str(archive)
         assistant.screen.query_one("#examiner", Button).press()
@@ -133,7 +133,7 @@ async def test_la_restauration_repose_reellement_les_fichiers(assistant, tmp_pat
     archive = _archive(tmp_path)
     cible = tmp_path / "restaure"
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(RestaurationScreen())
+        await assistant.push_screen(RestaurationScreen())
         await pilot.pause()
         assistant.screen.query_one("#archive", Input).value = str(archive)
         assistant.screen.query_one("#cible", Input).value = str(cible)
@@ -158,7 +158,7 @@ async def test_une_archive_etrangere_est_refusee(assistant, tmp_path):
         zf.writestr("bonjour.txt", "je ne suis pas une sauvegarde")
 
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(RestaurationScreen())
+        await assistant.push_screen(RestaurationScreen())
         await pilot.pause()
         assistant.screen.query_one("#archive", Input).value = str(faux)
         assistant.screen.query_one("#examiner", Button).press()

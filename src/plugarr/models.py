@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from pydantic import BaseModel, Field, field_validator
 
 from .i18n import t
+from .remote_models import RemoteAccessConfig
 
 
 class Category(str, Enum):
@@ -336,11 +337,17 @@ class ServiceInstance(BaseModel):
 #: plus changer sans tout reinstaller.
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,32}")
 
+#: Interfaces web de qBittorrent que PlugArr sait poser. Vide = celle
+#: d'origine. theme.park n'y est pas : mesure le 2026-09-19, il retelecharge les
+#: sources de qBittorrent depuis GitHub a chaque creation du conteneur et
+#: disparait au premier redemarrage sans Internet, cache ou non (ROADMAP).
+INTERFACES_QBITTORRENT = ("", "vuetorrent")
+
 
 class StackConfig(BaseModel):
     """Etat canonique versionnable (stack.yml)."""
 
-    version: int = 3
+    version: int = 7
     project_name: str = "plugarr"
     platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
 
@@ -388,12 +395,34 @@ class StackConfig(BaseModel):
     services: dict[str, ServiceInstance] = Field(default_factory=dict)
 
     vpn: VpnConfig = Field(default_factory=VpnConfig)
+    remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
 
     #: Template TRaSH choisi par service. Vide = celui par defaut de Recyclarr.
     recyclarr_templates: dict[str, str] = Field(default_factory=dict)
     #: Client de telechargement prefere quand plusieurs du meme protocole sont
     #: installes. Vide = choix automatique, voir `downloadclients.priorites`.
     client_prefere: str = ""
+    #: Interface web de qBittorrent : vide = celle d'origine, "vuetorrent" =
+    #: VueTorrent, pose par un mod LinuxServer epingle (voir
+    #: `catalog.VUETORRENT_MOD` et `compose`).
+    qbittorrent_ui: str = ""
+    #: Veille en conteneur : une page en lecture seule, qui survit au
+    #: redemarrage sans qu'une session soit ouverte. Sur un NAS, c'est la seule
+    #: facon d'avoir une surveillance : `plugarr autostart` ne connait que
+    #: Windows et systemd utilisateur.
+    veille_enabled: bool = False
+    #: Port publie sur l'hote. 7374 par defaut, comme `plugarr veille`.
+    veille_port: int = 7374
+    #: Donner a la veille en conteneur une vue LECTURE SEULE de Docker, par un
+    #: proxy qui refuse tout POST. Sans cela, elle ne montre ni processeur ni
+    #: memoire par conteneur : la section disparait au lieu de mentir.
+    veille_socket: bool = False
+    #: Console d'administration DANS un conteneur. Elle exige le socket Docker,
+    #: donc les pleins pouvoirs sur la machine : reservee aux hotes sans
+    #: systemd, ou `plugarr autostart --systeme` ne peut rien.
+    console_enabled: bool = False
+    #: Port publie sur l'hote. 7373 par defaut, comme `plugarr serve`.
+    console_port: int = 7373
     #: Repertoire des artefacts, necessaire pour lancer une commande ponctuelle.
     #: Renseigne a l'execution, pas persiste : il depend d'ou l'on se trouve.
     project_dir: object | None = Field(default=None, exclude=True)
@@ -431,6 +460,15 @@ class StackConfig(BaseModel):
                     "espace.",
                     valeur=repr(v),
                 )
+            )
+        return v
+
+    @field_validator("qbittorrent_ui")
+    @classmethod
+    def _interface_connue(cls, v: str) -> str:
+        if v not in INTERFACES_QBITTORRENT:
+            raise ValueError(
+                t("interface de qBittorrent inconnue : {valeur}", valeur=repr(v))
             )
         return v
 

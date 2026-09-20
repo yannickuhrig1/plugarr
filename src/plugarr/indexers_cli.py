@@ -14,7 +14,7 @@ from pathlib import Path
 import typer
 from rich.table import Table
 
-from . import catalog, migrations, report
+from . import catalog, import_prowlarr, migrations, report
 from .clients.arr import ArrClient
 from .clients.prowlarr import ProwlarrIndexers
 from .i18n import t
@@ -160,3 +160,49 @@ def add(
             raise typer.Exit(2)
     finally:
         client.close()
+
+
+@app.command("import")
+def import_backup(
+    backup: Path = typer.Argument(
+        ..., exists=True, dir_okay=False, help=t("Sauvegarde Prowlarr (.zip), archive PlugArr ou prowlarr.db.")
+    ),
+    project_dir: Path = typer.Option(Path("."), help="Repertoire du stack.yml."),
+    dry_run: bool = typer.Option(False, "--dry-run", help=t("Afficher ce qui serait importe, sans rien ecrire.")),
+) -> None:
+    """Reprend les indexeurs d'une sauvegarde, sans toucher aux liens existants.
+
+    Seuls les indexeurs sont importes. Les applications et les clients de
+    telechargement de la sauvegarde sont ignores : ceux cables par PlugArr
+    restent en place. Un indexeur deja present n'est jamais remplace.
+    """
+    try:
+        sauvegarde = import_prowlarr.lire(backup)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    client, indexers = _open(project_dir)
+    echecs = 0
+    try:
+        for entree, statut in import_prowlarr.examiner(sauvegarde, indexers):
+            if statut == import_prowlarr.INCONNU:
+                console.print(t("[yellow]{nom} : definition absente de ce Prowlarr, ignore[/yellow]", nom=entree.name))
+                continue
+            if statut == import_prowlarr.CONFIGURE:
+                console.print(t("[dim]{nom} : deja configure[/dim]", nom=entree.name))
+                continue
+            if dry_run:
+                console.print(t("{nom} : serait importe", nom=entree.name))
+                continue
+            ok, message, avertissements = import_prowlarr.importer(entree, indexers)
+            couleur = "green" if ok else "red"
+            console.print(f"[{couleur}]{entree.name} : {message}[/{couleur}]")
+            for avertissement in avertissements:
+                console.print(f"  [yellow]{avertissement}[/yellow]")
+            echecs += not ok
+        ignores = ", ".join(f"{nom}={nombre}" for nom, nombre in sauvegarde.ignores.items() if nombre)
+        if ignores:
+            console.print(t("[dim]Non importes, volontairement : {liste}[/dim]", liste=ignores))
+    finally:
+        client.close()
+    if echecs:
+        raise typer.Exit(2)

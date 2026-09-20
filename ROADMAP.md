@@ -95,9 +95,20 @@ Audiobookshelf et DroppedNeedle.
 
 ## Prochaine étape
 
-**Shelfarr et Shelfmark**, les deux derniers services de la liste. Leurs
-empreintes sont déjà relevées, et Audiobookshelf les débloque : ils livrent
-dans ses bibliothèques.
+**La 0.10.0 : la veille et les thèmes de qBittorrent.** Deux demandes faites à
+l'usage, étudiées plus bas, et chacune a un premier point à trancher avant
+d'écrire une ligne :
+
+- **la veille** : tranché, la console d'abord. Son panneau « Veille » est prêt
+  (disques, débits, sortie du VPN) ; le conteneur viendra ensuite, avec
+  l'image. Pour mémoire : le niveau 1 peut vivre dans la console, sur
+  l'hôte, sans image. Voir « Une veille en continu, dans un conteneur » ;
+- **les thèmes de qBittorrent** : VueTorrent est prêt, épinglé et proposé dans
+  l'assistant. theme.park est écarté pour la 0.10.0 : mesuré, il ne survit pas
+  à un redémarrage sans Internet. Voir « Personnalisation des interfaces ».
+
+**Shelfarr et Shelfmark** suivent : leurs empreintes sont déjà relevées, et
+Audiobookshelf les débloque, puisqu'ils livrent dans ses bibliothèques.
 
 ### Ce que la mise à jour du pack a réglé — livré en 0.6.0
 
@@ -156,6 +167,13 @@ supprime le démarrage automatique livré en 0.1.9. Ce qui protège aujourd'hui 
 | **Choisir le client de téléchargement** | ✅ livré en 0.9.0 | Deux clients torrent installés, et les *arr **alternaient** entre eux : tous étaient déclarés à `priority: 1`, et Sonarr applique alors un round-robin. Le client préféré passe à 1, les autres descendent et restent en secours ; qBittorrent par défaut, comme pour le port entrant. Question posée dans l'assistant web, le TUI et par `--client-prefere`, seulement quand elle a un sens. Une installation existante n'est corrigée que dans l'état fautif, jamais par-dessus un réglage manuel. Vérifié en CI sur un vrai Sonarr après le second passage de câblage : qBittorrent à 1, Transmission à 2. `stack.yml` passe en version 3, pour qu'une version plus ancienne refuse le fichier au lieu d'effacer ce choix. |
 | **Ports en double dans la pile** | ✅ livré en 0.9.0 | Le préflight sondait l'**hôte**, et ne voyait donc pas deux services de PlugArr sur le même port : tous deux « libres », puis `docker compose up` échouait pour la pile entière. Reproduit avec une pile Silo puis Jellyfin ajouté par l'assistant web, qui publiait 8096 deux fois. La cause est corrigée, et un contrôle bloquant compare désormais le plan à lui-même. |
 | **Téléchargement des images** | ✅ livré en 0.9.0 | Trois tentatives au lieu d'une. Relevé en CI : une coupure du registre (`read: connection reset by peer` chez lscr.io) faisait échouer toute l'installation. `pull` est idempotent, et une erreur définitive remonte toujours avec son message. |
+| **Indexeurs repris d'une sauvegarde Prowlarr** | ✅ prêt pour la 0.10.0 | Dans le panneau indexeurs de l'assistant, après l'installation, ou par `plugarr indexers import`. Seule la table des indexeurs est lue ; chacun est ajouté par l'API, sans toucher au client de téléchargement ni aux applications. Vérifié sur le banc : empreintes du client et des applications identiques avant et après. Prowlarr met jusqu'à 100 s à refuser un tracker hors ligne : il a désormais 150 s. |
+| **Configurer le téléphone par fichier** | ✅ prêt pour la 0.10.0 | Sauvegardes à restaurer dans **nzb360** 24.4.1 (Sonarr, Radarr, Lidarr, Seerr, qBittorrent ou Transmission, SABnzbd) et **qbRemote** 1.8.0 (chiffrée AES-256). Un seul fichier pour la maison et l'extérieur : l'appli bascule sur l'adresse locale sur le Wi-Fi de la maison. Formats relevés dans de vraies sauvegardes, puis chaque service validé sur un vrai téléphone Android, dont l'interrupteur de bascule de nzb360 sans lequel l'adresse locale ne sert jamais. |
+| **Garder les réglages du téléphone** | ✅ prêt pour la 0.10.0 | La restauration remplace tout. PlugArr part donc de la sauvegarde de l'utilisateur et n'y ajoute que ses services : serveur PlugArr ajouté à qbRemote ; dans nzb360, un **profil « PlugArr » séparé**, sans rien remplacer. Validé sur le téléphone avec de vraies sauvegardes : autres serveurs, Tautulli et profils intacts. |
+| **Envoi au téléphone par QR code** | ✅ prêt pour la 0.10.0 | Un lien à usage unique, dix minutes au plus, sur l'adresse privée du serveur. Validé en scannant avec l'appareil photo du téléphone. Sous Windows, le pare-feu demande une autorisation à la première ouverture, et l'assistant le signale. |
+| **Veille dans la console** | ✅ prêt pour la 0.10.0 | Panneau en lecture seule, rafraîchi toutes les 5 s : place libre par disque (un disque partagé par plusieurs dossiers n'est compté qu'une fois), débits de qBittorrent, Transmission et SABnzbd par leurs propres API, sortie du VPN lue au serveur de contrôle de Gluetun. Débits vérifiés sur le banc avec un vrai téléchargement (l'image Debian) : les chiffres suivent ceux de qBittorrent. Sortie du VPN relevée sur un vrai tunnel ProtonVPN (WireGuard), différente de l'adresse de la maison ; un échec n'est gardé que 10 s, car Gluetun annonce une adresse vide quelques secondes au démarrage. |
+| **VueTorrent pour qBittorrent** | ✅ prêt pour la 0.10.0 | En option dans l'assistant web, le TUI et `--qbittorrent-ui`. Mod épinglé par tag et condensat, cache `/modcache` en volume : VueTorrent survit aux redémarrages sans Internet. Essayé sur le banc dans les deux sens : VueTorrent servi et câblage intact, puis retour à l'interface d'origine. |
+| **Seerr démarre et se connecte** | ✅ prêt pour la 0.10.0 | Première installation réelle : Seerr redémarrait en boucle (`EACCES`). Son image ignore PUID/PGID : il tourne maintenant sous PUID:PGID et reçoit son dossier. Sa clé API, qu'il crée lui-même, est lue au câblage pour les applications du téléphone. |
 
 ---
 
@@ -203,7 +221,8 @@ reste une commande à lancer.
 | Renouveler une clé API, avec recâblage | ✅ |
 | Ajouter un service absent de l'installation | ✅ |
 | Démarrage automatique, sans lancer de commande | ✅ 0.1.9 |
-| Veille en continu, en conteneur, en lecture seule | ⬜ à l'étude |
+| Veille dans la console : disques, débits, sortie du VPN | ✅ 0.10.0 |
+| Veille en continu, en conteneur, en lecture seule | ⬜ après la console |
 | Gluetun sur la page : état, redémarrage, mise à jour, changement de serveur | ⬜ à faire |
 | Console traduite en anglais | ⬜ à faire |
 
@@ -288,6 +307,46 @@ même. Et parce qu'une console qui change des mots de passe doit s'authentifier
 sérieusement, `plugarr admin-password` pose un mot de passe : empreinte seule
 dans `stack.yml`, sessions expirables, tentatives limitées.
 
+**Administrer une machine distante.** Demandé à l'usage. Le trou n'était pas
+l'écoute — `plugarr serve --host` existait — mais le DÉMARRAGE : le lancement
+automatique ne connaissait que Windows et systemd *utilisateur*, qui attend
+une ouverture de session. Sur un serveur ou un LXC où personne ne se connecte,
+il n'y avait rien.
+
+- [x] `plugarr autostart --systeme` : une unité systemd SYSTÈME, qui démarre
+      avec la machine. Elle tourne sous le compte qui possède `stack.yml`, pas
+      sous root par commodité, et la commande refuse d'écouter hors de
+      `127.0.0.1` sans mot de passe posé. Vérifié sur le banc le 2026-09-20 :
+      unité installée, console jointe **depuis une autre machine** en 401 avec
+      son formulaire, puis **le LXC redémarré pour de vrai** — sans aucune
+      session, la console est revenue et les 9 conteneurs avec elle.
+- [x] Au passage, un défaut ancien : la commande écrite dans l'unité résolvait
+      le lien symbolique de l'interpréteur, ce qui fait sortir d'un
+      environnement virtuel. Le service lançait `/usr/bin/python3 -m plugarr`
+      et répondait « No module named plugarr », en boucle. Il touchait aussi le
+      lancement automatique par session.
+- [x] Conteneur d'administration, en option explicite (`--console-conteneur`,
+      question dédiée dans les deux assistants). L'image gagne une **seconde
+      cible** : par défaut celle de la veille, **sans aucun client Docker** —
+      même avec le socket elle ne saurait pas s'en servir, et le workflow le
+      vérifie — et `--target admin`, publiée sous un tag distinct, qui ajoute
+      le client Docker 29.8.1 et le greffon compose 5.5.1 (dépôt apt signé,
+      versions épinglées, empreinte de clé vérifiée). 263 Mo contre 393 Mo.
+      Le conteneur tourne en **root** et c'est dit partout : avec le socket on
+      crée un conteneur privilégié, donc lui donner un compte sans privilège
+      serait du théâtre. Vérifié sur le banc le 2026-09-20, contre la vraie
+      installation : console jointe en 401, connexion, état réel des 9
+      services lu depuis le conteneur, puis **Lidarr redémarré à travers le
+      socket**. Banc remis dans son état d'avant l'essai.
+- [x] Marche à suivre écrite : `docs/ADMIN_DISTANTE.md`, trois routes, de la
+      plus sûre à la plus permissive. Elle dit AUSSI ce qui n'est pas vérifié :
+      ni Unraid ni Synology ne sont sur le banc, donc leurs mécanismes propres
+      y figurent comme pistes sourcées, pas comme marche à suivre essayée. Sur
+      ces machines, la route vérifiée reste la console en conteneur.
+- [ ] Essayer la route Unraid sur un vrai Unraid : l'utilisateur en a un. Ce
+      jour-là, le greffon User Scripts passe de piste sourcée à marche à suivre
+      vérifiée, ou disparaît du document.
+
 ---
 
 ## Une veille en continu, dans un conteneur
@@ -295,6 +354,11 @@ dans `stack.yml`, sessions expirables, tentatives limitées.
 Demandé à l'usage : « pour monitorer PlugArr, un conteneur toujours actif, en
 temps réel », avec l'espace disque, la RAM, le CPU, le GPU et la bande passante
 sur la page.
+
+**Prévu pour la 0.10.0.** Le premier point à trancher est le périmètre : un
+conteneur exige d'abord une image publiée, alors que le niveau 1 tient sans
+elle dans la console, sur l'hôte. Le premier sert les NAS où personne n'ouvre
+de session, le second ne demande aucune image.
 
 **Surveiller n'est pas administrer, et c'est toute la différence.** Le refus
 ci-dessus porte sur l'écriture : créer, démarrer, recréer. La lecture ne demande
@@ -375,26 +439,123 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
 
 ### Ce qu'il reste à faire
 
-- [ ] Publier une image `plugarr` multi-architecture, épinglée, avant tout le
-      reste.
-- [ ] Une commande `plugarr veille` servant une page en LECTURE SEULE : aucun
-      bouton d'action, réemploi de `status_payload` et des clients existants.
-- [ ] Niveau 1, sans socket : état des services par leurs propres API, IP
-      publique par le serveur de contrôle de Gluetun — déjà interrogé par
-      `vpncheck` —, disque par montages en lecture seule, débits par les clients
-      de téléchargement.
-- [ ] Niveau 2, socket en lecture seule derrière un proxy (POST refusé), en
-      option explicite : CPU et RAM par conteneur, boucles de redémarrage, kills
-      OOM, journaux. Son coût s'écrit à l'écran, pas dans un fichier :
-      `GET /containers/{id}/json` rend les variables d'environnement RÉSOLUES —
-      vérifié — donc la clé privée WireGuard, les clés API et les mots de passe
-      que `.env` est censé garder.
-- [ ] N'exposer la veille qu'authentifiée. Le mot de passe existe déjà
-      (`adminauth`) : c'est le même modèle, pas un second.
-- [ ] L'entrer dans l'assistant, avec le choix des racines à surveiller. Aucune
-      option réservée à la ligne de commande.
-- [ ] Trancher le rafraîchissement : 5 secondes comme la console, ou un flux SSE.
-      Le seul vrai temps réel côté Docker reste `/events`, et il exige le socket.
+- [x] Trancher le périmètre de la 0.10.0 : le niveau 1 d'abord, dans la
+      console, sur l'hôte. Le conteneur suit, avec l'image.
+- [x] Construire une image `plugarr` multi-architecture, épinglée
+      (`Dockerfile`, `.github/workflows/docker.yml`) : base Python par tag et
+      condensat, compte sans privilège, amd64 et arm64 construits à chaque
+      poussée, essai de démarrage avant tout. Publication sur
+      `ghcr.io/yannickuhrig1/plugarr` au premier tag de version, jamais en
+      `latest`. Essayée sur le banc : 262 Mo, démarre, rapporte sa version.
+- [x] Une commande `plugarr veille` servant une page en LECTURE SEULE
+      (`veille_serveur.py`) : aucune route qui modifie quoi que ce soit, seul
+      bouton « Se déconnecter ». `--interne` dans un conteneur de la pile : les
+      services par leur nom sur le réseau Docker, Gluetun par HTTP, **sans
+      socket Docker**. L'état des services se lit par leur propre adresse
+      (toute réponse sous 500 prouve qu'il tourne). Essayée sur le banc dans
+      l'image, réseau `plugarr_plugarr`, racines montées en lecture seule : 9
+      services, 3 débits et le disque relevés.
+- [x] Niveau 1, sans socket, dans la console (`veille.py`, `/api/veille`) :
+      état des services (déjà là), sortie du VPN par le serveur de contrôle de
+      Gluetun, place libre par disque, débits par les clients de
+      téléchargement. Sortie du VPN relevée sur un vrai tunnel ProtonVPN. Reste
+      à monter les racines en lecture seule le jour où la veille passera en
+      conteneur.
+- [x] Niveau 2 sur l'HÔTE, par la ligne de commande Docker (`runner.py`,
+      `veille.conteneurs`) : processeur, mémoire, compteur de redémarrages,
+      kill OOM, code de sortie et santé, par conteneur. Des CHAMPS choisis,
+      jamais `docker inspect` entier : il rend les variables d'environnement
+      RÉSOLUES — vérifié — donc la clé privée WireGuard, les clés API et les
+      mots de passe que `.env` est censé garder. Relevé sur le banc le
+      2026-09-20 : 9 conteneurs, 2,1 s par lecture (`docker stats` prend deux
+      mesures espacées), d'où un cache de 10 s pour une page rafraîchie toutes
+      les 5 s. Tableau vérifié dans un vrai navigateur, console et page
+      autonome.
+- [x] Niveau 2 dans un CONTENEUR : vue Docker en lecture seule derrière un
+      proxy (`tecnativa/docker-socket-proxy` v0.5.0, épinglé tag et condensat),
+      en option explicite (`--veille-docker`, question dans les deux
+      assistants). Le proxy vit sur un réseau **interne**, sans sortie, que la
+      veille est seule à joindre. Mesuré sur le banc le 2026-09-20 : la liste
+      et les statistiques répondent 200, `POST .../stop` et
+      `POST /containers/create` répondent 403, `GET /images/json` répond 403,
+      et le réseau n'a aucune sortie. **Ce que le proxy ne protège pas** :
+      `CONTAINERS=1` ouvre aussi `GET /containers/{id}/json`, qui rend les
+      variables d'environnement RÉSOLUES — mesuré, 200. La retenue est donc
+      dans `veille.py`, qui ne demande que la liste et les statistiques. Les
+      redémarrages et les kills OOM ne vivent que dans cette inspection : ils
+      restent lisibles sur l'hôte et absents en conteneur, colonne vide plutôt
+      qu'un secret de plus dans un processus joignable.
+      **Essai bout en bout sur le banc**, image construite depuis la branche :
+      onze conteneurs affichés avec processeur et mémoire, chiffres confrontés
+      à `docker stats` de l'hôte (jellyfin 156,4 Mio des deux côtés, sabnzbd
+      75,71 Mio). Le journal du proxy tranche mieux qu'une relecture de code :
+      une requête sur la liste, onze sur les statistiques, **zéro sur
+      `/containers/{id}/json`**. Aucun des seize secrets de `stack.yml` dans la
+      réponse ; le fichier réduit n'en garde que cinq, ceux dont la veille se
+      sert. Page vérifiée dans un vrai navigateur : colonne des redémarrages
+      à « — », ni `null` ni `NaN`, aucune exception.
+      **Défaut trouvé par cet essai, et corrigé** : les relevés partaient en
+      file, et `stream=false` ne rend pas une mesure instantanée — le démon
+      attend son second échantillon de processeur. Onze conteneurs coûtaient
+      21,2 s, pendant lesquelles la page restait vide. Relevés mis en parallèle
+      (`MESURES_SIMULTANEES`) : 2,1 s démon froid, 2,4 s entre la connexion et
+      le tableau rempli dans le navigateur. Deux tests tiennent le parallélisme
+      et son plafond ; le premier échoue bien en 2,7 s si on revient en file.
+      **Images publiées vérifiées** (`preview.4`, les deux, épinglées par
+      condensat d'index) : les trois conteneurs démarrent, 12 conteneurs avec
+      processeur et mémoire, 2,2 s à froid, journal du proxy à 12 statistiques
+      et 1 liste sans un seul appel à la route des secrets, et la console de la
+      variante `-admin` a redémarré Lidarr à travers le socket.
+- [ ] Journaux des conteneurs dans la veille : à peser à part, un journal peut
+      porter des identifiants (Gluetun écrit sa configuration au démarrage).
+- [x] N'exposer la veille qu'authentifiée : même mot de passe que la console
+      (`adminauth`), mêmes sessions limitées. Sans mot de passe, elle refuse
+      d'écouter ailleurs que sur 127.0.0.1 (vérifié dans le conteneur).
+- [x] Poser un fichier d'authentification pour le serveur de contrôle de
+      Gluetun (`gluetun_auth.py`). Mesuré sur v3.41.3 : `GET /v1/publicip/ip`
+      répondait encore sans authentification, mais Gluetun prévenait à chaque
+      appel que la route deviendrait protégée, et sa documentation les dit
+      toutes privées. PlugArr pose un rôle à clé d'API sur les deux routes qu'il
+      lit (adresse publique, port entrant) dans `CONFIG_ROOT/gluetun/auth/`,
+      déjà monté : aucun changement de compose. Le fichier appartient à
+      PUID:PGID pour que la veille le lise ; ce qui tourne dans Gluetun y relit
+      la clé sur place. L'essai de tunnel jetable reçoit sa propre clé. Essayé
+      sur le banc : 401 sans clé, 200 pour la veille (hôte et conteneur) et le
+      port entrant.
+- [x] La veille est dans le compose (`veille_config.py`, `compose._veille_block`).
+      `stack.yml` est en 600 pour le compte qui installe : la veille, sous
+      PUID:PGID, ne pouvait pas le lire (`PermissionError` constatée sur le banc
+      le 2026-09-20, en lançant l'image publiée). Plutôt que d'ouvrir ce fichier
+      ou de faire tourner ce conteneur en root, PlugArr écrit une configuration
+      **réduite** dans `CONFIG_ROOT/veille/`, qui lui appartient : ni clé privée
+      WireGuard, ni identifiants OpenVPN, ni clés API des services dont la
+      veille ne lit que l'état. Le service dit ses limites : `user: PUID:PGID`,
+      montages et racine en lecture seule, `no-new-privileges`, aucun socket,
+      image épinglée par tag et condensat. Vérifié sur le banc contre la vraie
+      installation : page 200, 401 sans session, 9 services sur 9, les trois
+      clients lus par le réseau de la pile, un disque, et zéro conteneur, faute
+      de socket. Au passage, la protection de version a fait son travail :
+      l'image de la première avant-première lisait `stack.yml` jusqu'à la 4 et a
+      refusé la 5, d'où une seconde image.
+- [x] Entrée dans l'assistant : la question et le port dans l'assistant web et
+      dans le TUI, `--veille/--sans-veille` et `--veille-port` en ligne de
+      commande, la ligne au récapitulatif des deux, et la reprise à la
+      réinstallation. Chaîne vérifiée dans un vrai navigateur, en pilotant
+      Chrome : la case cochée et le port saisi arrivent au récapitulatif. Le
+      choix des racines à surveiller reste à faire : aujourd'hui, ce sont celles
+      de l'installation.
+- [x] Rafraîchissement tranché : **5 secondes, en interrogeant**, pas de flux
+      SSE. Mesuré sur le banc le 2026-09-20 : une réponse fait 3,3 Ko, et le
+      relevé coûte 0,3 s quand les conteneurs sont en cache, 2,1 s sinon — dont
+      presque tout en attente, `docker stats` ne consommant que 30 ms de
+      processeur par appel (mesure `times`, 10 appels en 0,31 s). Un flux SSE
+      n'économiserait donc pas de calcul : derrière, il faudrait interroger les
+      mêmes API, qui ne poussent rien. Le seul vrai temps réel côté Docker
+      reste `/events`, et il exige le socket. Ce qui a été corrigé, en
+      revanche : un relevé peut durer plus que l'intervalle, et la page en
+      lançait un second par-dessus. Le serveur accepte bien les appels
+      simultanés (mesuré : 3 à la fois), donc c'est à la page d'attendre la fin
+      du relevé en cours ; console et page autonome le font désormais.
 - [ ] Tout remesurer sur Linux natif : les relevés ci-dessus viennent de Docker
       Desktop.
 
@@ -451,6 +612,13 @@ poser ailleurs n'aurait rien à régler.
 Demandé à l'usage : pouvoir remplacer l'interface web d'un service, ou lui poser
 un thème, sans sortir de PlugArr.
 
+**Livré pour la 0.10.0 : VueTorrent sur qBittorrent.** theme.park n'est pas
+proposé : mesuré ci-dessous, il retélécharge les sources de qBittorrent depuis
+GitHub à chaque création du conteneur, disparaît au premier redémarrage sans
+Internet même avec le cache, et fait charger ses feuilles de style depuis
+`theme-park.dev` à chaque page. Les autres services ne suivront que si un mod
+tient ces conditions.
+
 Deux mécanismes, tous deux portés par les mods linuxserver.io — donc limités aux
 images `lscr.io/...` du catalogue. Gluetun, Recyclarr, Seerr et Silo n'en sont
 pas et resteront à l'écart.
@@ -480,6 +648,64 @@ son init. Trois conséquences, aucune anodine :
 La voie honnête est probablement d'épingler le mod par tag comme le reste, de le
 proposer en option explicite plutôt que par défaut, et d'écrire dans l'assistant
 ce que ça implique. Pas de l'activer en silence pour que ce soit joli.
+
+### Mesuré le 19 septembre 2026
+
+Sur un qBittorrent 5.2.3 jetable du banc, `lscr.io/linuxserver/qbittorrent`,
+avec un réseau Docker interne pour simuler l'absence d'Internet.
+
+- **Épinglage : possible pour les deux.** Le chargeur de mods de linuxserver
+  (`docker-mods.v3`) accepte `dépôt:tag@sha256:…` et télécharge alors cette
+  version précise. VueTorrent publie des tags versionnés (`2.35.0`), theme.park
+  seulement des tags flottants par application (`qbittorrent`) : pour lui, seul
+  le condensat fige la version. Vérifié : `vuetorrent-lsio-mod:2.35.0@sha256:f644…`
+  est téléchargé, installé, et qBittorrent sert VueTorrent.
+- **Sans Internet, qBittorrent ne casse pas, mais perd VueTorrent pour de bon.**
+  Conteneur recréé hors ligne : le mod est sauté (« not found in modcache,
+  skipping »), qBittorrent sert son interface d'origine, et **réécrit
+  `WebUI\AlternativeUIEnabled=false`** faute de trouver `/vuetorrent`. Le réseau
+  revenu, le mod est de nouveau là mais l'interface reste celle d'origine : une
+  seule coupure suffit.
+- **Parade mesurée : monter `/modcache` en volume.** Le chargeur y garde
+  l'archive du mod ; recréé hors ligne, le conteneur l'applique depuis ce cache
+  (« OFFLINE: … found in modcache ») et VueTorrent reste affiché, réglage intact.
+- **VueTorrent et theme.park s'excluent.** Ensemble sur une configuration propre,
+  qBittorrent sert son interface d'origine, thémée : theme.park l'emporte. C'est
+  l'un **ou** l'autre, pas les deux.
+- **Pourquoi theme.park l'emporte.** Son script réécrit à chaque démarrage
+  `WebUI\AlternativeUIEnabled=true` et `WebUI\RootFolder=/themepark`, après une
+  copie `qBittorrent.conf.bak` faite une seule fois. Il n'embarque pas
+  d'interface : il **clone à chaque création du conteneur les sources de
+  qBittorrent depuis GitHub** (branche `release-<version>`, version lue dans
+  l'index d'Alpine edge, pas dans l'image) et y ajoute deux feuilles de style
+  chargées par le navigateur depuis `theme-park.dev` à chaque page.
+- **Sans Internet, theme.park est perdu même avec `/modcache`.** Le mod est bien
+  repris du cache, mais le clonage échoue : `/themepark` n'existe pas,
+  qBittorrent sert son interface d'origine et réécrit
+  `WebUI\AlternativeUIEnabled=false`. Le cache ne protège que VueTorrent.
+- **Retirer theme.park rend l'interface d'origine.** Relancé sans le mod,
+  qBittorrent passe lui-même `AlternativeUIEnabled` à `false`. Restent
+  `WebUI\RootFolder=/themepark`, inerte, et `qBittorrent.conf.bak`.
+
+### Ce qu'il reste à faire pour la 0.10.0
+
+- [x] Trouver une version épinglable de chaque mod : par condensat pour les
+      deux, et par tag versionné en plus pour VueTorrent.
+- [x] Mesurer ce que devient qBittorrent quand il redémarre sans accès à
+      GitHub : voir ci-dessus. Règle retenue : `/modcache` en volume sous
+      `CONFIG_ROOT`, pour que VueTorrent survive à un redémarrage hors ligne
+      (theme.park n'y survit pas, voir ci-dessus).
+- [x] Vérifier VueTorrent et theme.park ensemble : ils s'excluent, l'assistant
+      proposera l'un ou l'autre.
+- [x] Relever ce que theme.park change dans `qBittorrent.conf` pour l'emporter,
+      et si le retrait du mod rend l'interface d'origine : oui, voir ci-dessus.
+- [x] Poser `WebUI\AlternativeUIEnabled` et `WebUI\RootFolder` au pré-semis de
+      `qBittorrent.conf`. Une installation qui abandonne VueTorrent repasse
+      `AlternativeUIEnabled` à `false` ; une interface posée à la main n'est
+      pas touchée.
+- [x] Le proposer dans l'assistant web et le TUI, en option explicite, avec ce
+      que ça implique écrit à l'écran, et `--qbittorrent-ui` en ligne de
+      commande. VueTorrent seul : theme.park est écarté, voir plus haut.
 
 ---
 

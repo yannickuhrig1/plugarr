@@ -662,6 +662,44 @@ class PathsScreen(WizardScreen):
             )
             yield Input(value="localhost", id="host")
 
+            # La veille tient ici, avec l'adresse et le fuseau : elle porte sur
+            # la MACHINE, pas sur un service. Sur un NAS ou personne n'ouvre de
+            # session, c'est la seule surveillance possible.
+            yield Label(
+                "Page de veille "
+                "[dim](lecture seule : disques, debits, VPN, conteneurs)[/dim]",
+                classes="group-title",
+            )
+            yield Checkbox(
+                "Installer la page de veille dans la pile",
+                value=_veille_en_place(self.app),
+                id="veille",
+            )
+            yield Label("Port de la veille", classes="group-title")
+            yield Input(value=str(self.app.veille_port), id="veille-port")
+            yield Checkbox(
+                "Montrer aussi processeur et memoire par conteneur "
+                "(vue Docker en lecture seule, par un proxy qui refuse tout POST)",
+                value=self.app.veille_socket,
+                id="veille-docker",
+            )
+
+            # La console en conteneur exige le socket Docker : elle ne se pose
+            # pas au meme rang que la veille, et la question le dit.
+            yield Label(
+                "Administrer cette machine a distance, par un conteneur "
+                "[dim](machines sans systemd : Unraid, Synology)[/dim]",
+                classes="group-title",
+            )
+            yield Checkbox(
+                "Installer la console dans un conteneur "
+                "(il recoit le socket Docker, donc tous les droits)",
+                value=_console_en_place(self.app),
+                id="console-conteneur",
+            )
+            yield Label("Port de la console", classes="group-title")
+            yield Input(value=str(self.app.console_port), id="console-port")
+
             yield Rule()
             yield Static(id="paths-check")
         yield Horizontal(
@@ -769,6 +807,13 @@ class PathsScreen(WizardScreen):
         choisie = self.query_one("#langue", Select).value
         self.app.language = choisie if isinstance(choisie, str) else "en"
         self.app.host = self.query_one("#host", Input).value.strip() or "localhost"
+        self.app.veille_enabled = bool(self.query_one("#veille", Checkbox).value)
+        port = self.query_one("#veille-port", Input).value.strip()
+        self.app.veille_port = int(port) if port.isdigit() and 0 < int(port) < 65536 else 7374
+        self.app.veille_socket = bool(self.query_one("#veille-docker", Checkbox).value)
+        self.app.console_enabled = bool(self.query_one("#console-conteneur", Checkbox).value)
+        port = self.query_one("#console-port", Input).value.strip()
+        self.app.console_port = int(port) if port.isdigit() and 0 < int(port) < 65536 else 7373
         self.app.platform = self.platform()
         # Le VPN d'abord, s'il y a un trafic a proteger. Puis les profils de
         # qualite, s'ils ont un sens. Chaque ecran facultatif sait s'effacer.
@@ -1028,6 +1073,23 @@ class VpnScreen(WizardScreen):
                     "eux a chaque telechargement.[/dim]",
                     classes="service-note",
                 )
+            if "qbittorrent" in self.app.selection:
+                if self.app.qbittorrent_ui is None:
+                    self.app.qbittorrent_ui = _interface_qbittorrent_en_place(self.app)
+                vue = self.app.qbittorrent_ui == "vuetorrent"
+                yield Label("Interface web de qBittorrent", classes="group-title")
+                with RadioSet(id="qbittorrent-ui"):
+                    yield RadioButton("Interface d'origine", value=not vue, id="qbui-origine")
+                    yield RadioButton("VueTorrent", value=vue, id="qbui-vuetorrent")
+                yield Static(
+                    "[dim]VueTorrent remplace l'interface de qBittorrent par une "
+                    "interface plus moderne, pratique aussi sur telephone. Le premier "
+                    "demarrage demande Internet pour le telecharger (version figee par "
+                    "PlugArr) ; il est ensuite garde dans le dossier de qBittorrent et "
+                    "survit aux redemarrages sans Internet. Pour revenir en arriere, "
+                    "choisissez l'interface d'origine et relancez l'installation.[/dim]",
+                    classes="service-note",
+                )
             if "sabnzbd" in self.app.selection:
                 yield Label("Trajet de SABnzbd", classes="group-title")
                 with RadioSet(id="sab-route"):
@@ -1249,6 +1311,12 @@ class VpnScreen(WizardScreen):
             return concurrents[0]
         return coche.id.removeprefix("prefere-")
 
+    def qbittorrent_ui_voulu(self) -> str:
+        if "qbittorrent" not in self.app.selection:
+            return ""
+        coche = self.query_one("#qbittorrent-ui", RadioSet).pressed_button
+        return "vuetorrent" if coche is not None and coche.id == "qbui-vuetorrent" else ""
+
     def sab_vpn_voulu(self) -> bool:
         if "sabnzbd" not in self.app.selection:
             return False
@@ -1306,11 +1374,57 @@ class VpnScreen(WizardScreen):
             return
         self.app.vpn = self.config()
         self.app.client_prefere = self.client_prefere_voulu()
+        self.app.qbittorrent_ui = self.qbittorrent_ui_voulu()
         _suite_apres_vpn(self.app)
 
     @on(Button.Pressed, "#back")
     def back(self) -> None:
         self.app.pop_screen()
+
+
+def _interface_qbittorrent_en_place(app) -> str:
+    """Interface de qBittorrent de l'installation en place, pour pre-cocher.
+
+    L'assistant web part du `stack.yml` precedent ; le TUI non. Sans ceci, une
+    reinstallation par le TUI retirerait VueTorrent sans qu'on l'ait demande.
+    """
+    from .. import reprise
+
+    try:
+        trouvee = reprise.trouver(Path(app.project_dir or "."), app.config_root)
+    except Exception:  # noqa: BLE001 - version future, fichier illisible
+        return ""
+    return trouvee.cfg.qbittorrent_ui if trouvee else ""
+
+
+def _console_en_place(app) -> bool:
+    """La console en conteneur de l'installation en place, pour pre-cocher."""
+    from .. import reprise
+
+    if app.console_enabled is not None:
+        return app.console_enabled
+    try:
+        trouvee = reprise.trouver(Path(app.project_dir or "."), app.config_root)
+    except Exception:  # noqa: BLE001 - version future, fichier illisible
+        return False
+    return bool(trouvee.cfg.console_enabled) if trouvee else False
+
+
+def _veille_en_place(app) -> bool:
+    """La veille de l'installation en place, pour pre-cocher la case.
+
+    Meme raison qu'au-dessus : sans cela, une reinstallation par le TUI
+    retirerait du compose une veille que l'on n'a pas demande a enlever.
+    """
+    from .. import reprise
+
+    if app.veille_enabled is not None:
+        return app.veille_enabled
+    try:
+        trouvee = reprise.trouver(Path(app.project_dir or "."), app.config_root)
+    except Exception:  # noqa: BLE001 - version future, fichier illisible
+        return False
+    return bool(trouvee.cfg.veille_enabled) if trouvee else False
 
 
 def _suite_apres_vpn(app) -> None:
@@ -1381,6 +1495,38 @@ class SummaryScreen(WizardScreen):
                 t(
                     "[b]Client prefere[/b] {client}, les autres en secours",
                     client=catalog.get(prefere).display_name,
+                )
+            )
+        if cfg.qbittorrent_ui == "vuetorrent":
+            lignes.append(
+                t(
+                    "[b]qBittorrent[/b]    interface VueTorrent [dim](telechargee au "
+                    "premier demarrage, puis gardee en cache)[/dim]"
+                )
+            )
+        # Comme Gluetun, la veille ajoute un conteneur absent du tableau : le
+        # recapitulatif doit dire ce qui sera reellement pose.
+        if cfg.veille_enabled:
+            lignes.append(
+                t(
+                    "[b]Veille[/b]         page en lecture seule sur le port "
+                    "{port} [dim](mot de passe de la console)[/dim]",
+                    port=cfg.veille_port,
+                )
+            )
+            if cfg.veille_socket:
+                lignes.append(
+                    t(
+                        "[b]              [/b] processeur et memoire par conteneur, "
+                        "par un proxy qui refuse tout POST"
+                    )
+                )
+        if cfg.console_enabled:
+            lignes.append(
+                t(
+                    "[b]Console[/b]        en conteneur, port {port} "
+                    "[dim](socket Docker : tous les droits sur la machine)[/dim]",
+                    port=cfg.console_port,
                 )
             )
         # Un VPN configure ajoute un conteneur que le tableau ci-dessus ne montre

@@ -1,0 +1,116 @@
+name: Image Docker
+
+# Construite a chaque poussee, pour amd64 et arm64 : sans arm64, les NAS ARM
+# restent dehors. PUBLIEE seulement sur un tag de version, sur ghcr.io, avec
+# le numero de version comme tag. Jamais de `latest` : le catalogue epingle
+# tout, l'image de PlugArr ne fait pas exception.
+on:
+  push:
+    branches: [main, "roadmap-*"]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/plugarr
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      # D'abord l'architecture native, chargee localement pour etre essayee :
+      # une image qui se construit mais ne demarre pas ne doit pas partir.
+      - name: Construire (amd64) pour l'essai
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: plugarr:essai
+
+      - name: L'image demarre et rapporte la version du code
+        run: |
+          attendue=$(python3 -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('src/plugarr/__init__.py').read()).group(1))")
+          obtenue=$(docker run --rm plugarr:essai --version)
+          echo "$obtenue"
+          test "$obtenue" = "plugarr $attendue"
+          # Compte sans privilege, jamais root.
+          test "$(docker run --rm --entrypoint id plugarr:essai -u)" = "1000"
+          # La veille n'a AUCUN client Docker : meme avec le socket, elle ne
+          # saurait pas s'en servir. C'est la garantie qui la rend exposable.
+          ! docker run --rm --entrypoint sh plugarr:essai -c "command -v docker"
+
+      - name: Construire la variante admin (amd64) pour l'essai
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: admin
+          platforms: linux/amd64
+          load: true
+          tags: plugarr:essai-admin
+
+      - name: La variante admin sait piloter Docker, et reste sans privilege
+        run: |
+          docker run --rm --entrypoint docker plugarr:essai-admin --version
+          docker run --rm --entrypoint docker plugarr:essai-admin compose version
+          test "$(docker run --rm --entrypoint id plugarr:essai-admin -u)" = "1000"
+
+      - name: Tags de publication
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Connexion a ghcr.io
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construire amd64 + arm64, publier sur un tag de version
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags || 'plugarr:multi' }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # La console en conteneur, sous un tag distinct : elle porte le client
+      # Docker, donc elle ne doit jamais etre prise pour la veille.
+      - name: Tags de publication, variante admin
+        id: meta-admin
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+            suffix=-admin
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Construire et publier la variante admin
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: admin
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta-admin.outputs.tags || 'plugarr:multi-admin' }}
+          labels: ${{ steps.meta-admin.outputs.labels }}

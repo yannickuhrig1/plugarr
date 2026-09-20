@@ -205,7 +205,7 @@ def test_un_essai_n_est_jamais_bloquant(monkeypatch):
 @pytest.mark.parametrize("etat", ["starting", "unhealthy", ""])
 def test_sans_sortie_observee_l_essai_echoue(monkeypatch, etat):
     monkeypatch.setattr(vpnessai, "_run", lambda *a, **kw: _proc(stdout=etat))
-    monkeypatch.setattr(vpnessai, "_sortie_observee", lambda: None)
+    monkeypatch.setattr(vpnessai, "_sortie_observee", lambda *_: None)
     monkeypatch.setattr(vpnessai, "_journal", lambda: "")
 
     controle = vpnessai.essayer(_vpn(), IMAGE, attente=0)
@@ -233,7 +233,7 @@ def test_le_doute_est_dit_dans_les_termes_du_protocole(monkeypatch):
     """Parler d'une « cle » a quelqu'un qui vient de taper un identifiant et un
     mot de passe l'envoie verifier une chose qu'il n'a jamais saisie."""
     monkeypatch.setattr(vpnessai, "_run", lambda *a, **kw: _proc(stdout=""))
-    monkeypatch.setattr(vpnessai, "_sortie_observee", lambda: None)
+    monkeypatch.setattr(vpnessai, "_sortie_observee", lambda *_: None)
     monkeypatch.setattr(vpnessai, "_journal", lambda: "")
     ovpn = _vpn(vpn_type="openvpn", openvpn_user="u", openvpn_password="p")
 

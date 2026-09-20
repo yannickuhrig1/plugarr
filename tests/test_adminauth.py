@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from plugarr import admin, adminauth, orchestrator
+from plugarr import admin, adminauth, i18n, orchestrator
 
 MOT_DE_PASSE = "unmotdepassecorrect"
 
@@ -138,8 +138,15 @@ def test_une_connexion_reussie_remet_le_compteur_a_zero():
 
 
 @pytest.fixture
-def console():
-    """Une console reelle, sur un port libre, arretee a la fin."""
+def console(monkeypatch):
+    """Une console reelle, sur un port libre, arretee a la fin.
+
+    Empreinte a 1 000 iterations : ces tests portent sur la console, pas sur le
+    cout du hachage. Aux 600 000 reelles, les douze essais du test de blocage
+    prenaient 2,7 s au repos (mesure), et pouvaient approcher le delai de 10 s
+    par appel sous la charge d'une suite complete.
+    """
+    monkeypatch.setattr(adminauth, "ITERATIONS", 1_000)
     cfg = orchestrator.build_config(
         services=["sonarr"], config_root="/c", data_root="/d"
     )
@@ -148,13 +155,24 @@ def console():
     port = serveur.server_address[1]
     threading.Thread(target=serveur.serve_forever, daemon=True).start()
     for _ in range(50):
+        # La sonde se REFERME. Laissee ouverte, elle occupait un fil du serveur,
+        # bloque a lire une requete qui ne venait jamais ; et comme la console
+        # tourne avec `daemon_threads = False`, ce fil survivait au test.
+        sonde = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
         try:
-            http.client.HTTPConnection("127.0.0.1", port, timeout=1).connect()
+            sonde.connect()
             break
         except OSError:
             time.sleep(0.02)
+        finally:
+            sonde.close()
     yield port
+    # `shutdown` arrete la boucle, il ne FERME PAS la socket d'ecoute : sans
+    # `server_close`, chaque test de ce fichier laissait un port pris et des
+    # fils en vie jusqu'a la fin de la suite. D'ou des `ConnectionAbortedError`
+    # intermittentes, jamais seules, jamais reproductibles isolement.
     serveur.shutdown()
+    serveur.server_close()
 
 
 def appel(port, methode, chemin, corps=None, cookie=None):
@@ -165,9 +183,13 @@ def appel(port, methode, chemin, corps=None, cookie=None):
     if corps is not None:
         corps = urllib.parse.urlencode(corps)
         entetes["Content-Type"] = "application/x-www-form-urlencoded"
-    connexion.request(methode, chemin, body=corps, headers=entetes)
-    reponse = connexion.getresponse()
-    return reponse.status, reponse.getheader("Set-Cookie"), reponse.read().decode("utf-8", "replace")
+    try:
+        connexion.request(methode, chemin, body=corps, headers=entetes)
+        reponse = connexion.getresponse()
+        return (reponse.status, reponse.getheader("Set-Cookie"),
+                reponse.read().decode("utf-8", "replace"))
+    finally:
+        connexion.close()
 
 
 def test_sans_rien_le_formulaire_est_propose(console):
@@ -237,17 +259,30 @@ def test_les_tentatives_repetees_finissent_bloquees(console):
 
     code, _cookie, page = appel(console, "POST", "/login", {"password": MOT_DE_PASSE})
 
-    assert code == 429
-    assert "Trop de tentatives" in page
+    # Ce test, et d'autres de ce fichier, echouaient de loin en loin en passe
+    # COMPLETE, jamais seuls, sur une `ConnectionAbortedError` cote client.
+    # Cause trouvee le 2026-09-20 : la fixture n'appelait pas `server_close`, et
+    # la sonde de disponibilite ne se refermait pas. Mesure : apres un seul
+    # cycle sans `server_close`, le port refuse un nouveau `bind` ; avec, il est
+    # libre. Chaque test de ce fichier laissait donc une socket d'ecoute vivante
+    # jusqu'a la fin de la suite. Les assertions ci-dessous gardent de quoi
+    # trancher si cela devait retomber malgre tout. La langue d'abord : la page
+    # est verifiee sur une phrase francaise, et un autre test qui la basculerait
+    # ferait echouer celle-la sans que le blocage soit en cause.
+    assert i18n.langue() == "fr", f"langue={i18n.langue()}"
+    assert code == 429, f"page={page[:300]!r}"
+    assert "Trop de tentatives" in page, f"code={code} page={page[:300]!r}"
 
 
 def test_les_entetes_de_securite_sont_poses(console):
     connexion = http.client.HTTPConnection("127.0.0.1", console, timeout=10)
-    connexion.request("GET", "/?t=jetondetest")
-    reponse = connexion.getresponse()
-
-    entetes = {nom: reponse.getheader(nom) for nom in
-               ("Content-Security-Policy", "Referrer-Policy", "X-Content-Type-Options")}
+    try:
+        connexion.request("GET", "/?t=jetondetest")
+        reponse = connexion.getresponse()
+        entetes = {nom: reponse.getheader(nom) for nom in
+                   ("Content-Security-Policy", "Referrer-Policy", "X-Content-Type-Options")}
+    finally:
+        connexion.close()
 
     # Une console qui affiche des mots de passe n'a rien a faire dans un cadre.
     assert "frame-ancestors 'none'" in entetes["Content-Security-Policy"]
@@ -272,3 +307,4 @@ def test_sans_mot_de_passe_configure_aucun_formulaire_n_est_propose():
         assert code == 401
     finally:
         serveur.shutdown()
+        serveur.server_close()

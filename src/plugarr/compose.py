@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from . import catalog, registre
+from . import catalog, registre, veille_config
 from .i18n import t
 from .models import StackConfig
 
@@ -144,6 +144,165 @@ def _gluetun_block(cfg: StackConfig) -> dict:
         "environment": environnement,
         "volumes": ["${CONFIG_ROOT}/gluetun:/gluetun"],
         "ports": ports,
+        "networks": [NETWORK_NAME],
+    }
+
+
+def _veille_block(cfg: StackConfig) -> dict:
+    """La veille de PlugArr, dans la pile qu'elle surveille.
+
+    Ce que ce conteneur apporte, et que `plugarr autostart` ne peut pas : sur
+    un NAS ou personne n'ouvre de session — Unraid, Synology, un BSD — il n'y
+    a aujourd'hui aucune surveillance du tout. En `restart: unless-stopped`,
+    celle-ci survit au redemarrage et se consulte depuis un telephone.
+
+    Il ne peut RIEN changer, et sa declaration le dit :
+
+    - il lit une configuration REDUITE (`veille_config`), sans la cle du VPN
+      ni les cles API dont il ne se sert pas ;
+    - il tourne sous PUID:PGID, jamais en root ;
+    - ses montages sont en lecture seule, y compris son propre systeme de
+      fichiers ;
+    - aucun socket Docker. En option (`veille_socket`), elle recoit une vue
+      LECTURE SEULE par un proxy qui refuse tout POST, sur un reseau interne
+      qu'elle est seule a joindre. Sans cette option, la section des
+      conteneurs disparait d'elle-meme.
+
+    Les racines sont montees a LEUR chemin de l'hote, et non sous `/config` :
+    la veille mesure la place libre des dossiers que la configuration nomme.
+    """
+    interne = 7374
+    return {
+        "image": catalog.VEILLE_IMAGE,
+        "container_name": f"{cfg.project_name}-veille",
+        "restart": "unless-stopped",
+        "labels": {"plugarr.managed": "true", "plugarr.service": "veille"},
+        "user": "${PUID}:${PGID}",
+        "command": [
+            "veille",
+            "--project-dir",
+            f"${{CONFIG_ROOT}}/{veille_config.DOSSIER}",
+            "--host",
+            "0.0.0.0",
+            f"--port={interne}",
+            "--interne",
+        ],
+        "environment": {
+            "TZ": "${TZ}",
+            # Avec la vue Docker : l'adresse du proxy, et rien d'autre. Sans
+            # elle, la veille ne cherche meme pas.
+            **({"PLUGARR_DOCKER_API": f"http://{cfg.project_name}-docker-proxy:2375"}
+               if cfg.veille_socket else {}),
+        },
+        "volumes": [
+            "${CONFIG_ROOT}:${CONFIG_ROOT}:ro",
+            "${DATA_ROOT}:${DATA_ROOT}:ro",
+        ],
+        "ports": [f"{cfg.veille_port}:{interne}"],
+        "networks": [NETWORK_NAME] + ([DOCKER_NETWORK] if cfg.veille_socket else []),
+        "read_only": True,
+        # Une page joignable depuis le reseau local, voire le telephone : rien
+        # de ce qu'elle lance ne doit pouvoir gagner de droits.
+        "security_opt": ["no-new-privileges:true"],
+    }
+
+
+#: Reseau du proxy de socket : INTERNE, donc sans route vers l'exterieur, et
+#: joint par la seule veille. Sur le reseau de la pile, n'importe quel service
+#: pourrait interroger le proxy ; ici, non.
+DOCKER_NETWORK = "plugarr-docker"
+
+
+def _socket_proxy_block(cfg: StackConfig) -> dict:
+    """Vue LECTURE SEULE de Docker pour la veille en conteneur.
+
+    Le socket ne se monte pas « en lecture seule » : le drapeau `ro` empeche
+    d'ecrire DANS le fichier de socket, pas d'envoyer `POST /containers/create`
+    au demon derriere. Seul un proxy qui filtre les routes enferme quelque
+    chose, d'ou celui-ci : `CONTAINERS=1` ouvre la liste et les statistiques,
+    `POST=0` refuse tout ce qui change.
+
+    Mesure sur le banc le 2026-09-20, depuis le reseau interne : la liste et
+    les statistiques repondent 200 ; `POST /containers/{id}/stop` et
+    `POST /containers/create` repondent 403 ; `GET /images/json`, hors filtre,
+    repond 403 ; et le reseau n'a aucune sortie.
+
+    Un point a ne pas se raconter : `CONTAINERS=1` ouvre AUSSI
+    `GET /containers/{id}/json` — mesure, 200 — qui rend les variables
+    d'environnement RESOLUES, donc la cle privee WireGuard et les cles API. Ce
+    n'est donc pas le proxy qui protege la, c'est PlugArr : `veille.py` ne
+    demande que la liste et les statistiques. Les redemarrages et les kills OOM
+    ne vivent que dans cette inspection : ils restent lisibles sur l'hote, par
+    la console, et absents en conteneur. Mieux vaut une colonne absente qu'un
+    secret de plus dans un processus joignable depuis le reseau.
+    """
+    return {
+        "image": catalog.SOCKET_PROXY_IMAGE,
+        "container_name": f"{cfg.project_name}-docker-proxy",
+        "restart": "unless-stopped",
+        "labels": {"plugarr.managed": "true", "plugarr.service": "docker-proxy"},
+        "environment": {
+            # Liste des conteneurs et leurs statistiques : tout ce que la veille
+            # lit. Le reste du filtre reste a son defaut, c'est-a-dire refuse.
+            "CONTAINERS": "1",
+            # Explicite, meme si c'est deja le defaut : c'est LA ligne qui fait
+            # qu'un proxy de socket protege quelque chose.
+            "POST": "0",
+        },
+        "volumes": ["/var/run/docker.sock:/var/run/docker.sock:ro"],
+        "networks": [DOCKER_NETWORK],
+        "security_opt": ["no-new-privileges:true"],
+    }
+
+
+def _console_block(cfg: StackConfig) -> dict:
+    """La console d'administration, dans un conteneur. Option explicite.
+
+    Ce n'est PAS le chemin recommande, et ce qui suit doit rester lisible par
+    celui qui l'active. La console cree, demarre et recree des conteneurs :
+    elle exige donc le socket Docker. Or un conteneur qui peut en creer
+    d'autres peut en creer un privilegie, qui monte la racine de l'hote. Ce
+    conteneur a donc, en pratique, les pleins pouvoirs sur la machine, et lui
+    donner un compte sans privilege ne changerait rien : ce serait du theatre.
+    Il tourne en root, et c'est dit.
+
+    Sur un Linux avec systemd, `plugarr autostart --systeme` fait la meme
+    chose SANS socket, en lancant la console sur l'hote. Ce bloc existe pour
+    les machines qui n'ont pas systemd : Unraid, Synology, un BSD.
+
+    Le repertoire du projet et CONFIG_ROOT sont montes en ECRITURE : faire
+    tourner une cle reecrit `stack.yml`, et un pre-semis ecrit dans les
+    configurations. Les donnees, elles, restent en lecture seule : la console
+    n'a aucune raison d'y toucher.
+    """
+    interne = 7373
+    return {
+        "image": catalog.CONSOLE_IMAGE,
+        "container_name": f"{cfg.project_name}-console",
+        "restart": "unless-stopped",
+        "labels": {"plugarr.managed": "true", "plugarr.service": "console"},
+        # Le socket appartient a root sur la plupart des hotes, et le pouvoir
+        # qu'il donne est deja celui de root. Voir la docstring.
+        "user": "0:0",
+        "command": [
+            "serve",
+            "--project-dir",
+            "${PROJECT_DIR}",
+            "--host",
+            "0.0.0.0",
+            f"--port={interne}",
+            "--no-open",
+        ],
+        "environment": {"TZ": "${TZ}"},
+        "volumes": [
+            "/var/run/docker.sock:/var/run/docker.sock",
+            # A LEUR chemin de l'hote : le compose que la console lance porte
+            # des chemins de l'hote, et c'est le demon de l'hote qui l'execute.
+            "${PROJECT_DIR}:${PROJECT_DIR}",
+            "${CONFIG_ROOT}:${CONFIG_ROOT}",
+            "${DATA_ROOT}:${DATA_ROOT}:ro",
+        ],
+        "ports": [f"{cfg.console_port}:{interne}"],
         "networks": [NETWORK_NAME],
     }
 
@@ -302,11 +461,20 @@ def _service_block(cfg: StackConfig, service_id: str) -> dict:
         # des *arr. `CRON_SCHEDULE` est sa planification, pas un reglage de plugarr.
         block["environment"] = {"TZ": cfg.timezone, "CRON_SCHEDULE": "@daily"}
         block["volumes"] = [f"${{CONFIG_ROOT}}/{spec.config_dir}:/config"]
+        # Son image tourne en 1000:1000 EN DUR et ne lit pas PUID : sans `user`,
+        # elle ne peut pas ecrire dans un dossier qui n'est pas a elle (voir
+        # layout.SANS_PUID). Sans interface web, elle n'a aucun moyen de le
+        # dire : la panne se lisait seulement dans une synchronisation en echec.
+        block["user"] = f"{cfg.puid}:{cfg.pgid}"
     elif service_id == "seerr":
         # Ni PUID ni PGID, ni acces aux medias : Seerr ne touche AUCUN fichier.
         # Il transmet des demandes aux *arr, qui telechargent.
         block["environment"] = {"TZ": cfg.timezone, "LOG_LEVEL": "info"}
         block["volumes"] = [f"${{CONFIG_ROOT}}/{spec.config_dir}:/app/config"]
+        # Son image ignore PUID/PGID et tourne en `node` (UID 1000) : sans
+        # `user`, elle ne peut pas ecrire dans un dossier qui n'est pas a elle
+        # (voir layout.SANS_PUID).
+        block["user"] = f"{cfg.puid}:{cfg.pgid}"
     elif service_id == "sabnzbd":
         block["environment"] = {
             "PUID": str(cfg.puid),
@@ -442,6 +610,15 @@ def _service_block(cfg: StackConfig, service_id: str) -> dict:
             # cohabitation sure plutot que simplement probable.
             "${DATA_ROOT}/media:/mnt/media:ro",
         ]
+    elif service_id == "qbittorrent" and cfg.qbittorrent_ui == "vuetorrent":
+        # Le mod est telecharge par le conteneur a chaque creation. `/modcache`
+        # en volume n'est pas un confort : mesure le 2026-09-19, un conteneur
+        # recree sans Internet et sans ce cache saute le mod, et qBittorrent,
+        # ne trouvant plus /vuetorrent, reecrit `AlternativeUIEnabled=false`.
+        # VueTorrent etait alors perdu pour de bon, meme le reseau revenu. Avec
+        # le cache, le mod est repris hors ligne et le reglage reste intact.
+        block["environment"]["DOCKER_MODS"] = catalog.VUETORRENT_MOD
+        block["volumes"].append(f"${{CONFIG_ROOT}}/{spec.config_dir}/modcache:/modcache")
     elif service_id == "autobrr":
         # autobrr n'a pas besoin de /data : il ne touche pas aux fichiers, il
         # pousse des sorties vers les applications.
@@ -487,10 +664,22 @@ def build_compose(cfg: StackConfig) -> dict:
         if not any(cfg.enabled(sid) and cfg.vpn.protects(sid) for sid in catalog.DOWNLOAD_CLIENTS):
             raise ValueError("VPN active mais aucun client selectionne ne doit l'utiliser")
         services = {"gluetun": _gluetun_block(cfg), **services}
+    if cfg.veille_enabled:
+        # En dernier : elle regarde les autres, rien ne depend d'elle.
+        if cfg.veille_socket:
+            services["docker-proxy"] = _socket_proxy_block(cfg)
+        services["veille"] = _veille_block(cfg)
+    if cfg.console_enabled:
+        services["console"] = _console_block(cfg)
+    reseaux: dict[str, Any] = {NETWORK_NAME: {"driver": "bridge"}}
+    if cfg.veille_enabled and cfg.veille_socket:
+        # `internal` : aucune route vers l'exterieur. Le proxy n'a rien a
+        # joindre, et personne hors de ce reseau ne le joint.
+        reseaux[DOCKER_NETWORK] = {"driver": "bridge", "internal": True}
     doc: dict[str, Any] = {
         "name": cfg.project_name,
         "services": services,
-        "networks": {NETWORK_NAME: {"driver": "bridge"}},
+        "networks": reseaux,
     }
     # Les volumes nommes, deduits du catalogue. Compose prefixe leur nom par
     # celui du projet : deux installations ne se marchent pas dessus.
@@ -530,7 +719,7 @@ def _env_value(value: object) -> str:
     return "'" + text.replace("'", "'\\''") + "'"
 
 
-def render_env(cfg: StackConfig) -> str:
+def render_env(cfg: StackConfig, project_dir: str | Path = "") -> str:
     lines = [
         t("# Genere par plugarr. Contient des secrets : ne JAMAIS commiter."),
         f"COMPOSE_PROJECT_NAME={_env_value(cfg.project_name)}",
@@ -542,6 +731,10 @@ def render_env(cfg: StackConfig) -> str:
         f"PGID={_env_value(cfg.pgid)}",
         f"TZ={_env_value(cfg.timezone)}",
         f"UMASK={_env_value(cfg.umask)}",
+        # Le repertoire du projet, pour la console en conteneur : elle le monte
+        # a SON chemin de l'hote, parce que le compose qu'elle lance porte des
+        # chemins de l'hote et qu'il est execute par le demon de l'hote.
+        *([f"PROJECT_DIR={_env_value(Path(project_dir).resolve())}"] if project_dir else []),
         "",
         t("# Cles API pre-semees - utilisees par le cablage automatique."),
     ]
@@ -593,6 +786,7 @@ acces-plugarr.html
 plugarr.log
 .plugarr-maintenance.json
 .plugarr-maintenance.tmp
+.plugarr-remote/
 backups/
 """
 
@@ -681,7 +875,7 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     written.append(compose_path)
 
     env_path = target_dir / ".env"
-    env_path.write_text(render_env(cfg), encoding="utf-8")
+    env_path.write_text(render_env(cfg, target_dir), encoding="utf-8")
     _restrict(env_path)
     written.append(env_path)
 

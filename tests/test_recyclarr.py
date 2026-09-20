@@ -380,6 +380,32 @@ def test_recyclarr_ne_publie_aucun_port(tmp_path):
     assert catalog.get("recyclarr").internal_port == 0
 
 
+def test_recyclarr_tourne_sous_le_compte_de_l_utilisateur(tmp_path):
+    """Son image tourne en 1000:1000 EN DUR et ne lit pas PUID.
+
+    Tant que l'installation se faisait sous un compte a 1000, la coincidence
+    tenait. Une installation en `sudo` — obligatoire sous `/volume1`, qui
+    appartient a root — creait le dossier en root, et Recyclarr se faisait jeter
+    a l'ecriture, sans interface pour le dire.
+
+    Verifie sur le banc le 2026-09-20 avec l'image 8.7.1 : dossier a root et
+    conteneur en 1000:1000, `config create` sort en code 1 sur une exception
+    .NET ; dossier a 1000:10 et conteneur force en 1000:10, il sort en code 0 et
+    ecrit `configs/web-1080p.yml`.
+    """
+    cfg = _cfg(tmp_path)
+    cfg.puid, cfg.pgid = 1000, 10
+
+    bloc = compose.build_compose(cfg)["services"]["recyclarr"]
+
+    assert bloc["user"] == "1000:10"
+    # Et son dossier doit lui revenir : le `user` seul ne suffit pas si le
+    # dossier reste a root.
+    from plugarr.layout import SANS_PUID
+
+    assert "recyclarr" in SANS_PUID
+
+
 def test_recyclarr_tire_un_arr():
     """Seul, Recyclarr n'a rien a synchroniser."""
     assert "sonarr" in catalog.resolve_dependencies(["recyclarr"])
@@ -524,3 +550,100 @@ def test_pas_de_synchro_si_rien_n_a_ete_cable(tmp_path, monkeypatch):
     Wirer(cfg).step_recyclarr()
 
     assert fake.calls == []
+
+
+# ------------------------------------------------- la cause, quand ca echoue
+
+
+#: Sortie REELLE de `recyclarr:8.7.1 config create --template web-1080p` avec un
+#: dossier qui n'appartient pas au conteneur. Relevee sur le banc le 2026-09-20,
+#: en reproduisant le cas remonte par un membre sur Synology.
+SORTIE_REELLE_ECHEC = (
+    "[ERR] Exiting due to fatal error: An exception was thrown while activating "
+    "Recyclarr.Cli.Migration.MigrationExecutor\n"
+    "Fatal error: An exception was thrown while activating \n"
+    "Recyclarr.Cli.Migration.MigrationExecutor -> \n"
+    "λ:Autofac.Features.Metadata.Meta`1[[Recyclarr.Cli.Migration.Steps.IMigrationStep\n"
+    ", recyclarr, Version=8.7.1.0, Culture=neutral, PublicKeyToken=null]][] -> \n"
+    "λ:System.Object -> Recyclarr.Cli.Migration.Steps.DeleteRepoDirMigrationStep -> \n"
+    "λ:Recyclarr.Platform.IAppPaths.\n"
+)
+
+
+def test_la_cause_ne_se_prend_plus_le_dernier_fragment_de_trace():
+    """Le defaut remonte le 2026-09-20, reproduit sur le banc.
+
+    Tout est dans la PREMIERE ligne, tagguee [ERR]. Les six suivantes deroulent
+    une chaine de types .NET coupee au milieu, et c'est la derniere que PlugArr
+    affichait : exacte, et sans le moindre interet pour qui doit reparer.
+    """
+    ancien = SORTIE_REELLE_ECHEC.splitlines()[-1]
+    assert ancien == "λ:Recyclarr.Platform.IAppPaths."
+    assert "error" not in ancien.lower()
+
+    obtenu = recyclarr.cause(SORTIE_REELLE_ECHEC)
+
+    assert obtenu.startswith("[ERR]")
+    assert "fatal error" in obtenu.lower()
+
+
+def test_la_cause_survit_a_une_ligne_vide_finale():
+    """L'autre facon de ne rien dire : un dernier element vide."""
+    sortie = "[ERR] Access to the path '/config' is denied.\n\n"
+
+    assert sortie.splitlines()[-1] == ""
+    assert "denied" in recyclarr.cause(sortie)
+
+
+def test_la_cause_prefere_les_lignes_graves():
+    """Recyclarr raconte beaucoup ; seules [ERR] et [FTL] disent pourquoi il
+    s'arrete."""
+    sortie = (
+        "[INF] Loaded config\n"
+        "[ERR] Permission denied\n"
+        "[INF] Cleaning up\n"
+        "[INF] Done\n"
+    )
+
+    obtenu = recyclarr.cause(sortie)
+
+    assert obtenu == "[ERR] Permission denied"
+    assert "Cleaning up" not in obtenu
+
+
+def test_la_cause_retombe_sur_les_dernieres_lignes_utiles():
+    """Une panne peut ne porter aucun niveau : une trace .NET, par exemple."""
+    sortie = "Unhandled exception.\nSystem.UnauthorizedAccessException: denied\n\n"
+
+    obtenu = recyclarr.cause(sortie)
+
+    assert "UnauthorizedAccessException" in obtenu
+
+
+def test_le_bruit_de_docker_ne_passe_pas_pour_une_cause():
+    """`docker compose run` encadre la sortie de lignes qui n'apprennent rien.
+    Si elles arrivaient les dernieres, elles volaient la place de la vraie."""
+    sortie = "[ERR] Permission denied\nPull complete\nStatus: Downloaded newer image\n"
+
+    assert recyclarr.cause(sortie) == "[ERR] Permission denied"
+
+
+def test_une_sortie_vide_le_dit_au_lieu_de_ne_rien_dire():
+    for sortie in ("", "   ", "\n\n"):
+        assert recyclarr.cause(sortie).strip(), f"vide pour {sortie!r}"
+
+
+def test_l_echec_de_generation_porte_desormais_la_cause(tmp_path, monkeypatch):
+    """Le bout en bout : ce que l'utilisateur lit dans son rapport."""
+    cfg = _cfg(tmp_path)
+    faux = FakeCompose(Path(cfg.config_path("recyclarr")), ok=False)
+    faux.run_once = lambda service, args, timeout=600: (
+        False,
+        "[INF] Creating config file\n[ERR] Access to the path '/config/configs' is denied.\n",
+    )
+    _patch_compose(monkeypatch, faux)
+
+    result = Wirer(cfg).step_recyclarr()
+
+    assert not result.ok
+    assert "denied" in result.warnings[0], result.warnings

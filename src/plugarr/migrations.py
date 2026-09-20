@@ -45,7 +45,7 @@ from .models import StackConfig
 #: Ajouter un champ neuf avec une valeur par defaut ne demande PAS de
 #: migration — pydantic l'absorbe, et c'est le cas courant. Ce qui en demande
 #: une : un champ qui change de sens, de type, ou qui disparait.
-VERSION_COURANTE = 3
+VERSION_COURANTE = 7
 
 #: `version depuis` -> transformation du dictionnaire brut. Chaque fonction
 #: recoit le contenu du fichier tel qu'il a ete lu et rend la forme attendue
@@ -81,9 +81,41 @@ def _client_prefere_introduit(donnees: dict[str, Any]) -> dict[str, Any]:
     return donnees
 
 
+def _interface_qbittorrent_introduite(donnees: dict[str, Any]) -> dict[str, Any]:
+    """Aucune transformation : `qbittorrent_ui` vaut par defaut l'interface
+    d'origine. La version avance pour la meme raison qu'a la 3 : une PlugArr
+    plus ancienne effacerait le choix de VueTorrent en reecrivant le fichier."""
+    return donnees
+
+
+def _veille_en_conteneur_introduite(donnees: dict[str, Any]) -> dict[str, Any]:
+    """Aucune transformation : la veille en conteneur est desactivee par
+    defaut, et le port vaut 7374. La version avance pour la meme raison qu'aux
+    precedentes : une PlugArr plus ancienne reecrirait le fichier sans ces
+    champs, et la veille disparaitrait du compose au premier `generate`."""
+    return donnees
+
+
+def _console_en_conteneur_introduite(donnees: dict[str, Any]) -> dict[str, Any]:
+    """Aucune transformation : la console en conteneur est desactivee par
+    defaut. La version avance pour la meme raison qu'aux precedentes : une
+    PlugArr plus ancienne reecrirait le fichier sans ces champs."""
+    return donnees
+
+
+def _vue_docker_de_la_veille_introduite(donnees: dict[str, Any]) -> dict[str, Any]:
+    """Aucune transformation : la vue Docker de la veille est desactivee par
+    defaut. La version avance pour la meme raison qu'aux precedentes."""
+    return donnees
+
+
 MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
     1: _vpn_sabnzbd_explicite,
     2: _client_prefere_introduit,
+    3: _interface_qbittorrent_introduite,
+    4: _veille_en_conteneur_introduite,
+    5: _console_en_conteneur_introduite,
+    6: _vue_docker_de_la_veille_introduite,
 }
 
 

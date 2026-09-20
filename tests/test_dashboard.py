@@ -40,6 +40,9 @@ def test_service_cards_use_their_embedded_application_logos():
 
 def test_services_that_were_not_installed_are_absent():
     page = dashboard.render(make(services=("sonarr",)))
+    # The offline export controller mentions supported apps in its source;
+    # only installed services should appear in the rendered HTML cards.
+    page = re.sub(r"<script\b[^>]*>.*?</script>", "", page, flags=re.DOTALL)
     assert "Sonarr" in page
     assert "Jellyfin" not in page
     assert "qBittorrent" not in page
@@ -102,9 +105,11 @@ def test_paths_are_html_escaped():
     assert "&lt;script&gt;" in page
 
 
-def test_the_only_script_tag_is_our_own():
+def test_the_only_script_tags_are_our_own():
     page = dashboard.render(make(data_root="/srv/data"))
-    assert len(re.findall(r"<script", page)) == 1
+    # Existing copy controls, shared mobile controller and escaped mobile data.
+    assert len(re.findall(r"<script", page)) == 3
+    assert '<script src=' not in page
 
 
 # ----------------------------------------------------------------------- hote

@@ -121,7 +121,7 @@ def test_sans_selection_aucune_variable_n_est_posee():
 
 async def _ecran(pilot) -> VpnScreen:
     pilot.app.selection = ["sonarr", "qbittorrent"]
-    pilot.app.push_screen(VpnScreen())
+    await pilot.app.push_screen(VpnScreen())
     await pilot.pause()
     screen = pilot.app.screen
     screen.query_one("#vpn-oui", RadioButton).value = True

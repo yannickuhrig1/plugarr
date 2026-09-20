@@ -63,7 +63,7 @@ async def test_l_installation_du_repertoire_est_trouvee_seule(assistant, tmp_pat
     _installation(tmp_path, tmp_path / "projet")
 
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(SauvegardeScreen())
+        await assistant.push_screen(SauvegardeScreen())
         await pilot.pause()
 
         assert not assistant.screen.query_one("#lancer", Button).disabled
@@ -81,7 +81,7 @@ async def test_une_installation_posee_ailleurs_est_retrouvee(assistant, tmp_path
     _installation(tmp_path, tmp_path / "ailleurs")
 
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(SauvegardeScreen())
+        await assistant.push_screen(SauvegardeScreen())
         await pilot.pause()
 
         assert not assistant.screen.query_one("#lancer", Button).disabled
@@ -92,7 +92,7 @@ async def test_une_installation_posee_ailleurs_est_retrouvee(assistant, tmp_path
 async def test_sans_installation_le_bouton_reste_inerte(assistant, tmp_path):
     """Et l'ecran dit quoi faire, plutot que d'echouer au moment du clic."""
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(SauvegardeScreen())
+        await assistant.push_screen(SauvegardeScreen())
         await pilot.pause()
 
         assert assistant.screen.query_one("#lancer", Button).disabled
@@ -109,7 +109,7 @@ async def test_l_arret_des_conteneurs_est_le_defaut(assistant, tmp_path):
     _installation(tmp_path, tmp_path / "projet")
 
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(SauvegardeScreen())
+        await assistant.push_screen(SauvegardeScreen())
         await pilot.pause()
 
         assert assistant.screen.query_one("#a-chaud", Checkbox).value is False
@@ -141,7 +141,7 @@ async def test_une_archive_est_reellement_ecrite(assistant, tmp_path, attendre, 
     destination = tmp_path / "archive.zip"
 
     async with assistant.run_test(size=(110, 40)) as pilot:
-        assistant.push_screen(SauvegardeScreen())
+        await assistant.push_screen(SauvegardeScreen())
         await pilot.pause()
         assistant.screen.query_one("#destination", Input).value = str(destination)
         assistant.screen.query_one("#lancer", Button).press()

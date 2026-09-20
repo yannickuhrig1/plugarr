@@ -15,14 +15,16 @@ import ntpath
 import posixpath
 import re
 import secrets
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -34,9 +36,11 @@ from . import (
     dashboard,
     downloadclients,
     i18n,
+    import_prowlarr,
     journal,
     migrations,
     orchestrator,
+    remote_access,
     reprise,
     sauvegarde,
     vpnessai,
@@ -56,11 +60,17 @@ from .layout import (
     path_warning,
     resolve_ids,
 )
-from .models import VPN_PROVIDERS, PlatformProfile, VpnConfig
+from .models import INTERFACES_QBITTORRENT, VPN_PROVIDERS, PlatformProfile, VpnConfig
+from .phone_share import TAILLE_MAX as MAX_PHONE_SHARE
+from .phone_share import PartageTelephone
+from .remote_models import RemoteAccessConfig
 from .runner import Check, check_docker
 
 ASSETS = Path(__file__).parent / "web"
 MAX_INDEXER_RESULTS = 40
+#: Une archive PlugArr complete pese une centaine de Mo ; une sauvegarde
+#: Prowlarr seule, un ou deux.
+MAX_BACKUP_UPLOAD = 2 * 1024 * 1024 * 1024
 DEFAULT_VPN = "protonvpn"
 VPN_ALIASES = {"pia": "private internet access"}
 
@@ -82,6 +92,13 @@ class WizardInput(BaseModel):
     reprendre: bool = True
     reset_config: bool = False
     client_prefere: str = ""
+    qbittorrent_ui: str = ""
+    veille_enabled: bool = False
+    veille_port: int = 7374
+    veille_socket: bool = False
+    console_enabled: bool = False
+    console_port: int = 7373
+    remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
 
 
 class WizardState:
@@ -89,6 +106,8 @@ class WizardState:
         self.launch_project_dir = project_dir.resolve()
         self.project_dir = self.launch_project_dir
         self.demo = demo
+        self.remote_result = None
+        self.remote_worker = None
         self.lock = threading.RLock()
         self.changed = threading.Condition(self.lock)
         self.revision = 0
@@ -117,10 +136,15 @@ class WizardState:
         self.worker = None
         self.admin_server = None
         self.admin_url = None
+        #: Lien a usage unique vers le telephone (QR code), ouvert a la demande.
+        self.phone_share: PartageTelephone | None = None
         self.restore_inspections: dict[str, dict] = {}
         self.indexer_client: ArrClient | None = None
         self.indexers: ProwlarrIndexers | None = None
         self.indexer_matches: dict[str, IndexerDefinition] = {}
+        #: Indexeurs lus dans une sauvegarde, avec leurs identifiants. Ils ne
+        #: quittent jamais le serveur : le navigateur ne voit que la cle.
+        self.backup_indexers: dict[str, import_prowlarr.IndexeurSauvegarde] = {}
         self.result = 0
 
     def stack_hash(self, path: Path | None = None):
@@ -237,6 +261,13 @@ class WizardState:
                 "vpn": vpn,
                 "recyclarr_templates": cfg.recyclarr_templates if cfg else {},
                 "client_prefere": cfg.client_prefere if cfg else "",
+                "qbittorrent_ui": cfg.qbittorrent_ui if cfg else "",
+                "veille_enabled": cfg.veille_enabled if cfg else False,
+                "veille_port": cfg.veille_port if cfg else 7374,
+                "veille_socket": cfg.veille_socket if cfg else False,
+                "console_enabled": cfg.console_enabled if cfg else False,
+                "console_port": cfg.console_port if cfg else 7373,
+                "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
                 "reprendre": cfg is not None,
                 "reset_config": False,
             },
@@ -357,6 +388,22 @@ class WizardState:
                     "Client de telechargement prefere invalide pour la selection."
                 )
             cfg.client_prefere = form.client_prefere
+        if form.qbittorrent_ui not in INTERFACES_QBITTORRENT:
+            raise ValueError("Interface de qBittorrent inconnue.")
+        if form.qbittorrent_ui and not cfg.enabled("qbittorrent"):
+            raise ValueError("VueTorrent demande que qBittorrent soit selectionne.")
+        cfg.qbittorrent_ui = form.qbittorrent_ui
+        if not 1 <= form.veille_port <= 65535:
+            raise ValueError("Port de la veille invalide.")
+        cfg.veille_enabled = form.veille_enabled
+        cfg.veille_port = form.veille_port
+        cfg.veille_socket = form.veille_socket
+        if not 1 <= form.console_port <= 65535:
+            raise ValueError("Port de la console invalide.")
+        if form.console_enabled and form.console_port == form.veille_port:
+            raise ValueError("La console et la veille ne peuvent pas partager un port.")
+        cfg.console_enabled = form.console_enabled
+        cfg.console_port = form.console_port
         cfg.recyclarr_templates = form.recyclarr_templates
         if form.recyclarr_templates:
             if self.demo:
@@ -384,6 +431,16 @@ class WizardState:
                     "language",
                     "ui_language",
                     "recyclarr_templates",
+                    # Toujours impose : le formulaire part du choix precedent,
+                    # et « interface d'origine » est un choix, pas un oubli.
+                    "qbittorrent_ui",
+                    # Meme raison : « pas de veille » est un choix du
+                    # formulaire, pas un oubli a completer par l'ancienne.
+                    "veille_enabled",
+                    "veille_port",
+                    "veille_socket",
+                    "console_enabled",
+                    "console_port",
                     *(("client_prefere",) if form.client_prefere else ()),
                     *(("vpn",) if cfg.vpn.enabled else ()),
                 },
@@ -406,6 +463,9 @@ class WizardState:
             orchestrator.resolve_port_conflicts(cfg)
             if self.previous_project_dir is not None:
                 self.project_dir = self.previous_project_dir
+        cfg.remote_access = form.remote_access.model_copy(deep=True)
+        if any(not cfg.enabled(sid) for sid in cfg.remote_access.services):
+            raise ValueError("L’accès distant doit concerner des applications sélectionnées.")
         cfg.project_dir = self.project_dir
         return cfg
 
@@ -787,6 +847,77 @@ class WizardState:
             response["message_i18n"] = {code: self.redact(v) for code, v in message_i18n.items()}
         return response
 
+    def prepare_indexer_backup(self):
+        """Refuse AVANT de recevoir le fichier, pas apres l'avoir lu."""
+        self._require_completed()
+        if not self.cfg.enabled("prowlarr"):
+            raise ValueError("Prowlarr n'est pas installe dans cette selection.")
+
+    def inspect_indexer_backup(self, path: Path):
+        self.prepare_indexer_backup()
+        sauvegarde = import_prowlarr.lire(path)
+        if self.demo:
+            statuts = [(entree, import_prowlarr.IMPORTABLE) for entree in sauvegarde.indexeurs]
+        else:
+            statuts = import_prowlarr.examiner(sauvegarde, self._ensure_indexers())
+        self.backup_indexers = {}
+        rows = []
+        for entree, statut in statuts:
+            key = None
+            if statut == import_prowlarr.IMPORTABLE:
+                key = secrets.token_urlsafe(12)
+                self.backup_indexers[key] = entree
+            rows.append(
+                {
+                    "key": key,
+                    "name": entree.name,
+                    "definition": entree.definition_file or entree.implementation,
+                    "enabled": entree.enable,
+                    "status": statut,
+                }
+            )
+        return {"source": sauvegarde.source, "indexers": rows, "ignored": sauvegarde.ignores}
+
+    def import_indexer_backup(self, payload):
+        self.prepare_indexer_backup()
+        key = str(payload.get("key", ""))
+        entree = self.backup_indexers.get(key)
+        if entree is None:
+            raise ValueError("Indexeur de sauvegarde invalide, expire ou deja importe.")
+        if self.demo:
+            ok, message, warnings = True, "Import simule : aucun indexeur contacte.", []
+            configured = [entree.name]
+        else:
+            indexers = self._ensure_indexers()
+            ok, message, warnings = import_prowlarr.importer(entree, indexers)
+            configured = [str(i.get("name", "?")) for i in indexers.configured()]
+        if ok:
+            self.backup_indexers.pop(key, None)
+        return {
+            "ok": ok,
+            "name": entree.name,
+            "message": self.redact(message),
+            "warnings": [self.redact(w) for w in warnings],
+            "configured": configured,
+        }
+
+    def share_to_phone(self, contenu: bytes, nom: str) -> dict:
+        """Publie un fichier du telephone derriere un lien a usage unique.
+
+        Seulement une fois l'installation terminee : c'est la page d'acces qui
+        produit ces fichiers. En demonstration, aucun serveur n'est ouvert.
+        """
+        self._require_completed()
+        if self.demo:
+            return {"url": "http://192.0.2.50:49152/t/demonstration", "expires_in": 600, "demo": True}
+        with self.lock:
+            hote = dashboard.resolve_host(self.cfg)[0]
+            if self.phone_share is None or self.phone_share.hote != hote:
+                if self.phone_share is not None:
+                    self.phone_share.arreter()
+                self.phone_share = PartageTelephone(hote)
+            return self.phone_share.publier(contenu, nom)
+
     def report(self):
         self._require_completed()
         failed = [result for result in self.results if not result.ok]
@@ -814,6 +945,8 @@ class WizardState:
                     "id": sid,
                     "name": catalog.get(sid).display_name,
                     "url": inst.url(self.cfg.host) if inst.has_web_ui else "",
+                    "remote_url": (self.remote_result or {}).get("urls", {}).get(sid, ""),
+                    "local_url": inst.url("192.0.2.50" if self.demo else dashboard.resolve_host(self.cfg)[0]) if inst.has_web_ui else "",
                     "username": inst.username or "-",
                     "password": inst.password or "-",
                     "api_key": inst.api_key or "-",
@@ -824,16 +957,50 @@ class WizardState:
             "env_path": str(self.project_dir / ".env"),
             "can_indexers": self.cfg.enabled("prowlarr"),
             "demo": self.demo,
+            "remote": self.remote_result or remote_access.summary(self.cfg, demo=self.demo),
+            "remote_managed": False if self.demo else (self.project_dir / ".plugarr-remote" / "compose.yml").is_file(),
         }
+
+    def remote_action(self, payload):
+        self._require_completed()
+        if payload.get("action") not in ("activate", "inspect", "deactivate"):
+            raise ValueError("Action distante inconnue.")
+        with self.lock:
+            if self.remote_worker and self.remote_worker.is_alive():
+                raise ValueError("Une opération d’accès distant est déjà en cours.")
+            if payload["action"] in ("activate", "deactivate") and payload.get("confirm") is not True:
+                raise ValueError("Confirmez l’activation de l’accès distant.")
+            self.remote_result = {**remote_access.summary(self.cfg, demo=self.demo), "status": "running", "message": "Configuration de l’accès distant en cours…"}
+            def work():
+                try:
+                    operation = {"activate": remote_access.activate, "inspect": remote_access.inspect, "deactivate": remote_access.deactivate}[payload["action"]]
+                    result = operation(self.cfg, self.project_dir, demo=self.demo)
+                    if not self.demo:
+                        path = self.project_dir / dashboard.FILENAME
+                        path.write_text(dashboard.render(self.cfg, remote_report=result), encoding="utf-8")
+                        path.chmod(0o600)
+                except Exception as exc:  # noqa: BLE001
+                    # Exception details can contain a sensitive authorization URL.
+                    message = str(exc) if isinstance(exc, ValueError) else "Vérification distante impossible. Vérifiez Docker, le réseau et les identifiants des applications."
+                    result = {**remote_access.summary(self.cfg, demo=self.demo), "status": "error", "message": self.redact(message)}
+                with self.lock:
+                    self.remote_result = result
+            self.remote_worker = threading.Thread(target=work, daemon=False)
+            self.remote_worker.start()
+        return {"status": "running"}
 
     def access_page(self):
         self._require_completed()
         cfg = self.cfg.model_copy(deep=True)
         if self.demo and cfg.host == "localhost":
             cfg.host = "192.0.2.10"
-        return dashboard.render(cfg, live=False).encode("utf-8")
+        return dashboard.render(cfg, live=False, remote_report=self.remote_result, demo=self.demo).encode("utf-8")
 
     def close_resources(self):
+        self.backup_indexers = {}
+        if self.phone_share is not None:
+            self.phone_share.arreter()
+            self.phone_share = None
         if self.indexer_client is not None:
             self.indexer_client.close()
             self.indexer_client = None
@@ -949,6 +1116,7 @@ class WizardState:
                 "project_name": cfg.project_name,
                 "project_dir": str(self.project_dir),
                 "host": cfg.host,
+                "remote_access": cfg.remote_access.model_dump(),
                 "puid": cfg.puid,
                 "pgid": cfg.pgid,
                 "ids_source": i18n.t(cfg.ids_source),
@@ -961,6 +1129,12 @@ class WizardState:
                     "vpn" if cfg.vpn.protects("sabnzbd") else "direct"
                 ) if cfg.enabled("sabnzbd") else None,
                 "recyclarr_templates": cfg.recyclarr_templates,
+                "qbittorrent_ui": cfg.qbittorrent_ui,
+                "veille_enabled": cfg.veille_enabled,
+                "veille_port": cfg.veille_port,
+                "veille_socket": cfg.veille_socket,
+                "console_enabled": cfg.console_enabled,
+                "console_port": cfg.console_port,
                 "client_prefere": next(
                     (
                         sid
@@ -1235,6 +1409,7 @@ class WizardHandler(BaseHTTPRequestHandler):
             "/wizard-parity.css": ("wizard-parity.css", "text/css; charset=utf-8"),
             "/wizard.js": ("wizard.js", "text/javascript; charset=utf-8"),
             "/graph.js": ("graph.js", "text/javascript; charset=utf-8"),
+            "/remote.js": ("remote.js", "text/javascript; charset=utf-8"),
             "/graph.css": ("graph.css", "text/css; charset=utf-8"),
         }
         if not self.allowed(authenticated=route not in assets):
@@ -1269,6 +1444,57 @@ class WizardHandler(BaseHTTPRequestHandler):
             self.respond({"names": names, "problem": problem, "bundled": state.demo})
         else:
             self.respond({"error": "Route inconnue."}, 404)
+
+    def receive_indexer_backup(self):
+        """Recoit le fichier brut, l'ecrit dans un dossier temporaire le temps
+        de le lire, puis l'efface : la sauvegarde contient les cles des
+        indexeurs et n'a pas a rester sur le disque."""
+        try:
+            if self.headers.get("Content-Type", "").split(";")[
+                0
+            ] != "application/octet-stream" or self.headers.get("Transfer-Encoding"):
+                raise ValueError("Fichier de sauvegarde attendu.")
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= MAX_BACKUP_UPLOAD:
+                raise ValueError("Taille de fichier refusee (2 Go au plus).")
+            self.server.state.prepare_indexer_backup()
+        except (ValueError, TypeError):
+            vider_corps_requete(self)
+            raise
+        dossier = Path(tempfile.mkdtemp(prefix="plugarr-televersement-"))
+        try:
+            chemin = dossier / "sauvegarde"
+            with open(chemin, "wb") as fichier:
+                reste = length
+                while reste > 0:
+                    morceau = self.rfile.read(min(reste, 1024 * 1024))
+                    if not morceau:
+                        raise ValueError("Televersement interrompu.")
+                    fichier.write(morceau)
+                    reste -= len(morceau)
+            return self.server.state.inspect_indexer_backup(chemin)
+        finally:
+            shutil.rmtree(dossier, ignore_errors=True)
+
+    def receive_phone_share(self):
+        """Recoit le fichier prepare par le navigateur pour le telephone. Il
+        reste en memoire, jamais sur le disque, le temps d'un telechargement."""
+        try:
+            if self.headers.get("Content-Type", "").split(";")[
+                0
+            ] != "application/octet-stream" or self.headers.get("Transfer-Encoding"):
+                raise ValueError("Fichier attendu.")
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= MAX_PHONE_SHARE:
+                raise ValueError("Taille de fichier refusee (1 Mo au plus).")
+        except (ValueError, TypeError):
+            vider_corps_requete(self)
+            raise
+        contenu = self.rfile.read(length)
+        if len(contenu) != length:
+            raise ValueError("Envoi interrompu.")
+        nom = parse_qs(urlsplit(self.path).query).get("name", [""])[0]
+        return self.server.state.share_to_phone(contenu, nom)
 
     def stream_events(self):
         """Instantane initial puis mises a jour poussees, avec reprise sans perte.
@@ -1309,6 +1535,14 @@ class WizardHandler(BaseHTTPRequestHandler):
             vider_corps_requete(self)
             return
         try:
+            state = self.server.state
+            route = urlsplit(self.path).path
+            if route == "/api/indexers/backup":
+                self.respond(self.receive_indexer_backup())
+                return
+            if route == "/api/phone-share":
+                self.respond(self.receive_phone_share())
+                return
             if self.headers.get("Content-Type", "").split(";")[
                 0
             ] != "application/json" or self.headers.get("Transfer-Encoding"):
@@ -1321,8 +1555,6 @@ class WizardHandler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise TypeError("Objet JSON requis.")
-            state = self.server.state
-            route = urlsplit(self.path).path
             if route == "/api/selection":
                 selected = body.get("services")
                 if (
@@ -1358,12 +1590,16 @@ class WizardHandler(BaseHTTPRequestHandler):
                 result = state.search_indexers(body)
             elif route == "/api/indexers/add":
                 result = state.add_indexer(body)
+            elif route == "/api/indexers/backup/import":
+                result = state.import_indexer_backup(body)
             elif route == "/api/graph":
                 result = state.graph_preview(body)
             elif route == "/api/validate":
                 result = state.validate(body)
             elif route == "/api/install":
                 result = state.start(body)
+            elif route == "/api/remote":
+                result = state.remote_action(body)
             elif route == "/api/preference":
                 if state.demo:
                     raise ValueError("Les preferences ne sont pas modifiees en demonstration.")
@@ -1389,6 +1625,7 @@ class WizardHandler(BaseHTTPRequestHandler):
                     state.active_step = None
                     state.deployed = False
                     state.cfg = None
+                    state.remote_result = None
                     state.reprise = None
                     state.reset_candidates = []
                     state.reset_requested = False
@@ -1401,7 +1638,7 @@ class WizardHandler(BaseHTTPRequestHandler):
                 result = state.open_admin()
             elif route == "/api/close":
                 with state.lock:
-                    if state.status == "running":
+                    if state.status == "running" or (state.remote_worker and state.remote_worker.is_alive()):
                         raise ValueError("Attendez la fin de l'installation avant de fermer.")
                     state.result = 0
                 self.respond({"ok": True})
@@ -1476,6 +1713,8 @@ def run_web(project_dir: Path, *, port=0, open_page=True, demo=False):
             server.state.changed.notify_all()
         if server.state.worker:
             server.state.worker.join()
+        if server.state.remote_worker:
+            server.state.remote_worker.join()
         if server.state.admin_server:
             server.state.admin_server.shutdown()
             server.state.admin_server.server_close()

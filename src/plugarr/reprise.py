@@ -187,6 +187,12 @@ _REGLAGES: tuple[tuple[str, str], ...] = (
     ("admin_password_hash", "mot de passe de la console"),
     ("recyclarr_templates", "profils de qualite"),
     ("client_prefere", "client de telechargement prefere"),
+    ("qbittorrent_ui", "interface de qBittorrent"),
+    ("veille_enabled", "veille en conteneur"),
+    ("veille_port", "port de la veille"),
+    ("console_enabled", "console en conteneur"),
+    ("console_port", "port de la console"),
+    ("veille_socket", "vue Docker de la veille"),
 )
 
 
@@ -217,6 +223,13 @@ def appliquer(
     if "vpn" not in imposes and ancienne.vpn.enabled:
         neuve.vpn = ancienne.vpn.model_copy(deep=True)
         reprise.reglages.append(t("VPN ({fournisseur})", fournisseur=ancienne.vpn.provider))
+
+    # Conserver le choix distant, seulement pour les services encore installes.
+    if "remote_access" not in imposes:
+        neuve.remote_access = ancienne.remote_access.model_copy(deep=True)
+        neuve.remote_access.services = [s for s in neuve.remote_access.services if neuve.enabled(s)]
+        if neuve.remote_access.mode == "https" and not neuve.remote_access.services:
+            neuve.remote_access.mode = "local"
 
     # Les identifiants, service par service. C'est ce qui evite d'annoncer un
     # mot de passe que le service refusera.

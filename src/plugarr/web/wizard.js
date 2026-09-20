@@ -9,6 +9,10 @@ const E = (tag, text, cls) => {
 };
 
 const EN = {
+  qbUiTitle:'qBittorrent web interface', qbUiHelp:'VueTorrent replaces the qBittorrent interface with a more modern one, also handy on a phone. Sonarr, Radarr and mobile apps are not affected.', qbUiOrigin:'Original interface', qbUiVue:'VueTorrent', qbUiTradeoff:'The first qBittorrent start needs Internet to download VueTorrent (version pinned by PlugArr). It is then kept in the qBittorrent folder and survives restarts without Internet. To go back, choose the original interface and run the installation again.', qbUiShort:'qBittorrent interface',
+  veilleTitle:'Watch page', veilleHelp:'A read-only page: free space, throughput, VPN exit, container CPU and memory. It runs inside the stack, survives a reboot even when nobody logs in, and can be read from a phone. It can neither stop nor change anything.', veilleEnable:'Install the watch page', veilleNote:'It asks for the console password. Without a password set, it only listens on this machine.', veillePort:'Watch port', veilleShort:'Watch', veilleOn:'Installed',
+  veilleDocker:'Also show CPU and memory per container', veilleDockerNote:'The watch gets a read-only view of Docker, through a proxy that refuses every POST, on an internal network it alone can reach. Restarts and out-of-memory kills stay absent: they can only be read through a route that also carries your keys.',
+  consoleEnable:'Administer this machine remotely, through a container', consoleWarn:'For machines without systemd only (Unraid, Synology). This container gets the Docker socket: it can do anything on the machine, including creating a privileged container. On an ordinary Linux, prefer the system service, which does the same thing without a socket.', consolePort:'Console port', consoleShort:'Console in a container',
   setup:'INSTALLATION', local:'On your computer', localDescription:'Your settings stay in PlugArr.', tui:'Open terminal TUI', quit:'Close wizard', assistant:'Configuration assistant', demoNotice:'Demo mode — no real installation, no Docker calls.', existingNotice:'Existing installation detected: you can resume its settings or start fresh before confirming.', loading:'Loading your assistant…',
   step1:'STEP 01 / 06', step2:'STEP 02 / 06', step3:'STEP 03 / 06', step4:'STEP 04 / 06', step5:'STEP 05 / 06', step6:'STEP 06 / 06',
   servicesTitle:'Your stack, your way.', servicesIntro:'Check Docker, use the backup tools if needed, then choose your applications. PlugArr will add their dependencies.', selectionHelp:'Editable before installation',
@@ -31,6 +35,7 @@ const EN = {
 };
 
 const FR = {
+  qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée', consoleShort:'Console en conteneur',
   services:'Applications', folders:'Dossiers', vpn:'VPN', quality:'Qualité', review:'Vérification', installation:'Installation', arr:'Automatisation', download:'Téléchargements', media:'Médiathèques', ui:'Interfaces', selected:'applications sélectionnées', dependencies:'dépendances', plannedLinks:'liens à configurer', defaultProfile:'Défaut PlugArr', profile:'Profil',
   checking:'Vérification de la configuration…', install:'Confirmer et installer', simulate:'Lancer la simulation', blocked:'Résolvez les contrôles bloquants avant de continuer.', demoCheck:'Les contrôles sont simulés. La disponibilité de Docker n’a pas été vérifiée.', ready:'Prêt pour confirmation', running:'Installation en cours…', done:'Installation terminée', partial:'Installation terminée avec des erreurs de câblage', error:'Installation interrompue', demoDone:'Simulation terminée — rien n’a été installé.', idle:'En attente de lancement',
   checkingTemplates:'Chargement des profils disponibles…', noTemplates:'Impossible de charger les profils. Conservez les profils par défaut ou réessayez.', templatesReady:'Profils disponibles chargés.', bundledProfiles:'Catalogue complet embarqué dans cette démo.', saving:'Enregistrement du choix…', sessionMissing:'Session absente. Ouvrez le lien complet affiché dans le terminal.', networkError:'Connexion perdue. Gardez le terminal PlugArr ouvert, puis réessayez.', noSelection:'Choisissez au moins une application.', dockerRequired:'Docker doit être disponible avant l’installation.', switched:'Retournez au terminal : le TUI s’ouvre. Les saisies web non enregistrées ne sont pas transférées.', retryWarning:'Relisez les réglages et relancez les vérifications avant de réessayer.', unavailable:'Indisponible', vpnOn:'Activé', vpnOff:'Désactivé', simulation:'SIMULATION', localBadge:'LOCAL', profile:'Profil', notInstalled:'La console de démonstration s’ouvre dans un nouvel onglet. Aucun service n’a été installé.', progressError:'Progression momentanément indisponible. Reconnexion…', optional:'facultatif', qualityInherited:'Profil existant', sizeEstimate:'Taille indicative', movie2h:'film de 2 h', episode45:'épisode de 45 min',
@@ -85,6 +90,26 @@ const GRAPH_LABELS = {
 };
 
 const tr = key => (lang === 'en' ? EN : FR)[key] || FR[key] || key;
+Object.assign(EN, globalThis.PlugArrRemote?.english || {});
+FR.remote = 'Accès à distance'; EN.remote = 'Remote access';
+Object.assign(FR, {
+  backupChooseFile:'Choisissez d’abord un fichier de sauvegarde.', backupUploading:'Lecture de la sauvegarde…',
+  backupNone:'Aucun indexeur dans cette sauvegarde.', backupFound:'indexeur(s) trouvé(s)', backupImportable:'à importer',
+  backupStatusConfigured:'déjà configuré', backupStatusUnknown:'définition absente de ce Prowlarr', backupStatusImportable:'importable',
+  backupDisabled:'désactivé', backupIgnored:'Laissés de côté, volontairement', backupSourcePlugarr:'Archive PlugArr', backupSourceProwlarr:'Sauvegarde Prowlarr', backupSourceBase:'Base Prowlarr',
+  backupIgnoredapplications:'applications', backupIgnoreddownload_clients:'clients de téléchargement', backupIgnoredproxies:'proxys', backupIgnorednotifications:'notifications',
+  backupImporting:'Import', backupSelectNone:'Cochez au moins un indexeur.', backupDone:'Import terminé',
+});
+Object.assign(EN, {
+  backupImportTitle:'Import indexers from a backup', backupImportHelp:'Prowlarr backup (.zip) or PlugArr archive. Only indexers are imported: the links to qBittorrent, Sonarr and Radarr stay those of this installation.',
+  backupFile:'Backup file', backupInspect:'Inspect', backupImport:'Import selection',
+  backupChooseFile:'Choose a backup file first.', backupUploading:'Reading backup…',
+  backupNone:'No indexer in this backup.', backupFound:'indexer(s) found', backupImportable:'to import',
+  backupStatusConfigured:'already configured', backupStatusUnknown:'definition missing from this Prowlarr', backupStatusImportable:'importable',
+  backupDisabled:'disabled', backupIgnored:'Deliberately left out', backupSourcePlugarr:'PlugArr archive', backupSourceProwlarr:'Prowlarr backup', backupSourceBase:'Prowlarr database',
+  backupIgnoredapplications:'applications', backupIgnoreddownload_clients:'download clients', backupIgnoredproxies:'proxies', backupIgnorednotifications:'notifications',
+  backupImporting:'Importing', backupSelectNone:'Tick at least one indexer.', backupDone:'Import finished',
+});
 // Textes rendus par le serveur : il les envoie dans chaque langue, la page prend la sienne.
 const pick = (variants, fallback) => (variants && typeof variants === 'object' ? variants[lang] ?? variants.fr : undefined) ?? fallback;
 let token = new URLSearchParams(location.hash.slice(1)).get('token');
@@ -96,11 +121,14 @@ if (location.hash) history.replaceState(null, '', location.pathname);
 
 async function request(path, body, asText = false) {
   let response;
+  // Un fichier part tel quel : la sauvegarde peut peser une centaine de Mo et
+  // n'a rien a faire dans du JSON.
+  const raw = body instanceof Blob;
   try {
     response = await fetch(path, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: {Authorization:'Bearer ' + (token || ''), ...(body === undefined ? {} : {'Content-Type':'application/json'})},
-      ...(body === undefined ? {} : {body:JSON.stringify(body)}),
+      headers: {Authorization:'Bearer ' + (token || ''), ...(body === undefined ? {} : {'Content-Type': raw ? 'application/octet-stream' : 'application/json'})},
+      ...(body === undefined ? {} : {body: raw ? body : JSON.stringify(body)}),
     });
   } catch (_) {
     throw new Error(tr('networkError'));
@@ -152,7 +180,7 @@ function scheduleGraph() {
 
 function setBusy(value) {
   busy = value;
-  $('next').disabled = value || (step === 0 && !startupReady) || (step === 4 && (!plan?.plan_id || !$('confirm').checked));
+  $('next').disabled = value || (step === 0 && !startupReady) || (step === 5 && (!plan?.plan_id || !$('confirm').checked));
   $('back').disabled = value;
   $('recheck').disabled = value;
 }
@@ -180,18 +208,19 @@ function translate() {
 
 function renderSteps() {
   $('steps').replaceChildren();
-  ['services','folders','vpn','quality','review','installation'].forEach((key, index) => {
+  ['services','folders','vpn','quality','remote','review','installation'].forEach((key, index) => {
     const item = E('li', undefined, index === step ? 'current' : index < step ? 'completed' : '');
     if (index === step) item.setAttribute('aria-current', 'step');
     item.append(E('span', index < step ? '✓' : String(index + 1).padStart(2, '0'), 'step-number'), E('span', tr(key), 'step-label'));
     $('steps').append(item);
   });
+  document.querySelectorAll('.step-panel .eyebrow').forEach((el, index) => { el.textContent = `${lang === 'fr' ? 'ÉTAPE' : 'STEP'} ${String(index + 1).padStart(2,'0')} / 07`; });
 }
 
 function updateButtons() {
-  $('back').hidden = step === 0 || step === 5;
-  $('footer').hidden = step === 5;
-  $('next').textContent = step === 4 ? tr(bootstrap.demo ? 'simulate' : 'install') : tr('next');
+  $('back').hidden = step === 0 || step === 6;
+  $('footer').hidden = step === 6;
+  $('next').textContent = step === 5 ? tr(bootstrap.demo ? 'simulate' : 'install') : tr('next');
   $('remember').closest('label').hidden = bootstrap.demo;
   setBusy(busy);
 }
@@ -205,8 +234,10 @@ function showStep(index) {
   updateButtons();
   const panel = document.querySelector(`.step-panel[data-step="${index}"]`);
   panel.insertBefore($('wiring-graph'), panel.children[3] || null);
+  $('wiring-graph').hidden = index === 4;
   if (index < 4) scheduleGraph();
   if (index === 3 && !templatesLoaded && !$('quality-controls').hidden) loadTemplates();
+  if (index === 4) globalThis.PlugArrRemote?.refresh(effective);
   document.querySelector(`.step-panel[data-step="${index}"] h1`)?.focus({preventScroll:true});
 }
 
@@ -314,10 +345,19 @@ function readVpnFields() {
 }
 
 function readFields() {
+  form.remote_access = globalThis.PlugArrRemote?.read(effective) || {mode:'local',domain:'',services:[]};
   for (const id of ['platform','project_name','data_root','config_root','username','host','timezone','language']) form[id] = $(id).value;
   form.ui_language = lang;
   form.vpn = readVpnFields();
   if (!effective.includes('sabnzbd')) form.vpn.protect_sabnzbd = false;
+  form.qbittorrent_ui = effective.includes('qbittorrent')
+    ? (document.querySelector('input[name="qbittorrent-ui"]:checked')?.value || '')
+    : '';
+  form.veille_enabled = $('veille-enabled').checked;
+  form.veille_port = Number($('veille-port').value) || 7374;
+  form.veille_socket = $('veille-docker').checked;
+  form.console_enabled = $('console-enabled').checked;
+  form.console_port = Number($('console-port').value) || 7373;
   form.client_prefere = competingClients().length
     ? (document.querySelector('input[name="preferred-client"]:checked')?.value || '')
     : '';
@@ -349,6 +389,13 @@ function fillFields() {
   $('vpn-enabled').checked = form.vpn.enabled;
   const sabRoute = document.querySelector(`input[name="sab-route"][value="${form.vpn.protect_sabnzbd ? 'vpn' : 'direct'}"]`);
   if (sabRoute) sabRoute.checked = true;
+  const qbUi = document.querySelector(`input[name="qbittorrent-ui"][value="${form.qbittorrent_ui || ''}"]`);
+  if (qbUi) qbUi.checked = true;
+  $('veille-enabled').checked = !!form.veille_enabled;
+  $('veille-port').value = form.veille_port || 7374;
+  $('veille-docker').checked = !!form.veille_socket;
+  $('console-enabled').checked = !!form.console_enabled;
+  $('console-port').value = form.console_port || 7373;
   $('vpn-provider').value = form.vpn.provider;
   $('vpn-type').value = form.vpn.vpn_type;
   $('vpn-key').value = form.vpn.wireguard_private_key;
@@ -443,6 +490,7 @@ function updateConditional() {
   $('no-torrent').hidden = hasDownload;
   $('vpn-controls').hidden = !hasDownload;
   $('sab-route').hidden = !hasSabnzbd;
+  $('qbittorrent-ui').hidden = !effective.includes('qbittorrent');
   renderPreferred();
   $('vpn-fields').hidden = !$('vpn-enabled').checked;
   $('vpn-warning').hidden = !hasTorrent || $('vpn-enabled').checked;
@@ -472,9 +520,13 @@ function renderReview() {
   const target = $('review');
   target.replaceChildren();
   const grid = E('div', undefined, 'summary-grid');
+  grid.append(summaryBox(tr('remote'), plan.remote_access?.mode === 'https' ? `HTTPS · ${plan.remote_access.domain}` : plan.remote_access?.mode === 'tailscale' ? 'Tailscale' : 'Local'));
   for (const [label, value] of [
     [tr('projectName'), plan.project_name], [tr('projectPath'), plan.project_dir], [tr('address'), plan.host], [tr('vpn'), tr(plan.vpn ? 'vpnOn' : 'vpnOff')],
     ...(plan.sabnzbd_route ? [[tr('sabRoute'), tr(plan.sabnzbd_route === 'vpn' ? 'sabVpnShort' : 'sabDirectShort')]] : []),
+    ...(plan.qbittorrent_ui ? [[tr('qbUiShort'), tr('qbUiVue')]] : []),
+    ...(plan.veille_enabled ? [[tr('veilleShort'), `${tr('veilleOn')} · ${plan.veille_port}`]] : []),
+    ...(plan.console_enabled ? [[tr('consoleShort'), `${tr('veilleOn')} · ${plan.console_port}`]] : []),
     ...(plan.client_prefere ? [[tr('preferredShort'), bootstrap.catalog.find(entry => entry.id === plan.client_prefere)?.name || plan.client_prefere]] : []),
     [tr('dataRoot'), plan.data_root], [tr('configRoot'), plan.config_root], [`${tr('puid')}:${tr('pgid')}`, `${plan.puid}:${plan.pgid}`], [`${tr('umask')} / TZ`, `${plan.umask} · ${plan.timezone}`],
   ]) grid.append(summaryBox(label, value));
@@ -631,6 +683,7 @@ async function testVpn() {
 
 function renderReport(report) {
   reportData = report;
+  globalThis.PlugArrRemote?.report(report);
   const rows = report.services.map(service => {
     const row = E('tr');
     row.append(E('th', service.name));
@@ -703,6 +756,67 @@ async function searchIndexers() {
     $('indexer-status').textContent = '';
   } catch (failure) { $('indexer-status').textContent = '× ' + failure.message; }
   finally { $('indexer-search').disabled = false; }
+}
+
+const BACKUP_SOURCES = {plugarr:'backupSourcePlugarr', prowlarr:'backupSourceProwlarr', base:'backupSourceBase'};
+const BACKUP_STATUSES = {importable:'backupStatusImportable', configure:'backupStatusConfigured', inconnu:'backupStatusUnknown'};
+
+function backupRow(indexer) {
+  const row = E('label');
+  const box = E('input'); box.type = 'checkbox';
+  box.disabled = !indexer.key; box.checked = Boolean(indexer.key);
+  if (indexer.key) box.dataset.key = indexer.key; else row.classList.add('unavailable');
+  box.dataset.name = indexer.name;
+  const status = E('span', tr(BACKUP_STATUSES[indexer.status] || 'unavailable'), 'chip');
+  row.append(box, E('strong', indexer.name), E('small', indexer.definition + (indexer.enabled ? '' : ` · ${tr('backupDisabled')}`)), status);
+  return row;
+}
+
+async function inspectIndexerBackup() {
+  const file = $('indexer-backup-file').files[0];
+  $('indexer-backup-list').replaceChildren();
+  $('indexer-backup-import').hidden = true;
+  if (!file) { $('indexer-backup-status').textContent = tr('backupChooseFile'); return; }
+  $('indexer-backup-inspect').disabled = true;
+  $('indexer-backup-status').textContent = tr('backupUploading');
+  try {
+    const response = await api('/api/indexers/backup', file);
+    const importable = response.indexers.filter(indexer => indexer.key).length;
+    $('indexer-backup-list').replaceChildren(...response.indexers.map(backupRow));
+    $('indexer-backup-import').hidden = importable === 0;
+    const ignored = Object.entries(response.ignored || {}).filter(([, count]) => count > 0).map(([name, count]) => `${count} ${tr('backupIgnored' + name)}`);
+    $('indexer-backup-status').textContent = response.indexers.length
+      ? `${tr(BACKUP_SOURCES[response.source])} : ${response.indexers.length} ${tr('backupFound')}, ${importable} ${tr('backupImportable')}.${ignored.length ? ` ${tr('backupIgnored')} : ${ignored.join(', ')}.` : ''}`
+      : tr('backupNone');
+  } catch (failure) { $('indexer-backup-status').textContent = '× ' + failure.message; }
+  finally { $('indexer-backup-inspect').disabled = false; }
+}
+
+async function importIndexerBackup() {
+  const boxes = [...$('indexer-backup-list').querySelectorAll('input[data-key]:checked')];
+  if (!boxes.length) { $('indexer-backup-status').textContent = tr('backupSelectNone'); return; }
+  $('indexer-backup-import').disabled = true; $('indexer-backup-inspect').disabled = true;
+  const list = E('ul', undefined, 'backup-result');
+  // Un indexeur a la fois : Prowlarr contacte chacun pour le valider, et un
+  // tracker lent ne doit pas masquer l'avancement des autres.
+  for (const [index, box] of boxes.entries()) {
+    $('indexer-backup-status').textContent = `${tr('backupImporting')} ${index + 1}/${boxes.length} : ${box.dataset.name}…`;
+    let line;
+    try {
+      const response = await api('/api/indexers/backup/import', {key:box.dataset.key});
+      line = `${response.ok ? '✓' : '×'} ${response.name} : ${response.message}${response.warnings.length ? ` (${response.warnings.join(' ; ')})` : ''}`;
+      if (response.ok) {
+        const row = box.closest('label');
+        box.checked = false; box.disabled = true; delete box.dataset.key;
+        row.classList.add('unavailable'); row.querySelector('.chip').textContent = tr('backupStatusConfigured');
+      }
+      renderConfigured(response.configured || []);
+    } catch (failure) { line = `× ${box.dataset.name} : ${failure.message}`; }
+    list.append(E('li', line));
+  }
+  $('indexer-backup-status').replaceChildren(E('span', `${tr('backupDone')} :`), list);
+  $('indexer-backup-import').hidden = !$('indexer-backup-list').querySelector('input[data-key]');
+  $('indexer-backup-import').disabled = false; $('indexer-backup-inspect').disabled = false;
 }
 
 async function loadPostInstall() {
@@ -868,14 +982,15 @@ $('wizard').addEventListener('submit', async event => {
     if (step === 1) {
       for (const input of document.querySelectorAll('[data-step="1"] input, [data-step="1"] select')) if (!input.reportValidity()) return;
     }
-    if (step < 4) {
-      readFields(); showStep(step + 1); if (step === 4) await validate(); return;
+    if (step < 5) {
+      if (step === 4 && globalThis.PlugArrRemote && !globalThis.PlugArrRemote.valid()) return;
+      readFields(); showStep(step + 1); if (step === 5) await validate(); return;
     }
-    if (step === 4 && plan?.plan_id && $('confirm').checked) {
+    if (step === 5 && plan?.plan_id && $('confirm').checked) {
       setBusy(true);
       if ($('remember').checked && !bootstrap.demo) await api('/api/preference', {interface:'web'});
       await api('/api/install', {plan_id:plan.plan_id, confirm:true});
-      installed = true; showStep(5); poll();
+      installed = true; showStep(6); poll();
     }
   } catch (failure) { error(failure.message); }
   finally { setBusy(false); }
@@ -921,6 +1036,8 @@ $('restore-confirm').addEventListener('change', () => { $('restore-run').disable
 for (const id of ['restore-archive','restore-target']) $(id).addEventListener('input', clearRestoreInspection);
 $('vpn-test').addEventListener('click', testVpn);
 $('indexer-search').addEventListener('click', searchIndexers);
+$('indexer-backup-inspect').addEventListener('click', inspectIndexerBackup);
+$('indexer-backup-import').addEventListener('click', importIndexerBackup);
 $('indexer-query').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); searchIndexers(); } });
 $('admin').addEventListener('click', openAdmin);
 $('access-page').addEventListener('click', openAccessPage);
@@ -938,6 +1055,7 @@ async function boot() {
     if (!token) throw new Error(tr('sessionMissing'));
     bootstrap = await api('/api/bootstrap');
     form = structuredClone(bootstrap.form);
+    globalThis.PlugArrRemote?.init(bootstrap, form, api, renderReport, () => lang);
     lang = form.ui_language;
     $('ui-language').value = lang;
     $('version').textContent = `v${bootstrap.version}`;
@@ -954,7 +1072,7 @@ async function boot() {
     const progress = await api('/api/progress');
     if (progress.status !== 'idle') {
       startupReady = true;
-      showStep(5);
+      showStep(6);
       if (!renderProgress(progress)) poll();
     } else await checkStartup();
   } catch (failure) {

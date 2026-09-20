@@ -90,7 +90,7 @@ async def test_l_assistant_preselectionne_le_profil_de_la_machine(tmp_path):
 
     app = PlugArrApp(project_dir=tmp_path)
     async with app.run_test() as pilot:
-        app.push_screen(PathsScreen())
+        await app.push_screen(PathsScreen())
         await pilot.pause()
         screen = app.screen
 
@@ -113,7 +113,7 @@ async def test_la_verification_dit_ou_le_dossier_atterrit(tmp_path):
 
     app = PlugArrApp(project_dir=tmp_path)
     async with app.run_test() as pilot:
-        app.push_screen(PathsScreen())
+        await app.push_screen(PathsScreen())
         await pilot.pause()
         screen = app.screen
         screen.query_one("#data-root", Input).value = str(tmp_path / "media")
@@ -139,7 +139,7 @@ async def test_la_note_explique_ce_que_sont_puid_et_pgid(tmp_path):
 
     app = PlugArrApp(project_dir=tmp_path)
     async with app.run_test() as pilot:
-        app.push_screen(PathsScreen())
+        await app.push_screen(PathsScreen())
         await pilot.pause()
         note = str(app.screen.query_one("#platform-note", Static).content)
 

@@ -57,7 +57,7 @@ class FakeClient:
             return [{"id": 7, "name": "Standard"}]
         return []
 
-    def post(self, resource, payload):
+    def post(self, resource, payload, *, timeout=None):
         from plugarr.clients.base import WiringError
 
         self.posted.append((resource, payload))

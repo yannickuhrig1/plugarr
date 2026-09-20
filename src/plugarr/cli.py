@@ -41,7 +41,13 @@ from .clients.arr import ArrClient
 from .i18n import t
 from .interface import Interface
 from .layout import create_tree, default_profile, path_warning
-from .models import VPN_PROVIDERS, PlatformProfile, StackConfig, VpnConfig
+from .models import (
+    INTERFACES_QBITTORRENT,
+    VPN_PROVIDERS,
+    PlatformProfile,
+    StackConfig,
+    VpnConfig,
+)
 from .orchestrator import InstallAborted, Progress
 from .runner import Compose
 from .wiring import Wirer
@@ -401,6 +407,51 @@ def install(
             "installes. Les autres restent declares, en secours."
         ),
     ),
+    qbittorrent_ui: str | None = typer.Option(
+        None,
+        "--qbittorrent-ui",
+        help=t(
+            "Interface web de qBittorrent : origine ou vuetorrent. VueTorrent "
+            "est telecharge au premier demarrage, puis garde en cache."
+        ),
+    ),
+    veille: bool | None = typer.Option(
+        None,
+        "--veille/--sans-veille",
+        help=t(
+            "Page de veille en lecture seule, dans un conteneur de la pile. "
+            "Elle survit au redemarrage sans qu'une session soit ouverte."
+        ),
+    ),
+    veille_port: int | None = typer.Option(
+        None,
+        "--veille-port",
+        help=t("Port de la page de veille sur l'hote. 7374 par defaut."),
+    ),
+    veille_socket: bool | None = typer.Option(
+        None,
+        "--veille-docker/--sans-veille-docker",
+        help=t(
+            "Donner a la veille une vue LECTURE SEULE de Docker, par un proxy "
+            "qui refuse tout POST : elle affiche alors processeur et memoire "
+            "par conteneur."
+        ),
+    ),
+    console_conteneur: bool | None = typer.Option(
+        None,
+        "--console-conteneur/--sans-console-conteneur",
+        help=t(
+            "Console d'administration DANS un conteneur, pour les hotes sans "
+            "systemd. Elle exige le socket Docker, donc les pleins pouvoirs "
+            "sur la machine. Sur un Linux, preferez `plugarr autostart "
+            "--systeme`."
+        ),
+    ),
+    console_port: int | None = typer.Option(
+        None,
+        "--console-port",
+        help=t("Port de la console en conteneur sur l'hote. 7373 par defaut."),
+    ),
 ) -> None:
     """Deploie et cable la stack de bout en bout, sans interaction."""
     selection = [s.strip() for s in services.split(",") if s.strip()]
@@ -528,6 +579,31 @@ def install(
             raise typer.Exit(1)
         cfg.client_prefere = client_prefere
 
+    if qbittorrent_ui is not None:
+        interface = "" if qbittorrent_ui == "origine" else qbittorrent_ui
+        if interface not in INTERFACES_QBITTORRENT:
+            console.print(
+                t("[red]--qbittorrent-ui attend origine ou vuetorrent.[/red]")
+            )
+            raise typer.Exit(1)
+        if interface and "qbittorrent" not in cfg.services:
+            console.print(
+                t("[red]--qbittorrent-ui vuetorrent demande qBittorrent dans la selection.[/red]")
+            )
+            raise typer.Exit(1)
+        cfg.qbittorrent_ui = interface
+
+    if veille is not None:
+        cfg.veille_enabled = veille
+    if veille_port is not None:
+        cfg.veille_port = veille_port
+    if veille_socket is not None:
+        cfg.veille_socket = veille_socket
+    if console_conteneur is not None:
+        cfg.console_enabled = console_conteneur
+    if console_port is not None:
+        cfg.console_port = console_port
+
     # Reprendre AVANT le recapitulatif : c'est lui qui doit montrer ce qui sera
     # reellement pose. Reprendre apres reviendrait a annoncer une chose et a en
     # ecrire une autre.
@@ -569,6 +645,12 @@ def install(
                     ("vpn", vpn),
                     ("recyclarr_templates", bool(chosen)),
                     ("client_prefere", bool(client_prefere)),
+                    ("qbittorrent_ui", qbittorrent_ui is not None),
+                    ("veille_enabled", veille is not None),
+                    ("veille_port", veille_port is not None),
+                    ("veille_socket", veille_socket is not None),
+                    ("console_enabled", console_conteneur is not None),
+                    ("console_port", console_port is not None),
                 )
                 if donne
             }
@@ -838,7 +920,9 @@ def wire(project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack
     # « Path '/data/media/anime' does not exist ». Constate en reparant une pile
     # reelle apres l'ajout de l'anime. `create_tree` est idempotent : sur une
     # installation a jour il ne cree rien et ne dit rien.
-    nouveaux = create_tree(cfg.data_root, cfg.config_root, list(cfg.services))
+    nouveaux = create_tree(
+        cfg.data_root, cfg.config_root, list(cfg.services), owner=(cfg.puid, cfg.pgid)
+    )
     if nouveaux:
         console.print(f"  [dim]arborescence[/dim] {len(nouveaux)} dossier(s) cree(s)")
 
@@ -1041,6 +1125,54 @@ def serve(
     console.print("Serveur arrete.")
 
 
+@app.command(help=t("Veille en lecture seule : services, debits, sortie du VPN, disques."))
+def veille(
+    project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack.yml.")),
+    host: str = typer.Option("127.0.0.1", help=t("Adresse d'ecoute.")),
+    port: int = typer.Option(7374, help=t("Port d'ecoute.")),
+    interne: bool = typer.Option(
+        False,
+        "--interne/--hote",
+        help=t(
+            "--interne dans un conteneur de la pile : services joints par leur "
+            "nom sur le reseau Docker, sans socket Docker."
+        ),
+    ),
+) -> None:
+    """Sert une page de veille qui ne peut rien modifier.
+
+    Hors de 127.0.0.1, elle exige le mot de passe de la console : sans lui,
+    elle refuse de demarrer.
+    """
+    from . import veille_serveur
+
+    cfg = _load_config(project_dir)
+    try:
+        serveur, jeton = veille_serveur.construire(cfg, hote=host, port=port, interne=interne)
+    except veille_serveur.VeilleRefusee as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except OSError as exc:
+        console.print(
+            t(
+                "[red]Impossible d'ecouter sur {hote}:{port} : {erreur}[/red]",
+                hote=host,
+                port=port,
+                erreur=exc,
+            )
+        )
+        raise typer.Exit(1) from exc
+    adresse = host if host not in ("0.0.0.0", "::") else "127.0.0.1"
+    suffixe = f"/?t={jeton}" if jeton else "/"
+    console.print(t("Veille : {url}", url=f"http://{adresse}:{serveur.server_port}{suffixe}"))
+    try:
+        serveur.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        serveur.server_close()
+
+
 @app.command("admin-password", help=t("Pose le mot de passe de la page d'administration."))
 def admin_password(
     project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack.yml.")),
@@ -1085,6 +1217,14 @@ def autostart(
     disable: bool = typer.Option(False, "--disable", help=t("Retirer le lancement automatique.")),
     host: str = typer.Option("127.0.0.1", help=t("Adresse d'ecoute de la console.")),
     port: int = typer.Option(7373, help=t("Port d'ecoute de la console.")),
+    systeme: bool = typer.Option(
+        False,
+        "--systeme",
+        help=t(
+            "Lancer avec la MACHINE et non a l'ouverture de session, pour "
+            "administrer un serveur a distance. Demande root."
+        ),
+    ),
 ) -> None:
     """Lance la console d'administration a chaque ouverture de session.
 
@@ -1097,10 +1237,11 @@ def autostart(
     reseau Docker.
     """
     cfg = _load_config(project_dir)
-    etat = autostart_mod.status(project_dir)
+    portee = "systeme" if systeme else "utilisateur"
+    etat = autostart_mod.status(project_dir, portee)
 
     if disable:
-        ok, message = autostart_mod.disable(project_dir)
+        ok, message = autostart_mod.disable(project_dir, portee)
         console.print(message if ok else f"[red]{message}[/red]")
         raise typer.Exit(0 if ok else 1)
 
@@ -1121,21 +1262,41 @@ def autostart(
             t("[dim]Deja installe : {chemin}. Reecriture.[/dim]", chemin=etat.chemin)
         )
 
-    ok, message = autostart_mod.enable(project_dir, host=host, port=port)
+    # Une console lancee sans session et joignable depuis le reseau n'a que le
+    # mot de passe pour la garder : le jeton, lui, n'est lu par personne.
+    if systeme and host not in ("127.0.0.1", "localhost", "::1") and not cfg.admin_password_hash:
+        console.print(
+            "[red]Ecoute sur le reseau sans mot de passe : refuse.[/red]"
+        )
+        console.print("[dim]Posez-en un d'abord :[/dim]")
+        console.print("  plugarr admin-password")
+        raise typer.Exit(1)
+
+    ok, message = autostart_mod.enable(project_dir, host=host, port=port, portee=portee)
     if not ok:
         console.print(f"[yellow]{message}[/yellow]")
         raise typer.Exit(1)
 
     console.print(message)
-    console.print(
-        t(
-            "[dim]Console : http://{hote}:{port} — au prochain demarrage "
-            "de session.[/dim]",
-            hote=host,
-            port=port,
+    if systeme:
+        console.print(
+            t(
+                "[dim]Console : http://{hote}:{port} — au prochain demarrage "
+                "de la machine.[/dim]",
+                hote=host,
+                port=port,
+            )
         )
-    )
-    if autostart_mod.mecanisme() == "systemd-utilisateur":
+    else:
+        console.print(
+            t(
+                "[dim]Console : http://{hote}:{port} — au prochain demarrage "
+                "de session.[/dim]",
+                hote=host,
+                port=port,
+            )
+        )
+    if not systeme and autostart_mod.mecanisme() == "systemd-utilisateur":
         console.print(
             "[dim]Une unite utilisateur s'arrete a la deconnexion. Pour qu'elle "
             "survive :[/dim]"

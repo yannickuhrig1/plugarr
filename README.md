@@ -259,6 +259,26 @@ Windows dépose un script dans votre dossier Démarrage ; Linux installe une uni
 systemd *utilisateur*. Aucun des deux ne demande les droits administrateur.
 `plugarr autostart --disable` retire tout.
 
+#### Administrer une machine distante
+
+Une unité *utilisateur* attend une ouverture de session : sur un serveur ou un
+LXC où personne ne se connecte, elle ne démarre jamais. Pour ces machines :
+
+```bash
+sudo plugarr autostart --systeme --host 0.0.0.0
+```
+
+La console démarre alors avec **la machine**, sous le compte qui possède
+`stack.yml`, et non sous root par commodité. Hors de `127.0.0.1`, la commande
+exige un mot de passe posé : sans lui, elle refuse.
+
+Sur une machine **sans systemd** — Unraid, Synology, un BSD — il reste la
+console *dans un conteneur*, en option explicite de l'assistant ou par
+`--console-conteneur`. Elle reçoit alors le socket Docker, donc tous les droits
+sur la machine : avec le socket, on crée un conteneur privilégié qui monte la
+racine de l'hôte. À n'activer que là où le service système est impossible, et
+en sachant ce que cela donne.
+
 ### En cas de problème
 
 Chaque installation écrit un journal complet à côté de `docker-compose.yml` :

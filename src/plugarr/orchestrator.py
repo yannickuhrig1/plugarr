@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, compose, dashboard, seed, vpncheck
+from . import catalog, compose, dashboard, gluetun_auth, seed, veille_config, vpncheck
 from .clients.arr import ArrClient
 from .i18n import t
 from .layout import CONTAINER_PATHS, PROFILE_DEFAULTS, create_tree, resolve_ids
@@ -633,6 +633,7 @@ def seed_all(cfg: StackConfig) -> list[str]:
                 username=inst.username or "plugarr",
                 password=inst.password or "",
                 port=spec.internal_port,
+                interface=cfg.qbittorrent_ui,
             )
             actions.append(f"{sid} : {message}")
         elif spec.api_family == "sabnzbd":
@@ -662,6 +663,15 @@ def seed_all(cfg: StackConfig) -> list[str]:
                 rpc_password=inst.password or "",
             )
             actions.append(f"{sid} : {message}")
+    if cfg.vpn_enabled:
+        # Avant le demarrage de Gluetun : il ne lit ce fichier qu'au lancement.
+        _ecrit, message = gluetun_auth.assurer(cfg)
+        actions.append(f"gluetun : {message}")
+    if cfg.veille_enabled:
+        # La veille ne peut pas lire `stack.yml`, en 600 pour le compte qui
+        # installe : elle recoit une version reduite, qui lui appartient.
+        veille_config.ecrire(cfg)
+        actions.append("veille : configuration reduite ecrite")
     return actions
 
 
@@ -836,7 +846,9 @@ def install(
     Leve InstallAborted avec un message actionnable en cas d'echec bloquant.
     """
     cfg.project_dir = project_dir
-    created = create_tree(cfg.data_root, cfg.config_root, list(cfg.services))
+    created = create_tree(
+        cfg.data_root, cfg.config_root, list(cfg.services), owner=(cfg.puid, cfg.pgid)
+    )
     on_progress(Progress("arborescence", f"{len(created)} dossiers crees"))
 
     written = compose.write_artifacts(cfg, project_dir)
@@ -1385,7 +1397,7 @@ def add_service(
     cfg.services.update(instances)
     on_progress(Progress("ajout", ", ".join(catalog.get(s).display_name for s in nouveaux)))
 
-    create_tree(cfg.data_root, cfg.config_root, nouveaux)
+    create_tree(cfg.data_root, cfg.config_root, nouveaux, owner=(cfg.puid, cfg.pgid))
     compose.write_artifacts(cfg, project_dir)
 
     # Pre-semis limite aux nouveaux : les anciens tournent, et reecrire la

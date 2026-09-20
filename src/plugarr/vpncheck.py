@@ -49,7 +49,7 @@ import json
 
 import httpx
 
-from . import catalog
+from . import catalog, gluetun_auth
 from .i18n import t
 from .models import StackConfig
 from .runner import Check, container_id, exec_in, network_mode
@@ -155,7 +155,7 @@ def piles_orphelines(cfg: StackConfig) -> list[str]:
 #: `sed` plutot qu'un analyseur JSON : l'image de Gluetun n'embarque ni python ni
 #: jq, et les trois valeurs cherchees sont des entiers.
 _LECTURE_PORTS = r"""
-A=$(wget -qO- http://127.0.0.1:8000/v1/portforward 2>/dev/null \
+A=$(wget -qO- --header "X-API-Key: $K" http://127.0.0.1:8000/v1/portforward 2>/dev/null \
     | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
 echo "annonce=${A:-0}"
 if [ -n "$QBT_USER" ]; then
@@ -196,7 +196,9 @@ def ports_entrants(cfg: StackConfig) -> dict[str, int]:
     clients = port_sync_clients(cfg)
     if not clients:
         return {}
-    script = _LECTURE_PORTS % {
+    # La cle du serveur de controle est relue DANS Gluetun, qui monte le
+    # fichier : elle ne passe pas sur la ligne de commande.
+    script = gluetun_auth.LIRE_CLE_SH + "\n" + _LECTURE_PORTS % {
         sid: catalog.get(sid).internal_port for sid in ("qbittorrent", "transmission")
     }
     ok, sortie = exec_in(f"{cfg.project_name}-gluetun", ["sh", "-c", script])
@@ -386,13 +388,16 @@ def ip_de_l_hote() -> str | None:
         return None
 
 
-def _sortie(conteneur: str) -> tuple[bool, str]:
+def _sortie(conteneur: str, cle: str = "") -> tuple[bool, str]:
     """Pays et operateur vus depuis l'interieur du conteneur.
 
     Renvoie (protege, description). L'IP elle-meme n'est JAMAIS renvoyee : le
     journal est le fichier qu'on demande de joindre aux rapports de bug.
     """
-    ok, sortie = exec_in(conteneur, ["wget", "-qO-", "--timeout=8", CONTROLE])
+    # Appel fait depuis le CLIENT, qui ne voit pas le fichier de Gluetun : la
+    # cle passe en argument. Elle ne permet que de lire l'adresse et le port.
+    entete = ["--header", f"X-API-Key: {cle}"] if cle else []
+    ok, sortie = exec_in(conteneur, ["wget", "-qO-", "--timeout=8", *entete, CONTROLE])
     if not ok or not sortie:
         return False, t(
             "le serveur de controle de Gluetun est injoignable depuis ce conteneur"
@@ -537,7 +542,7 @@ def verifier(cfg: StackConfig) -> list[Check]:
             )
             continue
 
-        protege, description = _sortie(conteneur)
+        protege, description = _sortie(conteneur, gluetun_auth.cle(cfg))
         controles.append(Check(f"VPN {sid}", protege, description, blocking=not protege))
         tunnel_verifie = tunnel_verifie or protege
 

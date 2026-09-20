@@ -121,6 +121,30 @@ class DemoHandler(BaseHTTPRequestHandler):
                 data = {'current': '0.8.0-demo' if srv.self_updated else '0.7.0-demo',
                         'latest': '0.8.0-demo', 'available': not srv.self_updated,
                         'verified_asset': True, 'notes': 'Version fictive, aucun téléchargement.'}
+            elif route == '/api/veille':
+                go = 1024 ** 3
+                data = {
+                    'debits': [
+                        {'id': sid, 'name': catalog.get(sid).display_name, 'ok': True,
+                         'down': 3_500_000, 'up': None if sid == 'sabnzbd' else 420_000,
+                         'detail': 'Simulation'}
+                        for sid in ('qbittorrent', 'transmission', 'sabnzbd') if srv.cfg.enabled(sid)
+                    ],
+                    'vpn': {'ok': True, 'ip': '198.51.100.7', 'pays': 'Pays fictif', 'ville': '',
+                            'operateur': 'Fournisseur fictif'} if srv.cfg.vpn_enabled else None,
+                    'disques': [
+                        {'dossiers': ['Configuration'], 'chemin': '/demo/config',
+                         'total': 256 * go, 'libre': 180 * go, 'utilise_pct': 29.7},
+                        {'dossiers': ['Données', 'torrents', 'usenet', 'media'], 'chemin': '/demo/media',
+                         'total': 4096 * go, 'libre': 380 * go, 'utilise_pct': 90.7},
+                    ],
+                    'conteneurs': [
+                        {'nom': f'demo-{sid}', 'service': sid, 'statut': 'running', 'sante': '',
+                         'redemarrages': 0, 'oom': False, 'code': 0, 'cpu_pct': 1.4,
+                         'memoire': 180 * 1024 ** 2, 'memoire_max': 4 * go}
+                        for sid in list(srv.cfg.services)[:4]
+                    ],
+                }
             elif route == '/api/doctor':
                 data = {'failed': 0, 'checks': [{'name': 'Diagnostic fictif', 'ok': True,
                         'detail': 'Aucun contrôle réel effectué.', 'blocking': False,

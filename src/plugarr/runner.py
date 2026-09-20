@@ -173,6 +173,81 @@ def exec_in(container: str, commande: list[str], timeout: int = PROBE_TIMEOUT) -
     return proc.returncode == 0, (proc.stdout or proc.stderr).strip()
 
 
+#: Unites de `docker stats`. La memoire est en binaire (MiB, GiB), mesure le
+#: 2026-09-20 sur Docker 29.8.0 : « 16.79MiB / 4GiB ».
+_UNITES = {"B": 1, "KB": 10**3, "KIB": 2**10, "MB": 10**6, "MIB": 2**20,
+           "GB": 10**9, "GIB": 2**30, "TB": 10**12, "TIB": 2**40}
+
+
+def _octets(texte: str) -> int | None:
+    trouve = re.fullmatch(r"\s*([0-9.]+)\s*([A-Za-z]+)\s*", texte or "")
+    if not trouve or trouve.group(2).upper() not in _UNITES:
+        return None
+    return int(float(trouve.group(1)) * _UNITES[trouve.group(2).upper()])
+
+
+def stats_conteneurs(noms: list[str]) -> dict[str, dict]:
+    """CPU et memoire de chaque conteneur nomme, par `docker stats`.
+
+    Un seul appel pour tous : `docker stats` prend deux mesures espacees pour
+    calculer le CPU, et le faire conteneur par conteneur couterait ce delai
+    autant de fois. Un nom inconnu est simplement absent du resultat.
+    """
+    if not noms:
+        return {}
+    proc = _run(
+        ["docker", "stats", "--no-stream", "--format", "json", *noms],
+        # Deux mesures a prendre : plus long que les autres sondes.
+        timeout=PROBE_TIMEOUT + 10,
+    )
+    if proc.returncode != 0:
+        return {}
+    releves: dict[str, dict] = {}
+    for ligne in (proc.stdout or "").splitlines():
+        try:
+            d = json.loads(ligne)
+        except json.JSONDecodeError:
+            continue
+        usage, _, limite = (d.get("MemUsage") or "").partition("/")
+        pourcent = re.sub(r"%", "", d.get("CPUPerc") or "")
+        releves[str(d.get("Name") or "")] = {
+            "cpu_pct": float(pourcent) if re.fullmatch(r"[0-9.]+", pourcent) else None,
+            "memoire": _octets(usage),
+            "memoire_max": _octets(limite),
+        }
+    return releves
+
+
+#: Champs releves par conteneur. Jamais `docker inspect` entier : il rend les
+#: variables d'environnement RESOLUES, donc la cle privee WireGuard, les cles
+#: API et les mots de passe que `.env` est cense garder.
+_GABARIT_ETAT = (
+    "{{.Name}}|{{.State.Status}}|{{.RestartCount}}|{{.State.OOMKilled}}"
+    "|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}"
+)
+
+
+def etats_conteneurs(noms: list[str]) -> dict[str, dict]:
+    """Etat, redemarrages, kill OOM et sante de chaque conteneur nomme."""
+    if not noms:
+        return {}
+    proc = _run(["docker", "inspect", "--format", _GABARIT_ETAT, *noms], timeout=PROBE_TIMEOUT)
+    etats: dict[str, dict] = {}
+    for ligne in (proc.stdout or "").splitlines():
+        champs = ligne.strip().split("|")
+        if len(champs) != 6:
+            continue
+        nom, statut, redemarrages, oom, code, sante = champs
+        etats[nom.lstrip("/")] = {
+            "statut": statut,
+            "redemarrages": int(redemarrages) if redemarrages.isdigit() else 0,
+            "oom": oom == "true",
+            "code": int(code) if re.fullmatch(r"-?[0-9]+", code) else 0,
+            "sante": "" if sante == "-" else sante,
+        }
+    return etats
+
+
 def volume_name(project_name: str, volume: str) -> str:
     """Nom REEL d'un volume nomme, tel que Docker Compose le cree.
 

@@ -742,6 +742,11 @@ class PathsScreen(WizardScreen):
         uid, gid, source, certain = resolve_ids(profile)
         note = self.query_one("#platform-note", Static)
         entete = f"[dim]PUID/PGID[/dim] [b]{uid}:{gid}[/b]"
+        # Ce que le profil ne peut pas deviner passe AVANT les identifiants :
+        # qu'un profil soit experimental, ou qu'un systeme impose une
+        # contrainte, se decide avant de regarder un UID.
+        propre = PROFILE_DEFAULTS[profile].note
+        entete = f"[yellow]{t(propre)}[/yellow]\n{entete}" if propre else entete
         if certain:
             note.update(f"{entete} [dim]- {t(source)}[/dim]\n{t(self.IDS_EXPLICATION)}")
         else:

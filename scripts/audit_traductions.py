@@ -142,15 +142,15 @@ def phrases() -> dict[str, list[str]]:
 
         # Phrases portees par des mots-cles plutot que par un appel de widget :
         # les notes du catalogue, affichees sous chaque service a la selection,
-        # et l'origine des PUID/PGID, affichee sous le profil de plateforme.
-        # Elles arrivent aux widgets par une variable : seul leur point de
-        # DECLARATION est un litteral.
+        # l'origine des PUID/PGID et la note d'un profil de plateforme, toutes
+        # deux affichees sous le choix de profil. Elles arrivent aux widgets par
+        # une variable : seul leur point de DECLARATION est un litteral.
         for noeud in ast.walk(arbre):
             if not isinstance(noeud, ast.Call):
                 continue
             for mot_cle in noeud.keywords:
                 if (
-                    mot_cle.arg in ("notes", "source")
+                    mot_cle.arg in ("notes", "source", "note")
                     and isinstance(mot_cle.value, ast.Constant)
                     and isinstance(mot_cle.value.value, str)
                 ):

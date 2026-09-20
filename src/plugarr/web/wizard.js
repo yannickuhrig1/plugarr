@@ -378,6 +378,11 @@ function updatePlatformInfo() {
   if (!profile) return;
   $('ids-summary').textContent = `${profile.puid}:${profile.pgid}`;
   $('ids-detail').textContent = profile.ids_source + (profile.ids_certain ? '' : ' · ' + tr('unavailable'));
+  // La note du profil : ce qu'aucun defaut ne peut porter, comme le fait qu'un
+  // profil soit experimental. Elle disparait pour les profils qui n'en ont pas.
+  const note = $('platform-note');
+  note.textContent = profile.note || '';
+  note.hidden = !profile.note;
 }
 
 function fillFields() {

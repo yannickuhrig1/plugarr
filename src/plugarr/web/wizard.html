@@ -35,7 +35,8 @@
 <section class="step-panel" data-step="1" hidden>
 <div class="eyebrow" data-i18n="step2">ÉTAPE 02 / 06</div><h1 tabindex="-1" data-i18n="foldersTitle">Une place pour chaque fichier.</h1><p class="intro" data-i18n="foldersIntro">Ces chemins et cette adresse désignent l’ordinateur sur lequel PlugArr s’exécute.</p>
 <div class="form-grid">
-<label><span data-i18n="platform">Plateforme</span><select id="platform"><option value="windows">Windows · Docker Desktop</option><option value="generic-linux">Linux</option><option value="unraid">Unraid</option><option value="synology">Synology</option></select></label>
+<label><span data-i18n="platform">Plateforme</span><select id="platform"><option value="windows">Windows · Docker Desktop</option><option value="macos">macOS · Docker Desktop</option><option value="generic-linux">Linux</option><option value="unraid">Unraid</option><option value="synology">Synology</option><option value="ugreen">UGREEN · UGOS</option></select></label>
+<p id="platform-note" class="notice warning wide" hidden></p>
 <label><span data-i18n="projectName">Nom de la pile Docker</span><input id="project_name" required pattern="[a-z0-9][a-z0-9_\-]*" maxlength="63"></label>
 <label class="wide"><span data-i18n="dataRoot">Dossier des médias et téléchargements</span><input id="data_root" required spellcheck="false"><small data-i18n="dataHelp">Un dossier commun pour préserver les liens physiques quand le système le permet.</small></label>
 <label class="wide"><span data-i18n="configRoot">Dossier des configurations des applications</span><input id="config_root" required spellcheck="false"></label>

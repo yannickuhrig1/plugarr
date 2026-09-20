@@ -731,3 +731,71 @@ def test_hors_root_les_artefacts_ne_changent_pas_de_main(tmp_path, monkeypatch):
     _compose.write_artifacts(make_cfg(tmp_path), tmp_path / "projet")
 
     assert appels == []
+
+
+# --------------------------------------------------------------- profil UGREEN
+
+
+def test_le_profil_ugreen_propose_les_chemins_d_un_volume(monkeypatch):
+    """UGOS range ses volumes comme DSM : /volume1, /volume2, crees dans
+    l'interface. `/srv` et `/opt` y sont refuses, comme sur tout NAS : herite de
+    `generic-linux`, un utilisateur UGREEN se voyait proposer des chemins que le
+    systeme refuse.
+
+    Chemins releves avec un utilisateur sur son propre NAS, le 2026-09-18.
+    """
+    from plugarr.layout import PROFILE_DEFAULTS
+
+    defauts = PROFILE_DEFAULTS[PlatformProfile.UGREEN]
+
+    assert defauts.config_root == "/volume1/docker/plugarr"
+    assert defauts.data_root == "/volume1/data"
+    assert not defauts.config_root.startswith(("/srv", "/opt"))
+
+
+def test_le_profil_ugreen_detecte_les_identifiants(monkeypatch):
+    """La constante 1000:10 vient d'UN SEUL NAS. Sur UGOS comme sur DSM, l'UID
+    depend de l'ordre de creation des comptes : une constante serait fausse par
+    conception, d'ou la detection qui passe devant."""
+    import os as _os
+
+    from plugarr.layout import PROFILE_DEFAULTS, resolve_ids
+
+    assert PROFILE_DEFAULTS[PlatformProfile.UGREEN].prefer_detection
+
+    monkeypatch.setattr(_os, "getuid", lambda: 1027, raising=False)
+    monkeypatch.setattr(_os, "getgid", lambda: 100, raising=False)
+    uid, gid, _source, certain = resolve_ids(PlatformProfile.UGREEN)
+
+    assert (uid, gid) == (1027, 100), "la constante a pris le pas sur la detection"
+    assert certain
+
+
+def test_le_profil_ugreen_se_dit_experimental():
+    """Il vient d'une seule installation reelle. Le taire serait le presenter
+    pour ce qu'il n'est pas, et deux contraintes d'UGOS ne se devinent pas : les
+    volumes appartiennent a root, et les tunnels SSH sont interdits."""
+    from plugarr.layout import PROFILE_DEFAULTS
+
+    note = PROFILE_DEFAULTS[PlatformProfile.UGREEN].note
+
+    assert "EXPERIMENTAL" in note
+    assert "sudo" in note
+    assert "SSH" in note
+
+
+def test_les_profils_eprouves_n_affichent_aucune_note():
+    """Une note sur chaque profil ne voudrait plus rien dire."""
+    from plugarr.layout import PROFILE_DEFAULTS
+
+    for profil in (PlatformProfile.GENERIC_LINUX, PlatformProfile.WINDOWS,
+                   PlatformProfile.UNRAID, PlatformProfile.SYNOLOGY):
+        assert PROFILE_DEFAULTS[profil].note == "", profil
+
+
+def test_chaque_profil_declare_ses_defauts():
+    """Un profil ajoute a l'enumeration sans entree ici planterait a l'ouverture
+    de l'ecran des chemins, pas avant."""
+    from plugarr.layout import PROFILE_DEFAULTS
+
+    assert set(PROFILE_DEFAULTS) == set(PlatformProfile)

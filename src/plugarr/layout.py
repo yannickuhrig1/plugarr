@@ -117,6 +117,10 @@ class ProfileDefaults:
     prefer_detection: bool
     #: D'ou viennent puid/pgid. Affiche a l'utilisateur : il doit pouvoir juger.
     source: str
+    #: Ce que le profil ne peut PAS deviner, et que l'utilisateur doit savoir
+    #: avant de choisir : une contrainte du systeme, ou le fait que le profil
+    #: lui-meme n'a pas encore ete eprouve. Vide quand il n'y a rien a dire.
+    note: str = ""
 
 
 def _sous_le_dossier_personnel(*parties: str) -> str:
@@ -194,6 +198,29 @@ PROFILE_DEFAULTS: dict[PlatformProfile, ProfileDefaults] = {
         pgid=100,
         prefer_detection=True,
         source="utilisateur courant (les UID DSM varient selon l'utilisateur cree)",
+    ),
+    PlatformProfile.UGREEN: ProfileDefaults(
+        # UGOS range les volumes comme DSM : /volume1, /volume2... crees dans
+        # l'interface. `/srv` et `/opt` sont refuses, comme sur tout NAS.
+        # Chemins etablis avec un utilisateur sur son propre NAS, le 2026-09-18.
+        config_root="/volume1/docker/plugarr",
+        data_root="/volume1/data",
+        # Valeurs de repli seulement, et tirees d'UN SEUL NAS : `id` y rendait
+        # `uid=1000 gid=10(admin)`. Que ce soit vrai de tous les UGOS n'est pas
+        # etabli, d'ou la detection, qui passe devant.
+        puid=1000,
+        pgid=10,
+        prefer_detection=True,
+        source="utilisateur courant (UGOS : premier compte vu a 1000:10, groupe admin)",
+        note=(
+            "Profil EXPERIMENTAL : il vient d'une seule installation reelle, et "
+            "les retours sont attendus sur le Discord de PlugArr. Deux choses "
+            "qu'UGOS impose et qu'aucun profil ne peut contourner : les volumes "
+            "appartiennent a root, donc l'installation demande `sudo` ; et les "
+            "tunnels SSH sont interdits par defaut, donc l'assistant web ne "
+            "s'ouvre pas a travers SSH — utilisez le mode terminal, ou servez-le "
+            "sur le reseau local."
+        ),
     ),
 }
 

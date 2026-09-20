@@ -28,6 +28,7 @@ class PlatformProfile(str, Enum):
     GENERIC_LINUX = "generic-linux"
     UNRAID = "unraid"
     SYNOLOGY = "synology"
+    UGREEN = "ugreen"
     WINDOWS = "windows"
     MACOS = "macos"
 

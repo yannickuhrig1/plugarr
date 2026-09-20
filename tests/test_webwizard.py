@@ -810,3 +810,28 @@ def test_demo_exposes_and_accepts_complete_official_quality_catalog(server, monk
     form['recyclarr_templates']['radarr'] = 'template-invente'
     assert client.post('/api/validate', json=form).status_code == 400
     forbidden.assert_not_called()
+
+
+def test_l_assistant_web_propose_chaque_profil_de_plateforme():
+    """Le `<select>` est ecrit a la main dans le HTML, contrairement au TUI qui
+    parcourt l'enumeration. Un profil ajoute cote Python restait donc invisible
+    dans le navigateur, sans que rien ne le signale."""
+    from plugarr.models import PlatformProfile
+
+    html = (webwizard.ASSETS / "wizard.html").read_text(encoding="utf-8")
+    debut = html.index('<select id="platform"')
+    bloc = html[debut : html.index("</select>", debut)]
+
+    for profil in PlatformProfile:
+        assert f'value="{profil.value}"' in bloc, profil.value
+
+
+def test_l_assistant_web_porte_la_note_du_profil():
+    """Un profil experimental doit le dire dans le navigateur aussi, pas
+    seulement dans le terminal."""
+    html = (webwizard.ASSETS / "wizard.html").read_text(encoding="utf-8")
+    javascript = (webwizard.ASSETS / "wizard.js").read_text(encoding="utf-8")
+
+    assert 'id="platform-note"' in html
+    assert "platform-note" in javascript
+    assert "profile.note" in javascript

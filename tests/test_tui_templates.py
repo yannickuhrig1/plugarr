@@ -66,11 +66,16 @@ async def test_seuls_les_services_installes_sont_proposes(app):
 
 
 @pytest.mark.asyncio
-async def test_un_nom_inconnu_est_signale_avant_l_installation(app):
+async def test_un_nom_inconnu_est_signale_avant_l_installation(app, attendre):
     """Recyclarr ne refuserait le nom qu'a la fin du cablage, stack demarree.
 
     Le dire ici coute une comparaison ; le decouvrir la-bas coute une
     installation.
+
+    Les attentes sont BORNEES et non un simple `pause` : changer la valeur d'un
+    `Select` declenche un message, et sous la charge d'une suite complete le
+    bouton n'a pas encore ete rafraichi au tour suivant. Le test tombait alors
+    sur un code parfaitement sain.
     """
     async with app.run_test() as pilot:
         screen = await _goto_templates(pilot, ["sonarr", "radarr", "recyclarr"])
@@ -79,16 +84,18 @@ async def test_un_nom_inconnu_est_signale_avant_l_installation(app):
         screen._available["sonarr"] = ["web-1080p", "web-2160p"]
         screen.query_one("#tpl-sonarr", Select).set_options([("web-9999p", "web-9999p")])
         screen.query_one("#tpl-sonarr", Select).value = "web-9999p"
-        await pilot.pause()
 
-        assert screen.query_one("#next", Button).disabled is True
+        assert await attendre(
+            pilot, lambda: screen.query_one("#next", Button).disabled is True
+        ), "le bouton est reste actif malgre un nom inconnu"
         assert "inconnu" in str(screen.query_one("#templates-status", Static).content)
 
         screen.query_one("#tpl-sonarr", Select).set_options([("web-2160p", "web-2160p")])
         screen.query_one("#tpl-sonarr", Select).value = "web-2160p"
-        await pilot.pause()
 
-        assert screen.query_one("#next", Button).disabled is False
+        assert await attendre(
+            pilot, lambda: screen.query_one("#next", Button).disabled is False
+        ), "le bouton est reste bloque alors que le nom est valide"
 
 
 @pytest.mark.asyncio

@@ -191,6 +191,9 @@ class WizardState:
                 "pgid": gid,
                 "ids_source": i18n.t(source),
                 "ids_certain": certain,
+                # Ce que le profil ne peut pas deviner : une contrainte du
+                # systeme, ou le fait qu'il n'ait pas encore ete eprouve.
+                "note": i18n.t(profile_defaults.note) if profile_defaults.note else "",
             }
         backup = {"available": False, "source": "", "destination": ""}
         if cfg is not None and self.previous_project_dir is not None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -616,6 +617,44 @@ def test_lance_en_root_recyclarr_recoit_son_dossier(tmp_path, monkeypatch):
     # PUID : le faire ici masquerait a qui revient le travail.
     assert "sonarr" not in attribues, attribues
     assert all(owner == (1000, 10) for _, owner in donnes)
+
+
+def test_lance_en_root_les_dossiers_de_donnees_vont_a_l_utilisateur(tmp_path, monkeypatch):
+    """Mesure sur le banc le 2026-09-20, image linuxserver/sonarr:4.0.19.
+
+    Les deux montages a root, PUID=1000 PGID=10 : au demarrage, /config passe a
+    1000:10 — l'image s'en charge — mais /data reste a root, et un `touch` sous
+    1000:10 dans /data/torrents repond « Permission denied ». Une installation
+    en sudo donnait donc une pile qui demarre et qui ne telecharge rien.
+    """
+    from plugarr import layout
+
+    donnes: list[str] = []
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_donner", lambda dossier, owner: donnes.append(dossier.name))
+
+    layout.create_tree(tmp_path / "data", tmp_path / "config", ["sonarr"], owner=(1000, 10))
+
+    for sous_dossier in layout.DATA_SUBDIRS:
+        nom = Path(sous_dossier).name
+        assert nom in donnes, f"{sous_dossier} laisse a root : {donnes}"
+
+
+def test_une_racine_de_donnees_deja_peuplee_n_est_pas_reprise(tmp_path, monkeypatch):
+    """Un `chown -R` sur une mediatheque de plusieurs tera serait long, et ce
+    n'est pas a une installation de redistribuer ce qu'elle n'a pas cree."""
+    from plugarr import layout
+
+    data = tmp_path / "data"
+    for sous_dossier in layout.DATA_SUBDIRS:
+        (data / sous_dossier).mkdir(parents=True, exist_ok=True)
+    donnes: list[str] = []
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_donner", lambda dossier, owner: donnes.append(dossier.name))
+
+    layout.create_tree(data, tmp_path / "config", ["sonarr"], owner=(1000, 10))
+
+    assert donnes == [], donnes
 
 
 def test_sans_proprietaire_on_ne_touche_a_rien(tmp_path, monkeypatch):

@@ -312,10 +312,23 @@ def create_tree(
 ) -> list[Path]:
     """Cree l'arborescence. Idempotent.
 
-    `owner` (PUID, PGID) : lance en root, PlugArr donne a ces identifiants le
-    dossier des images de `SANS_PUID`, qui ne savent pas le faire elles-memes.
-    Les autres s'en chargent au demarrage, a partir de PUID/PGID : leur donner
-    leur dossier ici ne servirait a rien et masquerait a qui revient le travail.
+    `owner` (PUID, PGID) : lance en root, PlugArr donne ces identifiants aux
+    dossiers de DONNEES qu'il cree, et au dossier de configuration des images de
+    `SANS_PUID`. Le partage n'est pas arbitraire, il est mesure sur le banc le
+    2026-09-20, image `linuxserver/sonarr:4.0.19`, avec les deux montages
+    appartenant a root et PUID=1000, PGID=10 :
+
+        /config  root:root  ->  1000:10 au demarrage  (l'image s'en charge)
+        /data    root:root  ->  root:root             (personne ne s'en charge)
+        touch /data/torrents/x  sous 1000:10  ->  Permission denied
+
+    Autrement dit une installation en `sudo` — obligatoire sous `/volume1`, qui
+    appartient a root — donnait une pile qui demarre et qui ne telecharge rien.
+    Les images reprennent leur configuration, jamais les donnees.
+
+    Les dossiers DEJA presents ne sont pas repris : un `chown -R` sur une
+    mediatheque de plusieurs tera serait long, et ce n'est pas a une
+    installation de redistribuer ce qu'elle n'a pas cree.
     """
     created: list[Path] = []
     data_root, config_root = Path(data_root), Path(config_root)
@@ -324,6 +337,10 @@ def create_tree(
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
             created.append(p)
+            if owner is not None:
+                # Tout juste cree, donc vide : le parcours de `_donner` ne coute
+                # rien et n'atteint aucun fichier de l'utilisateur.
+                _donner(p, owner)
     for sid in service_ids:
         spec = catalog.CATALOG.get(sid)
         # On cree le dossier que le compose MONTE, pas un dossier portant le nom

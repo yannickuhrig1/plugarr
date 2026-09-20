@@ -503,6 +503,7 @@ EN: dict[str, str] = {
     'detecte ({origine})': 'detected ({origine})',
     'valeur par defaut : detection impossible sur cette plateforme': 'default value: detection impossible on this platform',
     'lance en root : conteneurs et medias appartiendront a root': 'running as root: containers and media will belong to root',
+    'detecte sous sudo : votre compte, pas root': 'detected under sudo: your account, not root',
     'hardlink OK entre torrents/ et media/': 'hardlink OK between torrents/ and media/',
     "hardlink impossible ({erreur}). Les imports recopieront les fichiers au lieu de les lier. Verifiez que {source} et {cible} sont sur le MEME systeme de fichiers, et que DATA_ROOT est monte d'un seul bloc.": 'hardlink impossible ({erreur}). Imports will copy files instead of linking them. Check that {source} and {cible} are on the SAME filesystem, and that DATA_ROOT is mounted as a single block.',
     # -- format de date --------------------------------------------------------------

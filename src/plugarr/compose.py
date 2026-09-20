@@ -461,6 +461,11 @@ def _service_block(cfg: StackConfig, service_id: str) -> dict:
         # des *arr. `CRON_SCHEDULE` est sa planification, pas un reglage de plugarr.
         block["environment"] = {"TZ": cfg.timezone, "CRON_SCHEDULE": "@daily"}
         block["volumes"] = [f"${{CONFIG_ROOT}}/{spec.config_dir}:/config"]
+        # Son image tourne en 1000:1000 EN DUR et ne lit pas PUID : sans `user`,
+        # elle ne peut pas ecrire dans un dossier qui n'est pas a elle (voir
+        # layout.SANS_PUID). Sans interface web, elle n'a aucun moyen de le
+        # dire : la panne se lisait seulement dans une synchronisation en echec.
+        block["user"] = f"{cfg.puid}:{cfg.pgid}"
     elif service_id == "seerr":
         # Ni PUID ni PGID, ni acces aux medias : Seerr ne touche AUCUN fichier.
         # Il transmet des demandes aux *arr, qui telechargent.

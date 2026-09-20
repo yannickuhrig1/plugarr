@@ -212,6 +212,30 @@ def detect_ids() -> tuple[int, int] | None:
     return getuid(), getgid()
 
 
+def _ids_sudo() -> tuple[int, int] | None:
+    """UID/GID du compte qui a lance `sudo`, s'il y en a un.
+
+    sudo pose `SUDO_UID` et `SUDO_GID` dans l'environnement de la commande
+    elevee. Les deux doivent etre des entiers, et l'uid non nul : `sudo` lance
+    depuis root donne SUDO_UID=0, qui n'apprend rien et ne doit pas faire croire
+    qu'un vrai utilisateur a ete retrouve.
+
+    Le gid manquant ne disqualifie pas l'uid : on retombe alors sur le gid du
+    processus, ce qui vaut mieux que de renoncer au bon uid.
+    """
+    brut_uid, brut_gid = os.environ.get("SUDO_UID", ""), os.environ.get("SUDO_GID", "")
+    if not brut_uid.strip().isdigit():
+        return None
+    uid = int(brut_uid.strip())
+    if uid == 0:
+        return None
+    gid = int(brut_gid.strip()) if brut_gid.strip().isdigit() else None
+    if gid is None:
+        courant = detect_ids()
+        gid = courant[1] if courant else uid
+    return uid, gid
+
+
 def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
     """Determine PUID/PGID pour un profil.
 
@@ -234,8 +258,26 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
         # Constate lors du premier essai sur Linux natif : `sudo plugarr install`
         # detecte 0:0 et fait tourner TOUTE la stack en root, en silence. Les
         # medias telecharges appartiennent alors a root, et l'utilisateur ne peut
-        # plus y toucher sans sudo. On propose la valeur, on ne l'impose pas, mais
-        # on ne la laisse pas passer sans le dire.
+        # plus y toucher sans sudo.
+        #
+        # Sous `sudo`, le vrai utilisateur n'est pourtant pas perdu : sudo pose
+        # SUDO_UID et SUDO_GID. C'est LUI qu'il faut retenir, pas le 0 de
+        # l'elevation. Remonte le 2026-09-20 par un membre sur Synology : son
+        # installation en sudo avait cree les dossiers en root, et Recyclarr,
+        # dont l'image tourne en 1000:1000 et ignore PUID, se faisait jeter a
+        # l'ecriture. Un `sudo` est souvent NECESSAIRE — /volume1 appartient a
+        # root, personne d'autre ne peut y creer un dossier — donc refuser sudo
+        # ne reglerait rien ; garder le bon identifiant, si.
+        sous_sudo = _ids_sudo()
+        if sous_sudo is not None:
+            return (
+                sous_sudo[0],
+                sous_sudo[1],
+                t("detecte sous sudo : votre compte, pas root"),
+                True,
+            )
+        # Root sans sudo : la valeur reste proposee, jamais imposee, mais jamais
+        # passee sous silence non plus.
         return (
             0,
             detected[1],
@@ -250,7 +292,15 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
 #: « EACCES: mkdir '/app/config/logs/' » dans un dossier qui n'est pas a lui
 #: (constate sur le banc le 2026-09-19 ; sa documentation Docker demande un
 #: `chown` ou `--user`).
-SANS_PUID = frozenset({"seerr"})
+#:
+#: Recyclarr est dans le meme cas, remonte le 2026-09-20 par un membre sur
+#: Synology : son image tourne en 1000:1000 en dur et ne lit pas PUID. Tant que
+#: l'installation se faisait sous un compte a 1000, la coincidence tenait ; une
+#: installation en `sudo` — obligatoire sous `/volume1`, qui appartient a root —
+#: creait le dossier en root et Recyclarr se faisait jeter a l'ecriture. Il
+#: n'avait alors aucune interface pour le dire : seule une synchronisation en
+#: echec, sans cause lisible.
+SANS_PUID = frozenset({"seerr", "recyclarr"})
 
 
 def create_tree(
@@ -264,6 +314,8 @@ def create_tree(
 
     `owner` (PUID, PGID) : lance en root, PlugArr donne a ces identifiants le
     dossier des images de `SANS_PUID`, qui ne savent pas le faire elles-memes.
+    Les autres s'en chargent au demarrage, a partir de PUID/PGID : leur donner
+    leur dossier ici ne servirait a rien et masquerait a qui revient le travail.
     """
     created: list[Path] = []
     data_root, config_root = Path(data_root), Path(config_root)

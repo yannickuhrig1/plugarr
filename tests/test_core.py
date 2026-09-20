@@ -308,6 +308,84 @@ def test_running_as_root_is_flagged(monkeypatch):
     assert "root" in source
 
 
+def test_sous_sudo_c_est_le_compte_de_l_utilisateur_qui_est_retenu(monkeypatch):
+    """Remonte le 2026-09-20 par un membre sur Synology.
+
+    `/volume1` appartient a root : sans `sudo`, PlugArr ne peut meme pas y creer
+    ses dossiers. Mais avec, il detectait 0:0 et posait tout en root ; Recyclarr,
+    dont l'image tourne en 1000:1000 et ignore PUID, ne pouvait plus ecrire chez
+    lui. sudo garde pourtant le vrai compte sous la main, dans SUDO_UID.
+    """
+    import os as _os
+
+    from plugarr.layout import resolve_ids
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0, raising=False)
+    monkeypatch.setattr(_os, "getgid", lambda: 0, raising=False)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "10")
+
+    uid, gid, source, certain = resolve_ids(PlatformProfile.GENERIC_LINUX)
+
+    assert (uid, gid) == (1000, 10)
+    assert certain, source
+    assert "sudo" in source
+
+
+def test_sudo_lance_depuis_root_n_apprend_rien(monkeypatch):
+    """SUDO_UID=0 veut dire que root a fait un sudo : aucun vrai compte a
+    retrouver, et l'avertissement doit rester."""
+    import os as _os
+
+    from plugarr.layout import resolve_ids
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0, raising=False)
+    monkeypatch.setattr(_os, "getgid", lambda: 0, raising=False)
+    monkeypatch.setenv("SUDO_UID", "0")
+
+    uid, _gid, source, certain = resolve_ids(PlatformProfile.GENERIC_LINUX)
+
+    assert uid == 0
+    assert not certain
+    assert "root" in source
+
+
+@pytest.mark.parametrize("valeur", ["", "   ", "root", "-1000", "1000abc"])
+def test_un_sudo_uid_illisible_ne_fabrique_pas_d_identifiant(monkeypatch, valeur):
+    """Un environnement bricole ne doit pas produire un uid invente : mieux vaut
+    l'avertissement sur root, que l'utilisateur peut corriger."""
+    import os as _os
+
+    from plugarr.layout import resolve_ids
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0, raising=False)
+    monkeypatch.setattr(_os, "getgid", lambda: 0, raising=False)
+    monkeypatch.setenv("SUDO_UID", valeur)
+
+    uid, _gid, _source, certain = resolve_ids(PlatformProfile.GENERIC_LINUX)
+
+    assert uid == 0
+    assert not certain
+
+
+def test_sans_sudo_gid_l_uid_est_garde_quand_meme(monkeypatch):
+    """Perdre le bon uid parce qu'il manque le gid serait absurde."""
+    import os as _os
+
+    from plugarr.layout import resolve_ids
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0, raising=False)
+    monkeypatch.setattr(_os, "getgid", lambda: 0, raising=False)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.delenv("SUDO_GID", raising=False)
+
+    uid, gid, _source, certain = resolve_ids(PlatformProfile.GENERIC_LINUX)
+
+    assert uid == 1000
+    assert gid == 0  # celui du processus, faute de mieux
+    assert certain
+
+
 def test_a_normal_user_is_not_flagged(monkeypatch):
     import os as _os
 
@@ -511,3 +589,59 @@ def test_a_vpn_bound_client_is_reached_through_gluetun(tmp_path):
     wirer = Wirer(cfg)
     assert wirer.internal_url("qbittorrent") == "http://gluetun:8080"
     assert wirer.internal_url("sonarr") == "http://sonarr:8989"
+
+
+def test_lance_en_root_recyclarr_recoit_son_dossier(tmp_path, monkeypatch):
+    """Remonte le 2026-09-20 par un membre sur Synology.
+
+    L'image de Recyclarr tourne en 1000:1000 en dur et ne lit pas PUID. Une
+    installation en `sudo` creait son dossier en root, et il se faisait jeter a
+    l'ecriture. Sans interface web, il n'avait aucun moyen de le dire.
+    """
+    from plugarr import layout
+
+    donnes: list[tuple[str, tuple[int, int]]] = []
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(
+        layout, "_donner", lambda dossier, owner: donnes.append((dossier.name, owner))
+    )
+
+    layout.create_tree(
+        tmp_path / "data", tmp_path / "config", ["recyclarr", "sonarr"], owner=(1000, 10)
+    )
+
+    attribues = {nom for nom, _ in donnes}
+    assert "recyclarr" in attribues, attribues
+    # Les images LinuxServer se donnent leur dossier elles-memes, a partir de
+    # PUID : le faire ici masquerait a qui revient le travail.
+    assert "sonarr" not in attribues, attribues
+    assert all(owner == (1000, 10) for _, owner in donnes)
+
+
+def test_sans_proprietaire_on_ne_touche_a_rien(tmp_path, monkeypatch):
+    """Hors root, il n'y a rien a redistribuer : les dossiers appartiennent deja
+    a celui qui les a crees."""
+    from plugarr import layout
+
+    donnes: list[str] = []
+    monkeypatch.setattr(layout, "_donner", lambda dossier, owner: donnes.append(dossier.name))
+
+    layout.create_tree(tmp_path / "data", tmp_path / "config", ["recyclarr"], owner=None)
+
+    assert donnes == []
+
+
+def test_le_dossier_de_recyclarr_est_repris_meme_s_il_existe_deja(tmp_path, monkeypatch):
+    """Celui qui a deja installe en sudo a un dossier en root. Le reparer au
+    passage evite de lui demander un `chown` a la main."""
+    from plugarr import layout
+
+    deja = tmp_path / "config" / "recyclarr"
+    deja.mkdir(parents=True)
+    donnes: list[str] = []
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_donner", lambda dossier, owner: donnes.append(dossier.name))
+
+    layout.create_tree(tmp_path / "data", tmp_path / "config", ["recyclarr"], owner=(1000, 10))
+
+    assert "recyclarr" in donnes, donnes

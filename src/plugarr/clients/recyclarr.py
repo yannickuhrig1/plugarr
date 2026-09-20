@@ -261,3 +261,42 @@ def resolve_split_instances(config_dir: Path, keep: dict[str, str]) -> list[tupl
             path.rename(path.with_suffix("").with_suffix(DISABLED_SUFFIX))
             ecartes.append((path, service))
     return ecartes
+
+
+#: Niveaux que Recyclarr prefixe a chaque ligne. Seuls les deux premiers disent
+#: pourquoi il s'est arrete ; le reste raconte ce qu'il faisait.
+_NIVEAUX_GRAVES = ("[FTL]", "[ERR]")
+
+#: Bruit de `docker compose run`, qui encadre la sortie de Recyclarr sans rien
+#: apprendre sur la panne.
+_BRUIT = ("Creating ", "Created ", "Pulling ", "Pull complete", "Digest:", "Status:")
+
+
+def cause(sortie: str, *, lignes: int = 3, taille: int = 400) -> str:
+    """Ce qui, dans la sortie de Recyclarr, explique l'echec.
+
+    Longtemps, PlugArr n'en gardait que `splitlines()[-1]`. Reproduit sur le
+    banc le 2026-09-20, avec l'image 8.7.1 et un dossier qui n'appartient pas au
+    conteneur, la sortie fait sept lignes : la PREMIERE porte tout, tagguee
+    `[ERR]`, et les six suivantes deroulent une chaine de types .NET coupee au
+    milieu. La derniere, celle que PlugArr affichait, etait
+    `λ:Recyclarr.Platform.IAppPaths.` — exacte, et sans le moindre interet.
+
+    D'ou le tri par niveau plutot que par position. Une sortie finissant par une
+    ligne vide donnerait par ailleurs un dernier element vide, l'autre facon
+    d'afficher un avertissement qui ne dit rien.
+
+    On garde donc les lignes GRAVES si Recyclarr en a pose, sinon les dernieres
+    lignes utiles, et jamais une chaine vide : « aucun detail » est une
+    information, une ligne blanche n'en est pas une.
+    """
+    utiles = [
+        ligne.strip()
+        for ligne in (sortie or "").splitlines()
+        if ligne.strip() and not ligne.strip().startswith(_BRUIT)
+    ]
+    if not utiles:
+        return t("aucun detail")
+    graves = [ligne for ligne in utiles if ligne.startswith(_NIVEAUX_GRAVES)]
+    retenues = (graves or utiles)[-lignes:]
+    return " / ".join(retenues)[:taille]

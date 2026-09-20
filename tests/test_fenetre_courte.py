@@ -34,14 +34,21 @@ def _app(tmp_path):
 
 @pytest.mark.parametrize("hauteur", HAUTEURS)
 @pytest.mark.asyncio
-async def test_le_champ_de_cle_vpn_a_une_hauteur_utilisable(tmp_path, hauteur):
+async def test_le_champ_de_cle_vpn_a_une_hauteur_utilisable(tmp_path, hauteur, attendre):
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
         pilot.app.selection = ["sonarr", "qbittorrent"]
         await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen.query_one("#vpn-oui", RadioButton).value = True
-        await pilot.pause()
+
+        # Une seule `pause` ne suffit pas : cocher le bouton redessine l'ecran,
+        # et sous la charge d'une suite complete la mise en page arrive apres.
+        # Le test tombait alors sur une hauteur de zero, sans que rien ne soit
+        # casse. On attend l'etat, borne dans le temps, plutot qu'un tour.
+        assert await attendre(
+            pilot, lambda: screen.query_one("#vpn-key", Input).region.height == 3
+        ), f"hauteur restee a {screen.query_one('#vpn-key', Input).region.height}"
 
         # 3 lignes : c'est la hauteur d'un Input avec sa bordure. En dessous,
         # le champ est ecrase et l'utilisateur ne peut pas le remplir.
@@ -51,7 +58,7 @@ async def test_le_champ_de_cle_vpn_a_une_hauteur_utilisable(tmp_path, hauteur):
 
 @pytest.mark.parametrize("hauteur", HAUTEURS)
 @pytest.mark.asyncio
-async def test_le_couple_openvpn_a_une_hauteur_utilisable(tmp_path, hauteur):
+async def test_le_couple_openvpn_a_une_hauteur_utilisable(tmp_path, hauteur, attendre):
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
         pilot.app.selection = ["sonarr", "qbittorrent"]
         await pilot.app.push_screen(VpnScreen())
@@ -60,7 +67,10 @@ async def test_le_couple_openvpn_a_une_hauteur_utilisable(tmp_path, hauteur):
         screen.query_one("#vpn-oui", RadioButton).value = True
         await pilot.pause()
         screen.query_one("#vpn-type", Select).value = "openvpn"
-        await pilot.pause()
+
+        assert await attendre(
+            pilot, lambda: screen.query_one("#vpn-user", Input).region.height == 3
+        ), f"hauteur restee a {screen.query_one('#vpn-user', Input).region.height}"
 
         assert screen.query_one("#vpn-user", Input).region.height == 3
         assert screen.query_one("#vpn-pass", Input).region.height == 3
@@ -68,12 +78,15 @@ async def test_le_couple_openvpn_a_une_hauteur_utilisable(tmp_path, hauteur):
 
 @pytest.mark.parametrize("hauteur", HAUTEURS)
 @pytest.mark.asyncio
-async def test_tous_les_champs_des_chemins_restent_atteignables(tmp_path, hauteur):
+async def test_tous_les_champs_des_chemins_restent_atteignables(tmp_path, hauteur, attendre):
     """Le dernier champ ajoute est le plus expose : c'est celui qui sort."""
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
         await pilot.app.push_screen(PathsScreen())
-        await pilot.pause()
         screen = pilot.app.screen
+
+        assert await attendre(
+            pilot, lambda: screen.query_one("#host", Input).region.height == 3
+        ), "l'ecran n'a jamais fini sa mise en page"
 
         for ident in ("#config-root", "#data-root", "#username", "#tz", "#host"):
             assert screen.query_one(ident, Input).region.height == 3, ident
@@ -81,12 +94,14 @@ async def test_tous_les_champs_des_chemins_restent_atteignables(tmp_path, hauteu
 
 @pytest.mark.parametrize("hauteur", [24, 30])
 @pytest.mark.asyncio
-async def test_l_ecran_des_chemins_defile(tmp_path, hauteur):
+async def test_l_ecran_des_chemins_defile(tmp_path, hauteur, attendre):
     """Sans defilement, les champs du bas etaient simplement inaccessibles."""
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
         await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         zone = pilot.app.screen.query_one("#paths")
 
+        assert await attendre(pilot, lambda: zone.max_scroll_y > 0), (
+            "le contenu tiendrait dans la fenetre"
+        )
         assert zone.allow_vertical_scroll
-        assert zone.max_scroll_y > 0, "le contenu tiendrait dans la fenetre"

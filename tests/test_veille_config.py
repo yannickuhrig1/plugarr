@@ -384,8 +384,11 @@ def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
     second echantillon de processeur avant de repondre, environ deux secondes.
     En file, onze conteneurs coutaient 21,2 s mesurees sur le banc le
     2026-09-20 ; la page restait vide tout ce temps, puis se remplissait d'un
-    coup. Ce test tient le parallelisme : un serveur qui traine sur chaque
-    releve, et un mur qui ne grandit pas avec le nombre de conteneurs.
+    coup.
+
+    Ce test compte les releves EN VOL, pas les secondes ecoulees. Une premiere
+    version mesurait la duree : elle tombait quand la suite complete chargeait
+    la machine, et un test qui depend de la charge ne dit plus rien de juste.
     """
     import json as _json
     import threading
@@ -394,8 +397,10 @@ def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
 
     from plugarr import veille
 
-    LENTEUR = 0.3
     NOMBRE = 8
+    simultanes = 0
+    sommet = 0
+    verrou = threading.Lock()
 
     class _DockerLent(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -404,6 +409,7 @@ def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
             pass
 
         def do_GET(self):
+            nonlocal simultanes, sommet
             if self.path.startswith("/containers/json"):
                 corps = [
                     {"Id": f"id{i}", "Names": [f"/plugarr-service{i}"],
@@ -411,7 +417,14 @@ def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
                     for i in range(NOMBRE)
                 ]
             else:
-                _time.sleep(LENTEUR)
+                with verrou:
+                    simultanes += 1
+                    sommet = max(sommet, simultanes)
+                # Assez long pour que les autres releves arrivent pendant
+                # celui-ci, assez court pour ne pas ralentir la suite.
+                _time.sleep(0.25)
+                with verrou:
+                    simultanes -= 1
                 corps = {
                     "cpu_stats": {"cpu_usage": {"total_usage": 200_000_000},
                                   "system_cpu_usage": 20_000_000_000, "online_cpus": 2},
@@ -435,9 +448,7 @@ def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
             veille.VAR_API_DOCKER, f"http://127.0.0.1:{serveur.server_address[1]}"
         )
         veille._cache_conteneurs.clear()
-        depart = _time.monotonic()
         lignes = veille.conteneurs(cfg, interne=True)
-        duree = _time.monotonic() - depart
     finally:
         serveur.shutdown()
         serveur.server_close()
@@ -445,9 +456,10 @@ def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
 
     assert len(lignes) == NOMBRE
     assert all(ligne["cpu_pct"] == 2.0 for ligne in lignes)
-    # En file il faudrait NOMBRE * LENTEUR, soit 2,4 s. La moitie de ce mur
-    # laisse toute la marge d'une machine chargee, et reste loin du sequentiel.
-    assert duree < NOMBRE * LENTEUR / 2, f"{duree:.2f} s pour {NOMBRE} conteneurs"
+    # En file, le sommet vaudrait 1. Le plafond est bien plus haut que NOMBRE :
+    # la moitie laisse la marge d'un ordonnancement capricieux tout en restant
+    # hors de portee du sequentiel.
+    assert sommet >= NOMBRE // 2, f"{sommet} releves en vol au plus, pour {NOMBRE}"
 
 
 def test_le_parallelisme_ne_depasse_pas_le_plafond(tmp_path, monkeypatch):

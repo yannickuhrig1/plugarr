@@ -333,7 +333,13 @@ LXC where nobody logs in, there was nothing.
       installation: console reached with a 401, login, the real state of the 9
       services read from inside the container, then **Lidarr restarted through
       the socket**. The bench was put back as it was.
-- [ ] Steps for Unraid and Synology, which have their own boot mechanisms.
+- [x] Steps written: `docs/ADMIN_DISTANTE.md`, three routes, from the safest to
+      the most permissive. It ALSO says what is not verified: neither Unraid nor
+      Synology is on the bench, so their own mechanisms appear as sourced leads,
+      not as tested steps. On those machines, the verified route remains the
+      console in a container.
+- [ ] Try the Unraid route on a real Unraid: the user has one. That day, the
+      User Scripts plugin becomes either verified steps or nothing at all.
 
 ---
 

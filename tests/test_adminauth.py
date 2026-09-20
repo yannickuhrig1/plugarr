@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from plugarr import admin, adminauth, orchestrator
+from plugarr import admin, adminauth, i18n, orchestrator
 
 MOT_DE_PASSE = "unmotdepassecorrect"
 
@@ -244,8 +244,15 @@ def test_les_tentatives_repetees_finissent_bloquees(console):
 
     code, _cookie, page = appel(console, "POST", "/login", {"password": MOT_DE_PASSE})
 
-    assert code == 429
-    assert "Trop de tentatives" in page
+    # Ce test echoue une fois sur plusieurs dizaines de passes COMPLETES, jamais
+    # seul, et n'a jamais laisse de message : `-rf` ne rend que son nom. Les
+    # assertions portent donc de quoi trancher le jour ou il retombe, au lieu
+    # d'obliger a deviner. La langue d'abord : la page est verifiee sur une
+    # phrase francaise, et un autre test qui la basculerait ferait echouer
+    # celle-la sans que le blocage soit en cause.
+    assert i18n.langue() == "fr", f"langue={i18n.langue()}"
+    assert code == 429, f"page={page[:300]!r}"
+    assert "Trop de tentatives" in page, f"code={code} page={page[:300]!r}"
 
 
 def test_les_entetes_de_securite_sont_poses(console):

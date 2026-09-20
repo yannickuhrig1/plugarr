@@ -338,8 +338,14 @@ il n'y avait rien.
       installation : console jointe en 401, connexion, état réel des 9
       services lu depuis le conteneur, puis **Lidarr redémarré à travers le
       socket**. Banc remis dans son état d'avant l'essai.
-- [ ] Marche à suivre pour Unraid et Synology, qui ont leurs propres
-      mécanismes de démarrage.
+- [x] Marche à suivre écrite : `docs/ADMIN_DISTANTE.md`, trois routes, de la
+      plus sûre à la plus permissive. Elle dit AUSSI ce qui n'est pas vérifié :
+      ni Unraid ni Synology ne sont sur le banc, donc leurs mécanismes propres
+      y figurent comme pistes sourcées, pas comme marche à suivre essayée. Sur
+      ces machines, la route vérifiée reste la console en conteneur.
+- [ ] Essayer la route Unraid sur un vrai Unraid : l'utilisateur en a un. Ce
+      jour-là, le greffon User Scripts passe de piste sourcée à marche à suivre
+      vérifiée, ou disparaît du document.
 
 ---
 

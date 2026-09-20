@@ -254,6 +254,25 @@ Docker network.
 Windows drops a script in your Startup folder; Linux installs a *user* systemd unit.
 Neither asks for administrator rights. `plugarr autostart --disable` removes everything.
 
+#### Administering a remote machine
+
+A *user* unit waits for a login: on a server or an LXC where nobody logs in, it never
+starts. For those machines:
+
+```bash
+sudo plugarr autostart --systeme --host 0.0.0.0
+```
+
+The console then starts with **the machine**, under the account that owns `stack.yml`,
+not as root for convenience. Outside `127.0.0.1` the command requires a password to be
+set: without one, it refuses.
+
+On a machine **without systemd** — Unraid, Synology, a BSD — there remains the console
+*in a container*, an explicit option in the wizard or through `--console-conteneur`. It
+then receives the Docker socket, hence every right on the machine: with the socket you can
+create a privileged container that mounts the host's root. Enable it only where the system
+service is impossible, and knowing what it grants.
+
 ### If something goes wrong
 
 Every installation writes a full log next to `docker-compose.yml`:

@@ -618,7 +618,7 @@ def test_le_port_et_la_protection_sont_deux_verdicts(monkeypatch):
     monkeypatch.setattr(
         vpncheck,
         "_sortie",
-        lambda conteneur: (True, "sortie par Austria"),
+        lambda conteneur, cle="": (True, "sortie par Austria"),
     )
     monkeypatch.setattr(
         vpncheck, "ports_entrants", lambda cfg: {"annonce": 48406, "qbittorrent": 45270}

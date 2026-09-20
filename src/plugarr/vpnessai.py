@@ -26,6 +26,7 @@ Deux echecs sont pourtant certains, et ils meritent d'etre nommes :
 from __future__ import annotations
 
 import json
+import secrets
 import time
 
 from .i18n import t
@@ -173,6 +174,14 @@ def essayer(vpn: VpnConfig, image: str, *, attente: int | None = None) -> Check:
         # parce qu'elle sert d'abord au compose. Ici, aucun .env n'existe encore :
         # on pose les valeurs reellement saisies.
         environnement += ["-e", f"{cle}={_valeur_reelle(vpn, cle, valeur)}"]
+    # Conteneur jetable, sans fichier d'authentification : une cle tiree pour
+    # l'essai protege le serveur de controle, que Gluetun rendra prive (mesure
+    # sur v3.41.3 : la variable est prise en compte, 401 sans la cle).
+    cle_controle = secrets.token_urlsafe(24)
+    environnement += [
+        "-e",
+        f'HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE={{"auth":"apikey","apikey":"{cle_controle}"}}',
+    ]
 
     demarre = _run(
         [
@@ -193,7 +202,7 @@ def essayer(vpn: VpnConfig, image: str, *, attente: int | None = None) -> Check:
         )
 
     try:
-        return _attendre(vpn, attente)
+        return _attendre(vpn, attente, cle_controle)
     finally:
         _supprimer()
 
@@ -207,13 +216,13 @@ def _valeur_reelle(vpn: VpnConfig, cle: str, valeur: str) -> str:
     }.get(valeur, valeur)
 
 
-def _attendre(vpn: VpnConfig, attente: int) -> Check:
+def _attendre(vpn: VpnConfig, attente: int, cle_controle: str = "") -> Check:
     """Boucle jusqu'a la bonne sante, un echec certain, ou l'expiration."""
     fin = time.monotonic() + attente
     while time.monotonic() < fin:
         # La sortie reelle d'abord : c'est elle qui tranche. La sante du
         # conteneur ne sert qu'a arreter d'attendre plus tot.
-        if pays := _sortie_observee():
+        if pays := _sortie_observee(cle_controle):
             return Check(
                 "Essai VPN",
                 True,
@@ -248,7 +257,7 @@ def _attendre(vpn: VpnConfig, attente: int) -> Check:
     return Check("Essai VPN", False, doute, blocking=False)
 
 
-def _sortie_observee() -> str | None:
+def _sortie_observee(cle_controle: str = "") -> str | None:
     """Le pays par lequel le tunnel sort, ou None s'il ne sort pas.
 
     C'est la SEULE preuve acceptee. Un premier jet se contentait de la sante du
@@ -265,8 +274,10 @@ def _sortie_observee() -> str | None:
     L'adresse elle-meme n'est jamais rendue, seulement le pays : ce texte finit
     dans un journal qu'on demande de joindre aux rapports de bug.
     """
+    entete = ["--header", f"X-API-Key: {cle_controle}"] if cle_controle else []
     ok, sortie = exec_in(
-        CONTENEUR, ["wget", "-qO-", "--timeout=8", "http://127.0.0.1:8000/v1/publicip/ip"]
+        CONTENEUR,
+        ["wget", "-qO-", "--timeout=8", *entete, "http://127.0.0.1:8000/v1/publicip/ip"],
     )
     if not ok or not sortie:
         return None

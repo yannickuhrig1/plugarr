@@ -34,7 +34,7 @@ from pathlib import Path
 
 import httpx
 
-from . import catalog
+from . import catalog, gluetun_auth
 from .layout import DATA_SUBDIRS
 from .models import StackConfig
 from .runner import exec_in
@@ -228,15 +228,22 @@ def etats(cfg: StackConfig, *, interne: bool = False) -> list[dict]:
 # ----------------------------------------------------------------------- VPN
 
 
-def _lire_sortie_vpn(conteneur: str, interne: bool = False) -> dict:
+def _lire_sortie_vpn(conteneur: str, interne: bool = False, cle: str = "") -> dict:
     if interne:
+        # Le fichier de Gluetun est lu sur CONFIG_ROOT, monte en lecture seule.
+        entetes = {"X-API-Key": cle} if cle else {}
         try:
-            reponse = httpx.get(CONTROLE_GLUETUN_INTERNE, timeout=DELAI)
+            reponse = httpx.get(CONTROLE_GLUETUN_INTERNE, timeout=DELAI, headers=entetes)
             ok, sortie = reponse.status_code == 200, reponse.text.strip()
         except httpx.HTTPError:
             ok, sortie = False, ""
     else:
-        ok, sortie = exec_in(conteneur, ["wget", "-qO-", "--timeout=5", CONTROLE_GLUETUN])
+        # Sur l'hote, la cle est relue DANS Gluetun : jamais en argument.
+        script = (
+            f'{gluetun_auth.LIRE_CLE_SH}; wget -qO- --timeout=5 '
+            f'--header "X-API-Key: $K" {CONTROLE_GLUETUN}'
+        )
+        ok, sortie = exec_in(conteneur, ["sh", "-c", script])
     if not ok or not sortie:
         return {"ok": False, "detail": "serveur de controle de Gluetun injoignable"}
     try:
@@ -266,7 +273,7 @@ def vpn(cfg: StackConfig, *, interne: bool = False) -> dict | None:
             duree = DUREE_CACHE_VPN if lu[1]["ok"] else DUREE_CACHE_ECHEC_VPN
             if time.monotonic() - lu[0] < duree:
                 return lu[1]
-    sortie = _lire_sortie_vpn(conteneur, interne)
+    sortie = _lire_sortie_vpn(conteneur, interne, gluetun_auth.cle(cfg) if interne else "")
     with _verrou_vpn:
         _cache_vpn[cle] = (time.monotonic(), sortie)
     return sortie

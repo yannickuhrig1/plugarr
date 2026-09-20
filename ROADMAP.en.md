@@ -422,11 +422,16 @@ Dozzle reads logs and asks for the socket.
 - [x] Expose the watch only behind authentication: same password as the
       console (`adminauth`), same limited sessions. Without a password it
       refuses to listen anywhere but 127.0.0.1 (checked in the container).
-- [ ] Set up an authentication file for Gluetun's control server. Measured on
-      v3.41.3: `GET /v1/publicip/ip` still answers without authentication from
-      another container, but Gluetun warns on every call that the route will
-      become protected. The watch AND the leak check of `plugarr doctor` depend
-      on it: to settle before upgrading Gluetun.
+- [x] Set up an authentication file for Gluetun's control server
+      (`gluetun_auth.py`). Measured on v3.41.3: `GET /v1/publicip/ip` still
+      answered without authentication, but Gluetun warned on every call that
+      the route would become protected, and its documentation says they are all
+      private now. PlugArr sets an API-key role on the two routes it reads
+      (public address, forwarded port) in `CONFIG_ROOT/gluetun/auth/`, already
+      mounted: no compose change. The file belongs to PUID:PGID so the watch can
+      read it; what runs inside Gluetun reads the key there. The disposable
+      tunnel test gets its own key. Tried on the test bench: 401 without the
+      key, 200 for the watch (host and container) and the forwarded port.
 - [ ] Add the watch to the compose file (`user: PUID:PGID`, `stack.yml` and
       roots read-only, the stack's network) once the image is published.
 - [ ] Put it in the wizard, with the choice of which roots to watch. No option

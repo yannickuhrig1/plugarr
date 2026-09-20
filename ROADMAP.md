@@ -430,11 +430,17 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
 - [x] N'exposer la veille qu'authentifiée : même mot de passe que la console
       (`adminauth`), mêmes sessions limitées. Sans mot de passe, elle refuse
       d'écouter ailleurs que sur 127.0.0.1 (vérifié dans le conteneur).
-- [ ] Poser un fichier d'authentification pour le serveur de contrôle de
-      Gluetun. Mesuré sur v3.41.3 : `GET /v1/publicip/ip` répond encore sans
-      authentification depuis un autre conteneur, mais Gluetun prévient à chaque
-      appel que la route deviendra protégée. La veille ET le contrôle de fuite
-      de `plugarr doctor` en dépendent : à régler avant de monter Gluetun.
+- [x] Poser un fichier d'authentification pour le serveur de contrôle de
+      Gluetun (`gluetun_auth.py`). Mesuré sur v3.41.3 : `GET /v1/publicip/ip`
+      répondait encore sans authentification, mais Gluetun prévenait à chaque
+      appel que la route deviendrait protégée, et sa documentation les dit
+      toutes privées. PlugArr pose un rôle à clé d'API sur les deux routes qu'il
+      lit (adresse publique, port entrant) dans `CONFIG_ROOT/gluetun/auth/`,
+      déjà monté : aucun changement de compose. Le fichier appartient à
+      PUID:PGID pour que la veille le lise ; ce qui tourne dans Gluetun y relit
+      la clé sur place. L'essai de tunnel jetable reçoit sa propre clé. Essayé
+      sur le banc : 401 sans clé, 200 pour la veille (hôte et conteneur) et le
+      port entrant.
 - [ ] Ajouter la veille au compose (`user: PUID:PGID`, `stack.yml` et racines
       en lecture seule, réseau de la pile) quand l'image est publiée.
 - [ ] L'entrer dans l'assistant, avec le choix des racines à surveiller. Aucune

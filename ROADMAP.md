@@ -455,8 +455,18 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       en lecture seule, réseau de la pile) quand l'image est publiée.
 - [ ] L'entrer dans l'assistant, avec le choix des racines à surveiller. Aucune
       option réservée à la ligne de commande.
-- [ ] Trancher le rafraîchissement : 5 secondes comme la console, ou un flux SSE.
-      Le seul vrai temps réel côté Docker reste `/events`, et il exige le socket.
+- [x] Rafraîchissement tranché : **5 secondes, en interrogeant**, pas de flux
+      SSE. Mesuré sur le banc le 2026-09-20 : une réponse fait 3,3 Ko, et le
+      relevé coûte 0,3 s quand les conteneurs sont en cache, 2,1 s sinon — dont
+      presque tout en attente, `docker stats` ne consommant que 30 ms de
+      processeur par appel (mesure `times`, 10 appels en 0,31 s). Un flux SSE
+      n'économiserait donc pas de calcul : derrière, il faudrait interroger les
+      mêmes API, qui ne poussent rien. Le seul vrai temps réel côté Docker
+      reste `/events`, et il exige le socket. Ce qui a été corrigé, en
+      revanche : un relevé peut durer plus que l'intervalle, et la page en
+      lançait un second par-dessus. Le serveur accepte bien les appels
+      simultanés (mesuré : 3 à la fois), donc c'est à la page d'attendre la fin
+      du relevé en cours ; console et page autonome le font désormais.
 - [ ] Tout remesurer sur Linux natif : les relevés ci-dessus viennent de Docker
       Desktop.
 

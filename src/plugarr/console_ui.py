@@ -102,7 +102,8 @@ const debit=o=>o==null?'non mesuré':o<1024?o+' o/s':o<1048576?nb(o/1024,0)+' Ko
 const taille=o=>o>=1099511627776?nb(o/1099511627776,2)+' To':nb(o/1073741824,1)+' Go';
 const octets=o=>o<1048576?nb(o/1024,0)+' Ko':o<1073741824?nb(o/1048576,0)+' Mo':nb(o/1073741824,2)+' Go';
 const el=(tag,text)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e};
-async function veille(){if(document.hidden)return;try{const d=await api('veille');
+let veilleEnCours=false;
+async function veille(){if(document.hidden||veilleEnCours)return;veilleEnCours=true;try{const d=await api('veille');
 $('veille-debits').replaceChildren(...(d.debits.length?d.debits.map(c=>{const m=el('div');m.className='metric';m.append(c.name,el('strong',c.ok?'↓ '+debit(c.down)+(c.up==null?'':' · ↑ '+debit(c.up)):'Injoignable'),el('small',c.detail));return m}):[el('p','Aucun client de téléchargement installé.')]));
 const v=d.vpn;$('veille-vpn').textContent=v==null?'Aucun VPN configuré : les téléchargements sortent par votre propre adresse.':v.ok?v.ip+' · '+[v.ville,v.pays].filter(Boolean).join(', ')+(v.operateur?' · '+v.operateur:''):'Non vérifiée : '+v.detail;
 $('veille-disques').replaceChildren(...d.disques.map(g=>{const b=el('div');b.className='veille-disque';const meter=el('meter');meter.min=0;meter.max=100;meter.low=80;meter.high=90;meter.optimum=0;meter.value=g.utilise_pct;const noms=g.dossiers.length>4?g.dossiers.slice(0,4).join(', ')+' et '+(g.dossiers.length-4)+' autres':g.dossiers.join(', ');b.append(el('strong',taille(g.libre)+' libres sur '+taille(g.total)+' ('+nb(g.utilise_pct,1)+' % utilisés)'),meter,el('small',g.chemin+' · '+noms));return b}));
@@ -111,7 +112,7 @@ $('veille-conteneurs').tBodies[0].replaceChildren(...cs.map(c=>{const r=el('tr')
 const etat=[c.statut,c.sante,c.oom?'arrêté faute de mémoire':'',c.statut!=='running'&&c.code?'code '+c.code:''].filter(Boolean).join(' · ');
 r.append(el('td',c.service),el('td',etat),el('td',c.cpu_pct==null?'—':nb(c.cpu_pct,1)+' %'),el('td',c.memoire==null?'—':octets(c.memoire)+(c.memoire_max?' sur '+octets(c.memoire_max):'')),el('td',String(c.redemarrages)));
 if(alerte)r.className='veille-alerte';return r}));
-$('veille-etat').textContent='Relevé à '+new Date().toLocaleTimeString()}catch(e){$('veille-etat').textContent='Veille indisponible : '+e.message}}
+$('veille-etat').textContent='Relevé à '+new Date().toLocaleTimeString()}catch(e){$('veille-etat').textContent='Veille indisponible : '+e.message}finally{veilleEnCours=false}}
 refresh();graph();veille();setInterval(refresh,15000);setInterval(veille,5000);document.addEventListener('visibilitychange',veille);api('status').catch(()=>{});
 })();
 </script>'''

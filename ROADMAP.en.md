@@ -446,9 +446,17 @@ Dozzle reads logs and asks for the socket.
       roots read-only, the stack's network) once the image is published.
 - [ ] Put it in the wizard, with the choice of which roots to watch. No option
       reserved for the command line.
-- [ ] Settle the refresh: 5 seconds like the console, or an SSE stream. The only
-      true real time on the Docker side remains `/events`, and it requires the
-      socket.
+- [x] Refresh settled: **5 seconds, by polling**, no SSE stream. Measured on
+      the bench on 2026-09-20: a reply is 3.3 KB, and a read costs 0.3 s with
+      the containers cached, 2.1 s otherwise — nearly all of it waiting, since
+      `docker stats` only burns 30 ms of CPU per call (`times`, 10 calls in
+      0.31 s). An SSE stream would save no work: behind it, the same APIs would
+      still have to be polled, as they push nothing. The only true real time on
+      the Docker side remains `/events`, and it requires the socket. What did
+      get fixed: a read can last longer than the interval, and the page used to
+      start a second one on top. The server does accept concurrent calls
+      (measured: 3 at once), so it is up to the page to wait for the read in
+      flight; the console and the standalone page now do.
 - [ ] Measure it all again on native Linux: the figures above come from Docker
       Desktop.
 

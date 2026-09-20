@@ -63,7 +63,8 @@ const nb=(x,d)=>x.toLocaleString('fr-FR',{{minimumFractionDigits:d,maximumFracti
 const debit=o=>o==null?'non mesuré':o<1024?o+' o/s':o<1048576?nb(o/1024,0)+' Ko/s':nb(o/1048576,1)+' Mo/s';
 const taille=o=>o>=1099511627776?nb(o/1099511627776,2)+' To':nb(o/1073741824,1)+' Go';
 const octets=o=>o<1048576?nb(o/1024,0)+' Ko':o<1073741824?nb(o/1048576,0)+' Mo':nb(o/1073741824,2)+' Go';
-async function lire(){{if(document.hidden)return;try{{const r=await fetch('/api/veille',{{credentials:'same-origin'}});if(r.status===401){{location.reload();return}}const d=await r.json();
+let enCours=false;
+async function lire(){{if(document.hidden||enCours)return;enCours=true;try{{const r=await fetch('/api/veille',{{credentials:'same-origin'}});if(r.status===401){{location.reload();return}}const d=await r.json();
 $('services').replaceChildren(...(d.services||[]).map(s=>{{const c=el('div',undefined,'carte');c.append(el('span',s.name,'etat'+(s.up?' up':'')),el('small',s.up?'répond':'ne répond pas · '+s.detail));return c}}));
 $('debits').replaceChildren(...(d.debits.length?d.debits.map(c=>{{const m=el('div',undefined,'carte');m.append(c.name,el('strong',c.ok?'↓ '+debit(c.down)+(c.up==null?'':' · ↑ '+debit(c.up)):'Injoignable'),el('small',c.detail));return m}}):[el('p','Aucun client de téléchargement installé.')]));
 const v=d.vpn;$('vpn').textContent=v==null?'Aucun VPN configuré : les téléchargements sortent par votre propre adresse.':v.ok?v.ip+' · '+[v.ville,v.pays].filter(Boolean).join(', ')+(v.operateur?' · '+v.operateur:''):'Non vérifiée : '+v.detail;
@@ -72,7 +73,7 @@ const cs=d.conteneurs||[];$('conteneurs-bloc').hidden=cs.length===0;
 $('conteneurs').tBodies[0].replaceChildren(...cs.map(c=>{{const r=el('tr',undefined,(c.oom||c.statut!=='running'||c.redemarrages>2)?'alerte':undefined);
 const etat=[c.statut,c.sante,c.oom?'arrêté faute de mémoire':'',c.statut!=='running'&&c.code?'code '+c.code:''].filter(Boolean).join(' · ');
 r.append(el('td',c.service),el('td',etat),el('td',c.cpu_pct==null?'—':nb(c.cpu_pct,1)+' %'),el('td',c.memoire==null?'—':octets(c.memoire)+(c.memoire_max?' sur '+octets(c.memoire_max):'')),el('td',String(c.redemarrages)));return r}}));
-$('etat').textContent='Relevé à '+new Date().toLocaleTimeString()}}catch(e){{$('etat').textContent='Veille indisponible : '+e.message}}}}
+$('etat').textContent='Relevé à '+new Date().toLocaleTimeString()}}catch(e){{$('etat').textContent='Veille indisponible : '+e.message}}finally{{enCours=false}}}}
 lire();setInterval(lire,5000);document.addEventListener('visibilitychange',lire)}})();
 </script></body></html>"""
 

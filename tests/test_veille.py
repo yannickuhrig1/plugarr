@@ -333,6 +333,10 @@ def test_la_console_porte_le_panneau_de_veille_sans_bouton():
     # La section des conteneurs reste cachee tant qu'il n'y a rien a montrer :
     # dans un conteneur, la veille n'a pas de socket Docker.
     assert '<div id="veille-conteneurs-bloc" hidden>' in panneau
+    # Un releve peut durer plus que l'intervalle de 5 s : la page attend qu'il
+    # finisse au lieu d'en lancer un second par-dessus.
+    assert "if(document.hidden||veilleEnCours)return;veilleEnCours=true;" in page
+    assert "finally{veilleEnCours=false}" in page
 
 
 def test_un_service_qui_repond_est_en_marche_meme_en_404(tmp_path, faux_clients):

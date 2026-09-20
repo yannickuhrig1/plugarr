@@ -97,6 +97,17 @@ def test_la_page_ne_porte_aucun_bouton_d_action():
     assert boutons == 1 and "Se déconnecter" in page
 
 
+def test_un_releve_lent_n_en_declenche_pas_un_autre_par_dessus():
+    """Un relevé peut durer plus que l'intervalle de 5 s : 2,1 s de `docker
+    stats` plus les clients, qui attendent jusqu'a 4 s chacun. Le serveur, lui,
+    accepte les appels simultanes (mesure : 3 a la fois), donc c'est a la page
+    de ne pas les lancer."""
+    page = veille_serveur._PAGE.format(style="")
+
+    assert "if(document.hidden||enCours)return;enCours=true;" in page
+    assert "finally{enCours=false}" in page
+
+
 def test_la_section_des_conteneurs_est_cachee_tant_qu_elle_est_vide():
     """En conteneur, la veille n'a pas de socket Docker : la liste arrive
     vide, et la section doit disparaitre au lieu de montrer un tableau nu."""

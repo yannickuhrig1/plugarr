@@ -21,14 +21,26 @@ rien a importer.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 import pytest
 from textual.widgets import Button
 
-#: 60 passes : largement au-dela de ce qu'il faut, et sans consequence quand la
-#: condition est vraie tout de suite — la boucle sort a la premiere.
-PASSES_MAX = 60
+#: Une DUREE et non un nombre de passes : sous la charge d'une suite complete,
+#: 60 passes ont fini par ne plus suffire. Sans consequence quand la condition
+#: est vraie tout de suite : la boucle sort a la premiere passe.
+DELAI_MAX = 15.0
+
+
+async def _jusqu_a(pilot, condition: Callable[[], bool]) -> bool:
+    fin = time.monotonic() + DELAI_MAX
+    while True:
+        await pilot.pause()
+        if condition():
+            return True
+        if time.monotonic() > fin:
+            return False
 
 
 @pytest.fixture
@@ -41,11 +53,7 @@ def appuyer():
 
     async def _appuyer(pilot, selecteur: str, jusqu_a: Callable[[], bool]) -> bool:
         pilot.app.screen.query_one(selecteur, Button).press()
-        for _ in range(PASSES_MAX):
-            await pilot.pause()
-            if jusqu_a():
-                return True
-        return False
+        return await _jusqu_a(pilot, jusqu_a)
 
     return _appuyer
 
@@ -55,11 +63,7 @@ def attendre():
     """Meme chose sans appui : pour ce qu'un worker met a jour en arriere-plan."""
 
     async def _attendre(pilot, jusqu_a: Callable[[], bool]) -> bool:
-        for _ in range(PASSES_MAX):
-            await pilot.pause()
-            if jusqu_a():
-                return True
-        return False
+        return await _jusqu_a(pilot, jusqu_a)
 
     return _attendre
 

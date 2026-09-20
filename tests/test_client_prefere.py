@@ -246,14 +246,14 @@ async def test_le_tui_ne_pose_la_question_qu_avec_deux_clients_torrent(tmp_path)
     app_tui = PlugArrApp(project_dir=tmp_path)
     async with app_tui.run_test() as pilot:
         pilot.app.selection = ["sonarr", "qbittorrent"]
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         assert not pilot.app.screen.query("#client-prefere"), "question posee sans objet"
         pilot.app.pop_screen()
         await pilot.pause()
 
         pilot.app.selection = DEUX_TORRENTS
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         ecran = pilot.app.screen
         assert ecran.client_prefere_voulu() == "qbittorrent", "defaut different de la regle"

@@ -138,8 +138,15 @@ def test_une_connexion_reussie_remet_le_compteur_a_zero():
 
 
 @pytest.fixture
-def console():
-    """Une console reelle, sur un port libre, arretee a la fin."""
+def console(monkeypatch):
+    """Une console reelle, sur un port libre, arretee a la fin.
+
+    Empreinte a 1 000 iterations : ces tests portent sur la console, pas sur le
+    cout du hachage. Aux 600 000 reelles, les douze essais du test de blocage
+    prenaient 2,7 s au repos (mesure), et pouvaient approcher le delai de 10 s
+    par appel sous la charge d'une suite complete.
+    """
+    monkeypatch.setattr(adminauth, "ITERATIONS", 1_000)
     cfg = orchestrator.build_config(
         services=["sonarr"], config_root="/c", data_root="/d"
     )

@@ -22,7 +22,7 @@ def app(tmp_path):
 
 async def _goto_services(pilot) -> ServicesScreen:
     """Force le passage a l'ecran de selection sans dependre de Docker."""
-    pilot.app.push_screen(ServicesScreen())
+    await pilot.app.push_screen(ServicesScreen())
     await pilot.pause()
     return pilot.app.screen
 
@@ -126,7 +126,7 @@ async def test_switching_platform_rewrites_the_default_paths(app):
     from plugarr.layout import PROFILE_DEFAULTS, default_profile
 
     async with app.run_test() as pilot:
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
         attendu = PROFILE_DEFAULTS[default_profile()].data_root
@@ -142,7 +142,7 @@ async def test_platform_note_states_where_the_ids_come_from(app):
     """Des PUID/PGID faux cassent les permissions de toute la stack :
     l'utilisateur doit voir d'ou viennent les valeurs proposees."""
     async with app.run_test() as pilot:
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen.query_one("#plat-unraid", RadioButton).value = True
@@ -156,7 +156,7 @@ async def test_platform_note_states_where_the_ids_come_from(app):
 @pytest.mark.asyncio
 async def test_path_check_actually_creates_a_hardlink(app, tmp_path):
     async with app.run_test() as pilot:
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen.query_one("#data-root", Input).value = str(tmp_path / "data")
@@ -180,7 +180,7 @@ async def test_summary_warns_about_the_absent_vpn(app):
         pilot.app.selection = ["sonarr", "transmission"]
         pilot.app.data_root = "/tmp/x"
         pilot.app.config_root = "/tmp/y"
-        pilot.app.push_screen(SummaryScreen())
+        await pilot.app.push_screen(SummaryScreen())
         await pilot.pause()
         text = str(pilot.app.screen.query_one("#summary-warnings", Static).content)
         assert "VPN" in text
@@ -192,7 +192,7 @@ async def test_summary_shows_the_single_data_mount(app):
         pilot.app.selection = ["sonarr"]
         pilot.app.data_root = "/srv/data"
         pilot.app.config_root = "/opt/c"
-        pilot.app.push_screen(SummaryScreen())
+        await pilot.app.push_screen(SummaryScreen())
         await pilot.pause()
         text = str(pilot.app.screen.query_one("#summary-paths", Static).content)
         assert "/data dans tous les conteneurs" in text
@@ -229,7 +229,7 @@ async def test_la_page_d_acces_s_ouvre_toute_seule(app, tmp_path, monkeypatch):
         pilot.app.stack_config = cfg
         pilot.app.results = []
         (tmp_path / dashboard.FILENAME).write_text("<html></html>", encoding="utf-8")
-        pilot.app.push_screen(ReportScreen())
+        await pilot.app.push_screen(ReportScreen())
         await pilot.pause()
 
     assert ouvertes == [tmp_path / dashboard.FILENAME]
@@ -246,7 +246,7 @@ async def test_aucune_ouverture_si_la_page_manque(app, tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         pilot.app.stack_config = pilot.app.build_config()
         pilot.app.results = []
-        pilot.app.push_screen(ReportScreen())
+        await pilot.app.push_screen(ReportScreen())
         await pilot.pause()
 
     assert ouvertes == []
@@ -257,7 +257,7 @@ async def test_l_identifiant_se_choisit_dans_l_assistant(app, appuyer):
     """Demande a l'usage : tout le monde ne veut pas s'appeler « plugarr »."""
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
 
@@ -274,7 +274,7 @@ async def test_l_identifiant_se_choisit_dans_l_assistant(app, appuyer):
 async def test_un_identifiant_vide_retombe_sur_le_defaut(app, appuyer):
     async with app.run_test() as pilot:
         pilot.app.selection = ["sonarr"]
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen.query_one("#username", Input).value = "   "

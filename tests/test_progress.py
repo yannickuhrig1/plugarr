@@ -147,7 +147,7 @@ async def test_la_barre_du_tui_ne_depasse_jamais_son_total(tmp_path, monkeypatch
     app = PlugArrApp(project_dir=tmp_path)
     async with app.run_test() as pilot:
         app.selection = ["sonarr"]
-        app.push_screen(InstallScreen())
+        await app.push_screen(InstallScreen())
         await pilot.pause()
         screen = app.screen
 

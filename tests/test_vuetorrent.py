@@ -206,14 +206,14 @@ async def test_le_tui_ne_pose_la_question_qu_avec_qbittorrent(tmp_path):
     app_tui = PlugArrApp(project_dir=tmp_path)
     async with app_tui.run_test() as pilot:
         pilot.app.selection = ["sonarr", "transmission"]
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         assert not pilot.app.screen.query("#qbittorrent-ui"), "question posee sans objet"
         pilot.app.pop_screen()
         await pilot.pause()
 
         pilot.app.selection = ["sonarr", "qbittorrent"]
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         ecran = pilot.app.screen
         assert ecran.qbittorrent_ui_voulu() == "", "VueTorrent coche sans qu'on le demande"

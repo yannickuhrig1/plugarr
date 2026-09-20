@@ -37,7 +37,7 @@ def _app(tmp_path):
 async def test_le_champ_de_cle_vpn_a_une_hauteur_utilisable(tmp_path, hauteur):
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
         pilot.app.selection = ["sonarr", "qbittorrent"]
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen.query_one("#vpn-oui", RadioButton).value = True
@@ -54,7 +54,7 @@ async def test_le_champ_de_cle_vpn_a_une_hauteur_utilisable(tmp_path, hauteur):
 async def test_le_couple_openvpn_a_une_hauteur_utilisable(tmp_path, hauteur):
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
         pilot.app.selection = ["sonarr", "qbittorrent"]
-        pilot.app.push_screen(VpnScreen())
+        await pilot.app.push_screen(VpnScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen.query_one("#vpn-oui", RadioButton).value = True
@@ -71,7 +71,7 @@ async def test_le_couple_openvpn_a_une_hauteur_utilisable(tmp_path, hauteur):
 async def test_tous_les_champs_des_chemins_restent_atteignables(tmp_path, hauteur):
     """Le dernier champ ajoute est le plus expose : c'est celui qui sort."""
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
 
@@ -84,7 +84,7 @@ async def test_tous_les_champs_des_chemins_restent_atteignables(tmp_path, hauteu
 async def test_l_ecran_des_chemins_defile(tmp_path, hauteur):
     """Sans defilement, les champs du bas etaient simplement inaccessibles."""
     async with _app(tmp_path).run_test(size=(110, hauteur)) as pilot:
-        pilot.app.push_screen(PathsScreen())
+        await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         zone = pilot.app.screen.query_one("#paths")
 

@@ -43,7 +43,7 @@ async def test_intro_states_that_plugarr_provides_no_indexer(screen_app):
     """La position juridique du projet doit etre lisible a l'ecran, pas seulement
     dans le README."""
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         intro = str(pilot.app.screen.query_one("#indexers-intro", Static).content)
         assert "aucun" in intro.lower()
@@ -55,7 +55,7 @@ async def test_intro_warns_that_adding_contacts_the_indexer(screen_app):
     """Prowlarr contacte l'indexeur pour valider : l'utilisateur doit le savoir
     avant de cliquer."""
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         intro = str(pilot.app.screen.query_one("#indexers-intro", Static).content)
         assert "contacte" in intro
@@ -64,7 +64,7 @@ async def test_intro_warns_that_adding_contacts_the_indexer(screen_app):
 @pytest.mark.asyncio
 async def test_the_step_can_be_skipped(screen_app, appuyer):
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         pilot.app.results = []
         assert await appuyer(
@@ -75,7 +75,7 @@ async def test_the_step_can_be_skipped(screen_app, appuyer):
 @pytest.mark.asyncio
 async def test_add_is_disabled_until_an_indexer_is_chosen(screen_app):
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         assert pilot.app.screen.query_one("#add", Button).disabled is True
 
@@ -83,7 +83,7 @@ async def test_add_is_disabled_until_an_indexer_is_chosen(screen_app):
 @pytest.mark.asyncio
 async def test_form_shows_credentials_and_hides_tuning_fields(screen_app):
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
         await screen._render_form(DEFINITION)
@@ -97,7 +97,7 @@ async def test_form_shows_credentials_and_hides_tuning_fields(screen_app):
 @pytest.mark.asyncio
 async def test_secret_fields_are_masked_on_screen(screen_app):
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
         await screen._render_form(DEFINITION)
@@ -110,7 +110,7 @@ async def test_secret_fields_are_masked_on_screen(screen_app):
 async def test_base_url_is_prefilled_from_the_definition(screen_app):
     """Sans cela l'utilisateur devrait deviner l'adresse du tracker."""
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
         await screen._render_form(DEFINITION)
@@ -132,7 +132,7 @@ async def test_rendering_a_second_indexer_replaces_the_first_form(screen_app):
         raw={"indexerUrls": [], "fields": [{"name": "cookie", "type": "textbox"}]},
     )
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
         await screen._render_form(DEFINITION)
@@ -194,7 +194,7 @@ async def test_deux_indexeurs_aux_memes_champs_ne_tuent_pas_l_assistant(screen_a
     correspondances de « tr » plantaient a la seconde selection.
     """
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
 
@@ -210,7 +210,7 @@ async def test_deux_indexeurs_aux_memes_champs_ne_tuent_pas_l_assistant(screen_a
 async def test_dix_allers_retours_de_suite(screen_app):
     """Un utilisateur compare plusieurs indexeurs avant de choisir."""
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
 
@@ -226,7 +226,7 @@ async def test_un_nom_a_crochets_reste_lisible(screen_app):
     balisage : mal echappe, une balise fermante isolee ferait lever MarkupError
     en plein rendu de la liste."""
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen._indexers = _FauxCatalogue([JUMELLE_B, JUMELLE_A])
@@ -266,7 +266,7 @@ async def test_un_message_de_prowlarr_a_balise_ne_ferme_pas_l_assistant(screen_a
         "[https://c411.org/api/torznab?apikey=...&t=search&l"
     )
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
 
@@ -290,7 +290,7 @@ async def test_une_erreur_d_affichage_ne_remonte_pas_dans_le_worker(screen_app, 
     le worker, hors de tout `try`, et Textual arretait l'application.
     """
     async with screen_app.run_test() as pilot:
-        pilot.app.push_screen(IndexersScreen())
+        await pilot.app.push_screen(IndexersScreen())
         await pilot.pause()
         screen = pilot.app.screen
         screen._indexers = _FauxCatalogue([JUMELLE_A])

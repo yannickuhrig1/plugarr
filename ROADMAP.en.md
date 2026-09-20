@@ -320,10 +320,19 @@ LXC where nobody logs in, there was nothing.
       the interpreter's symlink, which steps out of a virtual environment. The
       service ran `/usr/bin/python3 -m plugarr` and answered "No module named
       plugarr", in a loop. It affected the per-session autostart too.
-- [ ] Administration container, as an explicit option: same image, with the
-      Docker socket, the real `stack.yml` writable and root. It covers machines
-      without systemd (Unraid, Synology, BSD). To be presented for what it is:
-      that container can do anything on the machine.
+- [x] Administration container, as an explicit option (`--console-conteneur`,
+      its own question in both wizards). The image gains a **second target**:
+      by default the watch one, **with no Docker client at all** — even with
+      the socket it could not use it, and the workflow checks that — and
+      `--target admin`, published under a distinct tag, which adds the Docker
+      client 29.8.1 and the compose plugin 5.5.1 (signed apt repo, pinned
+      versions, key fingerprint verified). 263 MB against 393 MB. The container
+      runs as **root** and that is stated everywhere: with the socket you can
+      create a privileged container, so giving it an unprivileged account would
+      be theatre. Checked on the bench on 2026-09-20 against the real
+      installation: console reached with a 401, login, the real state of the 9
+      services read from inside the container, then **Lidarr restarted through
+      the socket**. The bench was put back as it was.
 - [ ] Steps for Unraid and Synology, which have their own boot mechanisms.
 
 ---

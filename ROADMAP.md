@@ -325,10 +325,19 @@ il n'y avait rien.
       environnement virtuel. Le service lançait `/usr/bin/python3 -m plugarr`
       et répondait « No module named plugarr », en boucle. Il touchait aussi le
       lancement automatique par session.
-- [ ] Conteneur d'administration, en option explicite : même image, avec le
-      socket Docker, le vrai `stack.yml` en écriture et root. Il couvre les
-      machines sans systemd (Unraid, Synology, BSD). À présenter pour ce qu'il
-      est : ce conteneur peut tout faire sur la machine.
+- [x] Conteneur d'administration, en option explicite (`--console-conteneur`,
+      question dédiée dans les deux assistants). L'image gagne une **seconde
+      cible** : par défaut celle de la veille, **sans aucun client Docker** —
+      même avec le socket elle ne saurait pas s'en servir, et le workflow le
+      vérifie — et `--target admin`, publiée sous un tag distinct, qui ajoute
+      le client Docker 29.8.1 et le greffon compose 5.5.1 (dépôt apt signé,
+      versions épinglées, empreinte de clé vérifiée). 263 Mo contre 393 Mo.
+      Le conteneur tourne en **root** et c'est dit partout : avec le socket on
+      crée un conteneur privilégié, donc lui donner un compte sans privilège
+      serait du théâtre. Vérifié sur le banc le 2026-09-20, contre la vraie
+      installation : console jointe en 401, connexion, état réel des 9
+      services lu depuis le conteneur, puis **Lidarr redémarré à travers le
+      socket**. Banc remis dans son état d'avant l'essai.
 - [ ] Marche à suivre pour Unraid et Synology, qui ont leurs propres
       mécanismes de démarrage.
 

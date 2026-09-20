@@ -38,18 +38,17 @@ VUETORRENT_MOD = (
 #: les pieds de celui qui la regarde. Le digest est celui de l'INDEX multi
 #: architecture, donc valable pour amd64 comme pour arm64.
 VEILLE_IMAGE = (
-    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.2"
-    "@sha256:eab34e911492e899a80fe10a02ac5409cbb13a9fe02504a9b6cd29c9cbdfb551"
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.3"
+    "@sha256:c5b6b6429e8201380d17099cadc3df4b175e44cd02e0d6e7fc447bf94e571c13"
 )
 
 #: La meme PlugArr, variante `admin` : elle porte le client Docker et le
 #: greffon compose, que la console appelle. Tag DISTINCT, pour qu'elle ne soit
 #: jamais prise pour celle de la veille, qui n'a aucun client Docker.
-#:
-#: Pas encore epinglee par condensat : ce tag n'existera qu'a la publication,
-#: et un condensat invente serait pire qu'absent. A epingler des que l'image
-#: est publiee, comme `VEILLE_IMAGE`.
-CONSOLE_IMAGE = "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.3-admin"
+CONSOLE_IMAGE = (
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.3-admin"
+    "@sha256:4bff7797d6e3bd8f471d6ed58e960197245cee4babcce4bdd4d3d395281023a0"
+)
 
 #: Silo s'epingle autrement : il ne publie pas de version au sens habituel, mais
 #: un numero de construction monotone. `build-522` porte l'etiquette

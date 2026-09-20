@@ -10,12 +10,13 @@ etre une rustine plus tard, meme si la Phase 1 n'expose que la forme sans VPN.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from . import catalog, registre, veille_config
+from . import catalog, layout, registre, veille_config
 from .i18n import t
 from .models import StackConfig
 
@@ -923,6 +924,11 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
         except (OSError, NotImplementedError):
             pass
         written.append(script)
+
+    # En dernier, une fois tout ecrit : sous root, ces fichiers reviennent a
+    # l'utilisateur de la pile, sinon `plugarr` sans `sudo` ne peut plus les
+    # lire.
+    _rendre_les_artefacts(written, target_dir, cfg)
     return written
 
 
@@ -932,3 +938,28 @@ def _restrict(path: Path) -> None:
         path.chmod(0o600)
     except (OSError, NotImplementedError):
         pass
+
+
+def _rendre_les_artefacts(chemins: list[Path], dossier: Path, cfg: StackConfig) -> None:
+    """Sous root, les artefacts reviennent a l'utilisateur de la pile.
+
+    `stack.yml` et `.env` sont en 600 : ecrits par root, ils deviennent
+    illisibles a leur proprietaire legitime, et `plugarr` lance sans `sudo`
+    s'arrete sur un PermissionError. L'utilisateur est alors condamne a `sudo`
+    pour toujours, y compris pour regarder l'etat de ses services.
+
+    Le cas n'est pas theorique : c'est le chemin normal sur un NAS, ou
+    `/volume1` appartient a root et ou la creation des dossiers EXIGE `sudo`.
+    Remonte le 2026-09-20 par un membre, a qui il avait fallu dicter un `chown`
+    a la main.
+
+    Seuls les fichiers ecrits changent de main, et le dossier lui-meme : le
+    repertoire de projet peut contenir autre chose, qui ne nous regarde pas.
+    """
+    if not layout._est_root():
+        return
+    for chemin in [dossier, *chemins]:
+        try:
+            os.chown(chemin, cfg.puid, cfg.pgid, follow_symlinks=False)
+        except (OSError, AttributeError):
+            pass

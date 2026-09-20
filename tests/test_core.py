@@ -684,3 +684,50 @@ def test_le_dossier_de_recyclarr_est_repris_meme_s_il_existe_deja(tmp_path, monk
     layout.create_tree(tmp_path / "data", tmp_path / "config", ["recyclarr"], owner=(1000, 10))
 
     assert "recyclarr" in donnes, donnes
+
+
+def test_installe_en_root_les_artefacts_reviennent_a_l_utilisateur(tmp_path, monkeypatch):
+    """`stack.yml` et `.env` sont en 600. Ecrits par root, ils deviennent
+    illisibles a leur proprietaire legitime, et `plugarr` sans `sudo` s'arrete
+    sur un PermissionError : l'utilisateur est condamne a `sudo` pour toujours,
+    y compris pour regarder l'etat de ses services.
+
+    Le cas est le chemin NORMAL sur un NAS, ou `/volume1` appartient a root et
+    ou creer les dossiers EXIGE `sudo`.
+    """
+    import os as _os
+
+    from plugarr import compose as _compose
+    from plugarr import layout
+
+    donnes: dict[str, tuple[int, int]] = {}
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(
+        _os, "chown", lambda p, u, g, **kw: donnes.__setitem__(Path(p).name, (u, g)), raising=False
+    )
+
+    cfg = make_cfg(tmp_path)
+    cfg.puid, cfg.pgid = 1000, 10
+    projet = tmp_path / "projet"
+    _compose.write_artifacts(cfg, projet)
+
+    for nom in ("stack.yml", ".env", "docker-compose.yml"):
+        assert donnes.get(nom) == (1000, 10), f"{nom} laisse a root : {donnes}"
+    # Le dossier aussi : sans lui, l'utilisateur ne peut rien y reecrire.
+    assert donnes.get("projet") == (1000, 10), donnes
+
+
+def test_hors_root_les_artefacts_ne_changent_pas_de_main(tmp_path, monkeypatch):
+    """Ils appartiennent deja a celui qui les a ecrits."""
+    import os as _os
+
+    from plugarr import compose as _compose
+    from plugarr import layout
+
+    appels: list[str] = []
+    monkeypatch.setattr(layout, "_est_root", lambda: False)
+    monkeypatch.setattr(_os, "chown", lambda *a, **kw: appels.append("chown"), raising=False)
+
+    _compose.write_artifacts(make_cfg(tmp_path), tmp_path / "projet")
+
+    assert appels == []

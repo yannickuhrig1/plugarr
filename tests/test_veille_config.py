@@ -374,3 +374,136 @@ def test_la_veille_n_appelle_jamais_la_route_qui_porte_les_secrets(tmp_path, mon
     assert lignes[0]["redemarrages"] is None and lignes[0]["oom"] is None
     assert "/containers/abc/json" not in demandes, demandes
     assert "secret" not in _json.dumps(lignes)
+
+
+def test_les_releves_sont_demandes_en_parallele(tmp_path, monkeypatch):
+    """Une page vide vingt secondes est une page cassee, pour qui la regarde.
+
+    `stream=false` ne rend pas une mesure instantanee : le demon attend son
+    second echantillon de processeur avant de repondre, environ deux secondes.
+    En file, onze conteneurs coutaient 21,2 s mesurees sur le banc le
+    2026-09-20 ; la page restait vide tout ce temps, puis se remplissait d'un
+    coup. Ce test tient le parallelisme : un serveur qui traine sur chaque
+    releve, et un mur qui ne grandit pas avec le nombre de conteneurs.
+    """
+    import json as _json
+    import threading
+    import time as _time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from plugarr import veille
+
+    LENTEUR = 0.3
+    NOMBRE = 8
+
+    class _DockerLent(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            if self.path.startswith("/containers/json"):
+                corps = [
+                    {"Id": f"id{i}", "Names": [f"/plugarr-service{i}"],
+                     "State": "running", "Status": "Up 2 hours"}
+                    for i in range(NOMBRE)
+                ]
+            else:
+                _time.sleep(LENTEUR)
+                corps = {
+                    "cpu_stats": {"cpu_usage": {"total_usage": 200_000_000},
+                                  "system_cpu_usage": 20_000_000_000, "online_cpus": 2},
+                    "precpu_stats": {"cpu_usage": {"total_usage": 100_000_000},
+                                     "system_cpu_usage": 10_000_000_000},
+                    "memory_stats": {"usage": 500, "limit": 4096,
+                                     "stats": {"inactive_file": 200}},
+                }
+            brut = _json.dumps(corps).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(brut)))
+            self.end_headers()
+            self.wfile.write(brut)
+
+    serveur = ThreadingHTTPServer(("127.0.0.1", 0), _DockerLent)
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    try:
+        cfg = _cfg(tmp_path)
+        monkeypatch.setenv(
+            veille.VAR_API_DOCKER, f"http://127.0.0.1:{serveur.server_address[1]}"
+        )
+        veille._cache_conteneurs.clear()
+        depart = _time.monotonic()
+        lignes = veille.conteneurs(cfg, interne=True)
+        duree = _time.monotonic() - depart
+    finally:
+        serveur.shutdown()
+        veille._cache_conteneurs.clear()
+
+    assert len(lignes) == NOMBRE
+    assert all(ligne["cpu_pct"] == 2.0 for ligne in lignes)
+    # En file il faudrait NOMBRE * LENTEUR, soit 2,4 s. La moitie de ce mur
+    # laisse toute la marge d'une machine chargee, et reste loin du sequentiel.
+    assert duree < NOMBRE * LENTEUR / 2, f"{duree:.2f} s pour {NOMBRE} conteneurs"
+
+
+def test_le_parallelisme_ne_depasse_pas_le_plafond(tmp_path, monkeypatch):
+    """Le plafond existe pour ne pas ouvrir une rafale de connexions au proxy,
+    qui est un HAProxy avec ses propres limites. Un test le tient, sinon il ne
+    serait qu'un commentaire."""
+    import json as _json
+    import threading
+    import time as _time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from plugarr import veille
+
+    monkeypatch.setattr(veille, "MESURES_SIMULTANEES", 2)
+    simultanes = 0
+    sommet = 0
+    verrou = threading.Lock()
+
+    class _Compteur(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            nonlocal simultanes, sommet
+            if self.path.startswith("/containers/json"):
+                corps = [
+                    {"Id": f"id{i}", "Names": [f"/plugarr-service{i}"],
+                     "State": "running", "Status": "Up"}
+                    for i in range(6)
+                ]
+            else:
+                with verrou:
+                    simultanes += 1
+                    sommet = max(sommet, simultanes)
+                _time.sleep(0.2)
+                with verrou:
+                    simultanes -= 1
+                corps = {"memory_stats": {"usage": 500, "limit": 4096, "stats": {}}}
+            brut = _json.dumps(corps).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(brut)))
+            self.end_headers()
+            self.wfile.write(brut)
+
+    serveur = ThreadingHTTPServer(("127.0.0.1", 0), _Compteur)
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    try:
+        cfg = _cfg(tmp_path)
+        monkeypatch.setenv(
+            veille.VAR_API_DOCKER, f"http://127.0.0.1:{serveur.server_address[1]}"
+        )
+        veille._cache_conteneurs.clear()
+        veille.conteneurs(cfg, interne=True)
+    finally:
+        serveur.shutdown()
+        veille._cache_conteneurs.clear()
+
+    assert sommet <= 2, f"{sommet} releves en meme temps pour un plafond de 2"

@@ -474,6 +474,22 @@ Dozzle reads logs and asks for the socket.
       exist only in that inspection: they stay readable on the host and absent
       in the container, an empty column rather than one more secret inside a
       reachable process.
+      **End-to-end test on the bench**, with an image built from the branch:
+      eleven containers shown with CPU and memory, figures checked against the
+      host's `docker stats` (jellyfin 156.4 MiB on both sides, sabnzbd
+      75.71 MiB). The proxy's log settles it better than re-reading the code:
+      one request for the list, eleven for the stats, **none for
+      `/containers/{id}/json`**. None of the sixteen secrets in `stack.yml`
+      appear in the response; the reduced file keeps only the five the watch
+      actually uses. Page checked in a real browser: the restart column shows
+      "—", no `null`, no `NaN`, no exception.
+      **A defect this test found, and fixed**: the stats were fetched one after
+      another, and `stream=false` does not return an instant measurement — the
+      daemon waits for its second CPU sample. Eleven containers cost 21.2 s,
+      and the page stayed empty throughout. The stats now go out in parallel
+      (`MESURES_SIMULTANEES`): 2.1 s with a cold daemon, 2.4 s from login to a
+      filled table in the browser. Two tests hold the parallelism and its cap;
+      the first does fail, at 2.7 s, if the code goes back to sequential.
 - [ ] Container logs in the watch: to be weighed separately, a log can carry
       credentials (Gluetun writes its configuration at startup).
 - [x] Expose the watch only behind authentication: same password as the

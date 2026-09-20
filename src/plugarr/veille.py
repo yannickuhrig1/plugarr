@@ -70,6 +70,19 @@ CONTROLE_GLUETUN_INTERNE = "http://gluetun:8000/v1/publicip/ip"
 #: cache, Docker travaillerait presque sans arret.
 DUREE_CACHE_CONTENEURS = 10.0
 
+#: Delai d'UN releve de statistiques, par l'API. Plus large que `DELAI` : le
+#: demon ne repond qu'apres avoir pris son second echantillon de processeur,
+#: environ deux secondes. A 4 s, un hote charge aurait rendu des colonnes vides
+#: sans que rien n'aille mal.
+DELAI_STATS = 12.0
+
+#: Combien de releves simultanes. Le cout se lit en VAGUES : au-dela de ce
+#: nombre, les conteneurs restants attendent un tour de plus, et chaque tour
+#: coute les deux secondes du demon. Mesure sur le banc le 2026-09-20, onze
+#: conteneurs : 21,2 s en file, 4,0 s par vagues de huit, 2,0 s en une vague.
+#: Seize couvre donc une pile complete d'un coup, sans rafale pour autant.
+MESURES_SIMULTANEES = 16
+
 _cache_vpn: dict[str, tuple[float, dict]] = {}
 _verrou_vpn = threading.Lock()
 _cache_conteneurs: dict[str, tuple[float, list[dict]]] = {}
@@ -297,15 +310,25 @@ def _conteneurs_par_api(cfg: StackConfig, base: str) -> list[dict]:
     ICI, dans ce code, et nulle part ailleurs : une veille joignable depuis le
     reseau n'a pas a tenir ces secrets en memoire. Ces deux colonnes restent
     lisibles sur l'hote, par la console, et absentes ici.
+
+    Les statistiques sont demandees EN PARALLELE, et ce n'est pas une
+    optimisation de confort. `stream=false` ne rend pas une mesure instantanee :
+    un pourcentage de processeur se calcule entre deux echantillons, et le
+    demon attend donc le second avant de repondre, environ deux secondes. En
+    file, onze conteneurs coutaient 21,2 s mesurees sur le banc le 2026-09-20,
+    pendant lesquelles la page restait vide. En parallele, 2,0 s : le mur d'un
+    seul appel. `one-shot=true` repondrait tout de suite, mais sans echantillon
+    precedent : le processeur serait alors toujours absent.
     """
     filtre = json.dumps({"label": [f"com.docker.compose.project={cfg.project_name}"]})
     lignes: list[dict] = []
-    with httpx.Client(base_url=base, timeout=DELAI) as http:
+    with httpx.Client(base_url=base, timeout=DELAI_STATS) as http:
         liste = http.get("/containers/json", params={"all": "1", "filters": filtre})
         liste.raise_for_status()
-        for brut in liste.json():
+        bruts = liste.json()
+        for brut in bruts:
             nom = (brut.get("Names") or ["/?"])[0].lstrip("/")
-            ligne = {
+            lignes.append({
                 "nom": nom,
                 "service": nom[len(cfg.project_name) + 1:] if nom.startswith(cfg.project_name) else nom,
                 "statut": str(brut.get("State") or ""),
@@ -319,18 +342,31 @@ def _conteneurs_par_api(cfg: StackConfig, base: str) -> list[dict]:
                 "cpu_pct": None,
                 "memoire": None,
                 "memoire_max": None,
-            }
-            if ligne["statut"] == "running":
-                try:
-                    mesure = http.get(f"/containers/{brut['Id']}/stats", params={"stream": "false"})
-                    mesure.raise_for_status()
-                    stats = mesure.json()
-                except (httpx.HTTPError, ValueError, KeyError):
-                    stats = {}
-                if stats:
-                    ligne["cpu_pct"] = _pourcent_cpu(stats)
-                    ligne["memoire"], ligne["memoire_max"] = _memoire(stats)
-            lignes.append(ligne)
+            })
+
+        def mesurer(identifiant: str) -> dict:
+            try:
+                mesure = http.get(f"/containers/{identifiant}/stats", params={"stream": "false"})
+                mesure.raise_for_status()
+                return mesure.json()
+            except (httpx.HTTPError, ValueError, KeyError):
+                return {}
+
+        vivants = [
+            (ligne, str(brut.get("Id") or ""))
+            for ligne, brut in zip(lignes, bruts, strict=True)
+            if ligne["statut"] == "running" and brut.get("Id")
+        ]
+        if vivants:
+            with ThreadPoolExecutor(max_workers=min(len(vivants), MESURES_SIMULTANEES)) as bassin:
+                for ligne, stats in zip(
+                    (ligne for ligne, _ in vivants),
+                    bassin.map(mesurer, (ident for _, ident in vivants)),
+                    strict=True,
+                ):
+                    if stats:
+                        ligne["cpu_pct"] = _pourcent_cpu(stats)
+                        ligne["memoire"], ligne["memoire_max"] = _memoire(stats)
     return sorted(lignes, key=lambda ligne: ligne["nom"])
 
 

@@ -485,6 +485,22 @@ deux voies fragiles. Dozzle, lui, lit les journaux et demande le socket.
       redémarrages et les kills OOM ne vivent que dans cette inspection : ils
       restent lisibles sur l'hôte et absents en conteneur, colonne vide plutôt
       qu'un secret de plus dans un processus joignable.
+      **Essai bout en bout sur le banc**, image construite depuis la branche :
+      onze conteneurs affichés avec processeur et mémoire, chiffres confrontés
+      à `docker stats` de l'hôte (jellyfin 156,4 Mio des deux côtés, sabnzbd
+      75,71 Mio). Le journal du proxy tranche mieux qu'une relecture de code :
+      une requête sur la liste, onze sur les statistiques, **zéro sur
+      `/containers/{id}/json`**. Aucun des seize secrets de `stack.yml` dans la
+      réponse ; le fichier réduit n'en garde que cinq, ceux dont la veille se
+      sert. Page vérifiée dans un vrai navigateur : colonne des redémarrages
+      à « — », ni `null` ni `NaN`, aucune exception.
+      **Défaut trouvé par cet essai, et corrigé** : les relevés partaient en
+      file, et `stream=false` ne rend pas une mesure instantanée — le démon
+      attend son second échantillon de processeur. Onze conteneurs coûtaient
+      21,2 s, pendant lesquelles la page restait vide. Relevés mis en parallèle
+      (`MESURES_SIMULTANEES`) : 2,1 s démon froid, 2,4 s entre la connexion et
+      le tableau rempli dans le navigateur. Deux tests tiennent le parallélisme
+      et son plafond ; le premier échoue bien en 2,7 s si on revient en file.
 - [ ] Journaux des conteneurs dans la veille : à peser à part, un journal peut
       porter des identifiants (Gluetun écrit sa configuration au démarrage).
 - [x] N'exposer la veille qu'authentifiée : même mot de passe que la console

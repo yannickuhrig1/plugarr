@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from . import catalog, registre
+from . import catalog, registre, veille_config
 from .i18n import t
 from .models import StackConfig
 
@@ -145,6 +145,56 @@ def _gluetun_block(cfg: StackConfig) -> dict:
         "volumes": ["${CONFIG_ROOT}/gluetun:/gluetun"],
         "ports": ports,
         "networks": [NETWORK_NAME],
+    }
+
+
+def _veille_block(cfg: StackConfig) -> dict:
+    """La veille de PlugArr, dans la pile qu'elle surveille.
+
+    Ce que ce conteneur apporte, et que `plugarr autostart` ne peut pas : sur
+    un NAS ou personne n'ouvre de session — Unraid, Synology, un BSD — il n'y
+    a aujourd'hui aucune surveillance du tout. En `restart: unless-stopped`,
+    celle-ci survit au redemarrage et se consulte depuis un telephone.
+
+    Il ne peut RIEN changer, et sa declaration le dit :
+
+    - il lit une configuration REDUITE (`veille_config`), sans la cle du VPN
+      ni les cles API dont il ne se sert pas ;
+    - il tourne sous PUID:PGID, jamais en root ;
+    - ses montages sont en lecture seule, y compris son propre systeme de
+      fichiers ;
+    - aucun socket Docker : la section des conteneurs disparait d'elle-meme.
+
+    Les racines sont montees a LEUR chemin de l'hote, et non sous `/config` :
+    la veille mesure la place libre des dossiers que la configuration nomme.
+    """
+    interne = 7374
+    return {
+        "image": catalog.VEILLE_IMAGE,
+        "container_name": f"{cfg.project_name}-veille",
+        "restart": "unless-stopped",
+        "labels": {"plugarr.managed": "true", "plugarr.service": "veille"},
+        "user": "${PUID}:${PGID}",
+        "command": [
+            "veille",
+            "--project-dir",
+            f"${{CONFIG_ROOT}}/{veille_config.DOSSIER}",
+            "--host",
+            "0.0.0.0",
+            f"--port={interne}",
+            "--interne",
+        ],
+        "environment": {"TZ": "${TZ}"},
+        "volumes": [
+            "${CONFIG_ROOT}:${CONFIG_ROOT}:ro",
+            "${DATA_ROOT}:${DATA_ROOT}:ro",
+        ],
+        "ports": [f"{cfg.veille_port}:{interne}"],
+        "networks": [NETWORK_NAME],
+        "read_only": True,
+        # Une page joignable depuis le reseau local, voire le telephone : rien
+        # de ce qu'elle lance ne doit pouvoir gagner de droits.
+        "security_opt": ["no-new-privileges:true"],
     }
 
 
@@ -500,6 +550,9 @@ def build_compose(cfg: StackConfig) -> dict:
         if not any(cfg.enabled(sid) and cfg.vpn.protects(sid) for sid in catalog.DOWNLOAD_CLIENTS):
             raise ValueError("VPN active mais aucun client selectionne ne doit l'utiliser")
         services = {"gluetun": _gluetun_block(cfg), **services}
+    if cfg.veille_enabled:
+        # En dernier : elle regarde les autres, rien ne depend d'elle.
+        services["veille"] = _veille_block(cfg)
     doc: dict[str, Any] = {
         "name": cfg.project_name,
         "services": services,

@@ -415,6 +415,19 @@ def install(
             "est telecharge au premier demarrage, puis garde en cache."
         ),
     ),
+    veille: bool | None = typer.Option(
+        None,
+        "--veille/--sans-veille",
+        help=t(
+            "Page de veille en lecture seule, dans un conteneur de la pile. "
+            "Elle survit au redemarrage sans qu'une session soit ouverte."
+        ),
+    ),
+    veille_port: int | None = typer.Option(
+        None,
+        "--veille-port",
+        help=t("Port de la page de veille sur l'hote. 7374 par defaut."),
+    ),
 ) -> None:
     """Deploie et cable la stack de bout en bout, sans interaction."""
     selection = [s.strip() for s in services.split(",") if s.strip()]
@@ -556,6 +569,11 @@ def install(
             raise typer.Exit(1)
         cfg.qbittorrent_ui = interface
 
+    if veille is not None:
+        cfg.veille_enabled = veille
+    if veille_port is not None:
+        cfg.veille_port = veille_port
+
     # Reprendre AVANT le recapitulatif : c'est lui qui doit montrer ce qui sera
     # reellement pose. Reprendre apres reviendrait a annoncer une chose et a en
     # ecrire une autre.
@@ -598,6 +616,8 @@ def install(
                     ("recyclarr_templates", bool(chosen)),
                     ("client_prefere", bool(client_prefere)),
                     ("qbittorrent_ui", qbittorrent_ui is not None),
+                    ("veille_enabled", veille is not None),
+                    ("veille_port", veille_port is not None),
                 )
                 if donne
             }

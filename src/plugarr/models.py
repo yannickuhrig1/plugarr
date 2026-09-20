@@ -347,7 +347,7 @@ INTERFACES_QBITTORRENT = ("", "vuetorrent")
 class StackConfig(BaseModel):
     """Etat canonique versionnable (stack.yml)."""
 
-    version: int = 4
+    version: int = 5
     project_name: str = "plugarr"
     platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
 
@@ -406,6 +406,13 @@ class StackConfig(BaseModel):
     #: VueTorrent, pose par un mod LinuxServer epingle (voir
     #: `catalog.VUETORRENT_MOD` et `compose`).
     qbittorrent_ui: str = ""
+    #: Veille en conteneur : une page en lecture seule, qui survit au
+    #: redemarrage sans qu'une session soit ouverte. Sur un NAS, c'est la seule
+    #: facon d'avoir une surveillance : `plugarr autostart` ne connait que
+    #: Windows et systemd utilisateur.
+    veille_enabled: bool = False
+    #: Port publie sur l'hote. 7374 par defaut, comme `plugarr veille`.
+    veille_port: int = 7374
     #: Repertoire des artefacts, necessaire pour lancer une commande ponctuelle.
     #: Renseigne a l'execution, pas persiste : il depend d'ou l'on se trouve.
     project_dir: object | None = Field(default=None, exclude=True)

@@ -188,6 +188,8 @@ _REGLAGES: tuple[tuple[str, str], ...] = (
     ("recyclarr_templates", "profils de qualite"),
     ("client_prefere", "client de telechargement prefere"),
     ("qbittorrent_ui", "interface de qBittorrent"),
+    ("veille_enabled", "veille en conteneur"),
+    ("veille_port", "port de la veille"),
 )
 
 

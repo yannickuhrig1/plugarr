@@ -71,6 +71,10 @@ class PlugArrApp(App):
         #: Interface web de qBittorrent. None = pas encore demandee : l'ecran
         #: du VPN pre-coche alors le choix de l'installation en place.
         self.qbittorrent_ui: str | None = None
+        #: Veille en conteneur. None = pas encore demandee : l'ecran des
+        #: chemins pre-coche alors ce que porte l'installation en place.
+        self.veille_enabled: bool | None = None
+        self.veille_port: int = 7374
         self.platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
         #: Template TRaSH choisi par service. Vide = celui par defaut.
         self.recyclarr_templates: dict[str, str] = {}
@@ -140,6 +144,9 @@ class PlugArrApp(App):
         )
         if "qbittorrent" in cfg.services:
             cfg.qbittorrent_ui = self.qbittorrent_ui or ""
+        if self.veille_enabled is not None:
+            cfg.veille_enabled = self.veille_enabled
+            cfg.veille_port = self.veille_port
 
         # Une installation deja presente : on reprend ce qu'elle portait plutot
         # que de l'effacer. Le VPN est le cas grave — sans cela il disparait en
@@ -171,7 +178,13 @@ class PlugArrApp(App):
                     | ({"client_prefere"} if cfg.client_prefere else set())
                     # Demande a l'ecran, qui partait du choix en place :
                     # « interface d'origine » est alors un choix, pas un oubli.
-                    | ({"qbittorrent_ui"} if self.qbittorrent_ui is not None else set()),
+                    | ({"qbittorrent_ui"} if self.qbittorrent_ui is not None else set())
+                    # Meme raison : decocher la veille est un choix.
+                    | (
+                        {"veille_enabled", "veille_port"}
+                        if self.veille_enabled is not None
+                        else set()
+                    ),
                 )
                 # Ecrire ici les artefacts d'une pile installee ailleurs
                 # donnerait DEUX repertoires de projet portant le meme nom de

@@ -93,6 +93,8 @@ class WizardInput(BaseModel):
     reset_config: bool = False
     client_prefere: str = ""
     qbittorrent_ui: str = ""
+    veille_enabled: bool = False
+    veille_port: int = 7374
     remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
 
 
@@ -255,6 +257,8 @@ class WizardState:
                 "recyclarr_templates": cfg.recyclarr_templates if cfg else {},
                 "client_prefere": cfg.client_prefere if cfg else "",
                 "qbittorrent_ui": cfg.qbittorrent_ui if cfg else "",
+                "veille_enabled": cfg.veille_enabled if cfg else False,
+                "veille_port": cfg.veille_port if cfg else 7374,
                 "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
                 "reprendre": cfg is not None,
                 "reset_config": False,
@@ -381,6 +385,10 @@ class WizardState:
         if form.qbittorrent_ui and not cfg.enabled("qbittorrent"):
             raise ValueError("VueTorrent demande que qBittorrent soit selectionne.")
         cfg.qbittorrent_ui = form.qbittorrent_ui
+        if not 1 <= form.veille_port <= 65535:
+            raise ValueError("Port de la veille invalide.")
+        cfg.veille_enabled = form.veille_enabled
+        cfg.veille_port = form.veille_port
         cfg.recyclarr_templates = form.recyclarr_templates
         if form.recyclarr_templates:
             if self.demo:
@@ -411,6 +419,10 @@ class WizardState:
                     # Toujours impose : le formulaire part du choix precedent,
                     # et « interface d'origine » est un choix, pas un oubli.
                     "qbittorrent_ui",
+                    # Meme raison : « pas de veille » est un choix du
+                    # formulaire, pas un oubli a completer par l'ancienne.
+                    "veille_enabled",
+                    "veille_port",
                     *(("client_prefere",) if form.client_prefere else ()),
                     *(("vpn",) if cfg.vpn.enabled else ()),
                 },
@@ -1083,6 +1095,8 @@ class WizardState:
                 ) if cfg.enabled("sabnzbd") else None,
                 "recyclarr_templates": cfg.recyclarr_templates,
                 "qbittorrent_ui": cfg.qbittorrent_ui,
+                "veille_enabled": cfg.veille_enabled,
+                "veille_port": cfg.veille_port,
                 "client_prefere": next(
                     (
                         sid

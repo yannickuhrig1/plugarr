@@ -180,6 +180,26 @@ EN: dict[str, str] = {
         "The watch listens on the network but no password is set. "
         "Run `plugarr admin-password` on the host first."
     ),
+    "Page de veille en lecture seule, dans un conteneur de la pile. "
+    "Elle survit au redemarrage sans qu'une session soit ouverte.": (
+        "Read-only watch page, in a container of the stack. It survives a "
+        "reboot without anyone logging in."
+    ),
+    "Port de la page de veille sur l'hote. 7374 par defaut.": (
+        "Host port of the watch page. 7374 by default."
+    ),
+    "veille en conteneur": "watch in a container",
+    "port de la veille": "watch port",
+    "Page de veille [dim](lecture seule : disques, debits, VPN, conteneurs)[/dim]": (
+        "Watch page [dim](read-only: disks, throughput, VPN, containers)[/dim]"
+    ),
+    "Installer la page de veille dans la pile": "Install the watch page in the stack",
+    "Port de la veille": "Watch port",
+    "[b]Veille[/b]         page en lecture seule sur le port "
+    "{port} [dim](mot de passe de la console)[/dim]": (
+        "[b]Watch[/b]          read-only page on port "
+        "{port} [dim](console password)[/dim]"
+    ),
     "interface de qBittorrent": "qBittorrent interface",
     "Interface web de qBittorrent": "qBittorrent web interface",
     "Interface d'origine": "Original interface",

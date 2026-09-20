@@ -662,6 +662,22 @@ class PathsScreen(WizardScreen):
             )
             yield Input(value="localhost", id="host")
 
+            # La veille tient ici, avec l'adresse et le fuseau : elle porte sur
+            # la MACHINE, pas sur un service. Sur un NAS ou personne n'ouvre de
+            # session, c'est la seule surveillance possible.
+            yield Label(
+                "Page de veille "
+                "[dim](lecture seule : disques, debits, VPN, conteneurs)[/dim]",
+                classes="group-title",
+            )
+            yield Checkbox(
+                "Installer la page de veille dans la pile",
+                value=_veille_en_place(self.app),
+                id="veille",
+            )
+            yield Label("Port de la veille", classes="group-title")
+            yield Input(value=str(self.app.veille_port), id="veille-port")
+
             yield Rule()
             yield Static(id="paths-check")
         yield Horizontal(
@@ -769,6 +785,9 @@ class PathsScreen(WizardScreen):
         choisie = self.query_one("#langue", Select).value
         self.app.language = choisie if isinstance(choisie, str) else "en"
         self.app.host = self.query_one("#host", Input).value.strip() or "localhost"
+        self.app.veille_enabled = bool(self.query_one("#veille", Checkbox).value)
+        port = self.query_one("#veille-port", Input).value.strip()
+        self.app.veille_port = int(port) if port.isdigit() and 0 < int(port) < 65536 else 7374
         self.app.platform = self.platform()
         # Le VPN d'abord, s'il y a un trafic a proteger. Puis les profils de
         # qualite, s'ils ont un sens. Chaque ecran facultatif sait s'effacer.
@@ -1352,6 +1371,23 @@ def _interface_qbittorrent_en_place(app) -> str:
     return trouvee.cfg.qbittorrent_ui if trouvee else ""
 
 
+def _veille_en_place(app) -> bool:
+    """La veille de l'installation en place, pour pre-cocher la case.
+
+    Meme raison qu'au-dessus : sans cela, une reinstallation par le TUI
+    retirerait du compose une veille que l'on n'a pas demande a enlever.
+    """
+    from .. import reprise
+
+    if app.veille_enabled is not None:
+        return app.veille_enabled
+    try:
+        trouvee = reprise.trouver(Path(app.project_dir or "."), app.config_root)
+    except Exception:  # noqa: BLE001 - version future, fichier illisible
+        return False
+    return bool(trouvee.cfg.veille_enabled) if trouvee else False
+
+
 def _suite_apres_vpn(app) -> None:
     """Ecran suivant : les profils de qualite s'ils ont un sens, sinon la fin."""
     if "recyclarr" in app.selection and any(
@@ -1427,6 +1463,16 @@ class SummaryScreen(WizardScreen):
                 t(
                     "[b]qBittorrent[/b]    interface VueTorrent [dim](telechargee au "
                     "premier demarrage, puis gardee en cache)[/dim]"
+                )
+            )
+        # Comme Gluetun, la veille ajoute un conteneur absent du tableau : le
+        # recapitulatif doit dire ce qui sera reellement pose.
+        if cfg.veille_enabled:
+            lignes.append(
+                t(
+                    "[b]Veille[/b]         page en lecture seule sur le port "
+                    "{port} [dim](mot de passe de la console)[/dim]",
+                    port=cfg.veille_port,
                 )
             )
         # Un VPN configure ajoute un conteneur que le tableau ci-dessus ne montre

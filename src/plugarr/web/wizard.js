@@ -10,6 +10,7 @@ const E = (tag, text, cls) => {
 
 const EN = {
   qbUiTitle:'qBittorrent web interface', qbUiHelp:'VueTorrent replaces the qBittorrent interface with a more modern one, also handy on a phone. Sonarr, Radarr and mobile apps are not affected.', qbUiOrigin:'Original interface', qbUiVue:'VueTorrent', qbUiTradeoff:'The first qBittorrent start needs Internet to download VueTorrent (version pinned by PlugArr). It is then kept in the qBittorrent folder and survives restarts without Internet. To go back, choose the original interface and run the installation again.', qbUiShort:'qBittorrent interface',
+  veilleTitle:'Watch page', veilleHelp:'A read-only page: free space, throughput, VPN exit, container CPU and memory. It runs inside the stack, survives a reboot even when nobody logs in, and can be read from a phone. It can neither stop nor change anything.', veilleEnable:'Install the watch page', veilleNote:'It asks for the console password. Without a password set, it only listens on this machine.', veillePort:'Watch port', veilleShort:'Watch', veilleOn:'Installed',
   setup:'INSTALLATION', local:'On your computer', localDescription:'Your settings stay in PlugArr.', tui:'Open terminal TUI', quit:'Close wizard', assistant:'Configuration assistant', demoNotice:'Demo mode — no real installation, no Docker calls.', existingNotice:'Existing installation detected: you can resume its settings or start fresh before confirming.', loading:'Loading your assistant…',
   step1:'STEP 01 / 06', step2:'STEP 02 / 06', step3:'STEP 03 / 06', step4:'STEP 04 / 06', step5:'STEP 05 / 06', step6:'STEP 06 / 06',
   servicesTitle:'Your stack, your way.', servicesIntro:'Check Docker, use the backup tools if needed, then choose your applications. PlugArr will add their dependencies.', selectionHelp:'Editable before installation',
@@ -32,7 +33,7 @@ const EN = {
 };
 
 const FR = {
-  qbUiShort:'Interface de qBittorrent',
+  qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée',
   services:'Applications', folders:'Dossiers', vpn:'VPN', quality:'Qualité', review:'Vérification', installation:'Installation', arr:'Automatisation', download:'Téléchargements', media:'Médiathèques', ui:'Interfaces', selected:'applications sélectionnées', dependencies:'dépendances', plannedLinks:'liens à configurer', defaultProfile:'Défaut PlugArr', profile:'Profil',
   checking:'Vérification de la configuration…', install:'Confirmer et installer', simulate:'Lancer la simulation', blocked:'Résolvez les contrôles bloquants avant de continuer.', demoCheck:'Les contrôles sont simulés. La disponibilité de Docker n’a pas été vérifiée.', ready:'Prêt pour confirmation', running:'Installation en cours…', done:'Installation terminée', partial:'Installation terminée avec des erreurs de câblage', error:'Installation interrompue', demoDone:'Simulation terminée — rien n’a été installé.', idle:'En attente de lancement',
   checkingTemplates:'Chargement des profils disponibles…', noTemplates:'Impossible de charger les profils. Conservez les profils par défaut ou réessayez.', templatesReady:'Profils disponibles chargés.', bundledProfiles:'Catalogue complet embarqué dans cette démo.', saving:'Enregistrement du choix…', sessionMissing:'Session absente. Ouvrez le lien complet affiché dans le terminal.', networkError:'Connexion perdue. Gardez le terminal PlugArr ouvert, puis réessayez.', noSelection:'Choisissez au moins une application.', dockerRequired:'Docker doit être disponible avant l’installation.', switched:'Retournez au terminal : le TUI s’ouvre. Les saisies web non enregistrées ne sont pas transférées.', retryWarning:'Relisez les réglages et relancez les vérifications avant de réessayer.', unavailable:'Indisponible', vpnOn:'Activé', vpnOff:'Désactivé', simulation:'SIMULATION', localBadge:'LOCAL', profile:'Profil', notInstalled:'La console de démonstration s’ouvre dans un nouvel onglet. Aucun service n’a été installé.', progressError:'Progression momentanément indisponible. Reconnexion…', optional:'facultatif', qualityInherited:'Profil existant', sizeEstimate:'Taille indicative', movie2h:'film de 2 h', episode45:'épisode de 45 min',
@@ -348,6 +349,8 @@ function readFields() {
   form.qbittorrent_ui = effective.includes('qbittorrent')
     ? (document.querySelector('input[name="qbittorrent-ui"]:checked')?.value || '')
     : '';
+  form.veille_enabled = $('veille-enabled').checked;
+  form.veille_port = Number($('veille-port').value) || 7374;
   form.client_prefere = competingClients().length
     ? (document.querySelector('input[name="preferred-client"]:checked')?.value || '')
     : '';
@@ -381,6 +384,8 @@ function fillFields() {
   if (sabRoute) sabRoute.checked = true;
   const qbUi = document.querySelector(`input[name="qbittorrent-ui"][value="${form.qbittorrent_ui || ''}"]`);
   if (qbUi) qbUi.checked = true;
+  $('veille-enabled').checked = !!form.veille_enabled;
+  $('veille-port').value = form.veille_port || 7374;
   $('vpn-provider').value = form.vpn.provider;
   $('vpn-type').value = form.vpn.vpn_type;
   $('vpn-key').value = form.vpn.wireguard_private_key;
@@ -510,6 +515,7 @@ function renderReview() {
     [tr('projectName'), plan.project_name], [tr('projectPath'), plan.project_dir], [tr('address'), plan.host], [tr('vpn'), tr(plan.vpn ? 'vpnOn' : 'vpnOff')],
     ...(plan.sabnzbd_route ? [[tr('sabRoute'), tr(plan.sabnzbd_route === 'vpn' ? 'sabVpnShort' : 'sabDirectShort')]] : []),
     ...(plan.qbittorrent_ui ? [[tr('qbUiShort'), tr('qbUiVue')]] : []),
+    ...(plan.veille_enabled ? [[tr('veilleShort'), `${tr('veilleOn')} · ${plan.veille_port}`]] : []),
     ...(plan.client_prefere ? [[tr('preferredShort'), bootstrap.catalog.find(entry => entry.id === plan.client_prefere)?.name || plan.client_prefere]] : []),
     [tr('dataRoot'), plan.data_root], [tr('configRoot'), plan.config_root], [`${tr('puid')}:${tr('pgid')}`, `${plan.puid}:${plan.pgid}`], [`${tr('umask')} / TZ`, `${plan.umask} · ${plan.timezone}`],
   ]) grid.append(summaryBox(label, value));

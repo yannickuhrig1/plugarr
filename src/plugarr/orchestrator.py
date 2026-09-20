@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, compose, dashboard, gluetun_auth, seed, vpncheck
+from . import catalog, compose, dashboard, gluetun_auth, seed, veille_config, vpncheck
 from .clients.arr import ArrClient
 from .i18n import t
 from .layout import CONTAINER_PATHS, PROFILE_DEFAULTS, create_tree, resolve_ids
@@ -655,6 +655,11 @@ def seed_all(cfg: StackConfig) -> list[str]:
         # Avant le demarrage de Gluetun : il ne lit ce fichier qu'au lancement.
         _ecrit, message = gluetun_auth.assurer(cfg)
         actions.append(f"gluetun : {message}")
+    if cfg.veille_enabled:
+        # La veille ne peut pas lire `stack.yml`, en 600 pour le compte qui
+        # installe : elle recoit une version reduite, qui lui appartient.
+        veille_config.ecrire(cfg)
+        actions.append("veille : configuration reduite ecrite")
     return actions
 
 

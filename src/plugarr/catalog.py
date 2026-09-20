@@ -33,6 +33,15 @@ VUETORRENT_MOD = (
     "@sha256:f6445ce1eefc597650d4f469ad7b18e35451ce79fc9588f4276a2a0221ca793e"
 )
 
+#: PlugArr lui-meme, pour la veille en conteneur. Epingle tag ET digest, comme
+#: tout le reste du catalogue : une page qui surveille ne doit pas changer sous
+#: les pieds de celui qui la regarde. Le digest est celui de l'INDEX multi
+#: architecture, donc valable pour amd64 comme pour arm64.
+VEILLE_IMAGE = (
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.1"
+    "@sha256:0c7ea227f33ecbe43c8153a0a43895477ad7e250f55fbcdd9639c562657fa200"
+)
+
 #: Silo s'epingle autrement : il ne publie pas de version au sens habituel, mais
 #: un numero de construction monotone. `build-522` porte l'etiquette
 #: `org.opencontainers.image.version` de l'image, relevee dans l'image elle-meme.

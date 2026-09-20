@@ -124,13 +124,18 @@ def test_seules_les_interfaces_mesurees_sont_acceptees():
         StackConfig.model_validate(donnees)
 
 
-def test_stack_yml_passe_en_version_4():
+def test_un_stack_yml_en_version_3_est_migre():
     """Une PlugArr plus ancienne doit refuser ce fichier plutot que d'effacer
-    le choix de VueTorrent, champ qu'elle ne connait pas."""
+    le choix de VueTorrent, champ qu'elle ne connait pas.
+
+    La version d'arrivee n'est PAS ecrite en dur : elle a change le jour ou la
+    veille en conteneur est arrivee, et ce test echouait pour une raison sans
+    rapport avec ce qu'il verifie.
+    """
     migre, notes = migrations.migrer({"version": 3})
 
-    assert migre["version"] == 4 == migrations.VERSION_COURANTE
-    assert notes == ["stack.yml migre en version 4"]
+    assert migre["version"] == migrations.VERSION_COURANTE
+    assert notes[0] == "stack.yml migre en version 4"
 
 
 def test_une_reinstallation_garde_vuetorrent():

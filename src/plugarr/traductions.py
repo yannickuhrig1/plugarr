@@ -299,6 +299,9 @@ EN: dict[str, str] = {
     # -- installation ----------------------------------------------------------
     "Installation et cablage": "Installing and wiring",
     "Preparation...": "Preparing...",
+    ' (+{reste} autres)': ' (+{reste} more)',
+    'termine : {reussies}/{total} etapes': 'finished: {reussies}/{total} steps',
+    'termine : {reussies}/{total} etapes, en echec : {liste}': 'finished: {reussies}/{total} steps, failed: {liste}',
     # -- rapport ----------------------------------------------------------------
     "Acces": "Access",
     "Identifiant": "Username",
@@ -506,6 +509,8 @@ EN: dict[str, str] = {
     'detecte sous sudo : votre compte, pas root': 'detected under sudo: your account, not root',
     "utilisateur courant (UGOS : premier compte vu a 1000:10, groupe admin)": 'current user (UGOS: the first account was seen at 1000:10, group admin)',
     "Profil EXPERIMENTAL : il vient d'une seule installation reelle, et les retours sont attendus sur le Discord de PlugArr. Deux choses qu'UGOS impose et qu'aucun profil ne peut contourner : les volumes appartiennent a root, donc l'installation demande `sudo` ; et les tunnels SSH sont interdits par defaut, donc l'assistant web ne s'ouvre pas a travers SSH — utilisez le mode terminal, ou servez-le sur le reseau local.": "EXPERIMENTAL profile: it comes from a single real installation, and feedback is welcome on the PlugArr Discord. Two things UGOS imposes that no profile can work around: the volumes belong to root, so installing requires `sudo`; and SSH tunnels are forbidden by default, so the web wizard will not open through SSH — use the terminal mode, or serve it on your local network.",
+    '{nombre} dossier(s) de donnees rendu(s) a {puid}:{pgid} : {dossiers}': '{nombre} data folder(s) handed over to {puid}:{pgid}: {dossiers}',
+    "{nombre} dossier(s) de donnees restent fermes a {puid}:{pgid} : {dossiers}. Les applications refuseront d'y ranger quoi que ce soit. Corrigez-les avec `sudo chown {puid}:{pgid} {premier}`, puis relancez l'installation.": '{nombre} data folder(s) remain closed to {puid}:{pgid}: {dossiers}. The applications will refuse to file anything in them. Fix them with `sudo chown {puid}:{pgid} {premier}`, then run the installation again.',
     'hardlink OK entre torrents/ et media/': 'hardlink OK between torrents/ and media/',
     "hardlink impossible ({erreur}). Les imports recopieront les fichiers au lieu de les lier. Verifiez que {source} et {cible} sont sur le MEME systeme de fichiers, et que DATA_ROOT est monte d'un seul bloc.": 'hardlink impossible ({erreur}). Imports will copy files instead of linking them. Check that {source} and {cible} are on the SAME filesystem, and that DATA_ROOT is mounted as a single block.',
     # -- format de date --------------------------------------------------------------
@@ -740,6 +745,8 @@ EN: dict[str, str] = {
     'verifiez que {adresse} est joignable et que le conteneur tourne': 'check that {adresse} is reachable and that the container is running',
     'le config.xml pre-seme a peut-etre ete ecrase. Relancez `plugarr doctor`.': 'the pre-seeded config.xml may have been overwritten. Run `plugarr doctor`.',
     'le gabarit renvoye par /schema a peut-etre change de forme': 'the template returned by /schema may have changed shape',
+    '{service} ne peut pas ecrire dans {dossier}': '{service} cannot write into {dossier}',
+    "cote hote, ce dossier est {hote} : il existe deja et n'appartient pas a {puid}:{pgid}, les identifiants sous lesquels tournent vos conteneurs. Rendez-le lui avec `sudo chown {puid}:{pgid} {hote}` — le contenu peut rester tel quel — puis relancez l'installation.": 'on the host, that folder is {hote}: it already exists and does not belong to {puid}:{pgid}, the identifiers your containers run under. Hand it over with `sudo chown {puid}:{pgid} {hote}` — its contents can stay as they are — then run the installation again.',
     '{service} : implementation {implementation} absente de {ressource}/schema': '{service}: implementation {implementation} missing from {ressource}/schema',
     'implementations disponibles : {liste}': 'available implementations: {liste}',
     "la version de l'application ne propose peut-etre pas ce connecteur": 'this version of the application may not offer that connector',

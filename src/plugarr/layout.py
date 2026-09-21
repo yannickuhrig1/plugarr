@@ -404,6 +404,88 @@ def _donner(dossier: Path, owner: tuple[int, int]) -> None:
         os.chown(chemin, *owner, follow_symlinks=False)
 
 
+def _inscriptible_par(dossier: Path, owner: tuple[int, int]) -> bool:
+    """Le compte (uid, gid) des conteneurs peut-il ECRIRE dans ce dossier ?
+
+    On lit les droits du dossier, on ne les essaie pas : le seul essai qui
+    vaudrait serait fait SOUS cet utilisateur, et plugarr ne peut pas devenir
+    quelqu'un d'autre. La lecture suffit pour le cas qui nous occupe, un dossier
+    laisse a root.
+
+    Hors POSIX, la question n'a pas de sens : Docker Desktop ne reporte pas la
+    propriete Unix sur un montage venu de Windows, et les bits de mode qu'y
+    rend `stat` sont decoratifs. On repond oui plutot que d'inventer un
+    probleme.
+    """
+    import stat as _stat
+
+    if os.name != "posix":
+        return True
+    uid, gid = owner
+    if uid == 0:
+        return True
+    try:
+        infos = dossier.stat()
+    except OSError:
+        # Un dossier qu'on n'arrive meme pas a interroger n'est pas un dossier
+        # dont on a quelque chose a dire ici.
+        return True
+    if infos.st_uid == uid:
+        return bool(infos.st_mode & _stat.S_IWUSR)
+    if infos.st_gid == gid:
+        return bool(infos.st_mode & _stat.S_IWGRP)
+    return bool(infos.st_mode & _stat.S_IWOTH)
+
+
+def donnees_inaccessibles(data_root: str | Path, owner: tuple[int, int]) -> list[Path]:
+    """Dossiers de donnees DEJA presents ou l'utilisateur des conteneurs ne
+    peut pas ecrire.
+
+    Constate le 2026-09-21 sur UGOS, journal a l'appui : une premiere
+    installation avait cree `/volume2/data` en root, la suivante n'y touchait
+    plus — `create_tree` ne reprend que ce qu'il cree — et Sonarr comme Radarr
+    refusaient leurs dossiers racines sur « Folder '/data/media/tv' is not
+    writable by user 'abc' ». Rien, dans l'installation, n'avait vu venir cette
+    panne : l'arborescence etait complete, seuls les droits ne l'etaient pas.
+    """
+    racine = Path(data_root)
+    presents = (racine / sous for sous in DATA_SUBDIRS)
+    return [p for p in presents if p.is_dir() and not _inscriptible_par(p, owner)]
+
+
+def ouvrir_donnees(data_root: str | Path, owner: tuple[int, int]) -> tuple[list[Path], list[Path]]:
+    """Rend aux conteneurs les dossiers de donnees qu'ils ne peuvent pas ecrire.
+
+    Renvoie (repares, restants) : ce qui a ete rendu, et ce qui resiste encore
+    et doit donc etre dit a l'utilisateur.
+
+    Le `chown` porte sur le DOSSIER SEUL, jamais sur son contenu. La distinction
+    est tout le sujet : donner le dossier suffit a ce que les conteneurs y
+    ecrivent, alors qu'un `chown -R` sur une mediatheque de plusieurs tera
+    prendrait des heures et redistribuerait des fichiers que plugarr n'a pas
+    crees. On repare le point de montage, on ne touche pas aux medias.
+
+    Et on ne repare QUE ce qui est casse : un dossier deja inscriptible n'est
+    pas repris, pour ne pas defaire un partage voulu (un dossier de groupe en
+    2775, par exemple).
+    """
+    repares: list[Path] = []
+    restants: list[Path] = []
+    for dossier in donnees_inaccessibles(data_root, owner):
+        if not _est_root():
+            # Sans elevation, il n'y a rien a tenter : `chown` est refuse a tout
+            # le monde sauf root, meme sur ses propres dossiers.
+            restants.append(dossier)
+            continue
+        try:
+            os.chown(dossier, *owner, follow_symlinks=False)
+        except OSError:
+            restants.append(dossier)
+        else:
+            repares.append(dossier)
+    return repares, restants
+
+
 def _dossiers_absents(chemin: Path) -> list[Path]:
     """Les dossiers de cette chaine qui n'existent pas encore, du plus profond
     au plus haut. C'est exactement ce qu'un `mkdir(parents=True)` va creer."""

@@ -225,6 +225,37 @@ Deux conséquences dans le code :
 Sources : [forums Unraid](https://forums.unraid.net/topic/117661-docker-user-puid-and-group-pgid-settings/)
 · [Marius Hosting, UID/GID sur Synology](https://mariushosting.com/synology-how-to-find-uid-userid-and-gid-groupid/)
 
+## Dossiers de données déjà présents — vérifié sur UGOS le 2026-09-21
+
+Une installation qui trouve son arborescence déjà en place ne la reprenait pas : `create_tree`
+ne donne au PUID/PGID que les dossiers **qu'il crée**, pour ne pas lancer un `chown -R` de
+plusieurs heures sur une médiathèque et ne pas redistribuer des fichiers qui ne sont pas les
+siens. La règle est bonne pour le contenu ; elle était fausse pour le point de montage.
+
+Journal d'un utilisateur, trois dossiers racines refusés d'un coup alors que tout le reste du
+câblage passait :
+
+```
+ECHEC sonarr/rootfolder/tv - sonarr: POST rootfolder a echoue
+  cause : HTTP 400 - "Folder '/data/media/tv' is not writable by user 'abc'"
+  action : le gabarit renvoye par /schema a peut-etre change de forme
+```
+
+`abc` est l'utilisateur interne des images LinuxServer : il **porte** le PUID/PGID du
+conteneur. Le dossier existait, l'arborescence était complète, seuls les droits ne l'étaient
+pas — et l'action proposée envoyait chercher une incompatibilité d'API.
+
+Deux conséquences dans le code :
+
+- avant le premier démarrage, l'installation regarde les dossiers de données déjà présents et
+  rend à `PUID:PGID` **ceux, et seulement ceux, où le compte des conteneurs ne peut pas
+  écrire**. Le `chown` porte sur le dossier seul, jamais sur son contenu : donner le point de
+  montage suffit, et un dossier déjà partagé en `2775` n'est pas repris. Sans élévation, rien
+  n'est tenté — `chown` est refusé à tout le monde sauf root — mais la liste et la commande à
+  passer sont écrites dans le journal ;
+- le refus de Sonarr ou de Radarr est traduit en ce qu'il faut faire, avec le chemin **de
+  l'hôte** : `/data/media/tv` ne mène nulle part depuis un terminal.
+
 ## Coexistence avec une stack existante — vérifié
 
 Observation faite sur un Unraid réel faisant tourner 75 conteneurs, dont un

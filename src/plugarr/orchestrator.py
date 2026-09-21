@@ -15,7 +15,13 @@ from pathlib import Path
 from . import catalog, compose, dashboard, gluetun_auth, seed, veille_config, vpncheck
 from .clients.arr import ArrClient
 from .i18n import t
-from .layout import CONTAINER_PATHS, PROFILE_DEFAULTS, create_tree, resolve_ids
+from .layout import (
+    CONTAINER_PATHS,
+    PROFILE_DEFAULTS,
+    create_tree,
+    ouvrir_donnees,
+    resolve_ids,
+)
 from .models import PlatformProfile, ServiceInstance, StackConfig
 from .runner import (
     Check,
@@ -836,6 +842,20 @@ def wait_for_arrs(cfg: StackConfig, on_progress: ProgressFn = _noop) -> None:
 # -------------------------------------------------------------------- pipeline
 
 
+def _liste_courte(chemins: list[Path], maximum: int = 5) -> str:
+    """Une enumeration de chemins qui tient sur une ligne de journal.
+
+    Une arborescence entiere laissee a root, c'est vingt-huit dossiers : les
+    citer tous noie la consigne qui suit dans un mur de texte, alors que les
+    premiers suffisent a reconnaitre de quoi on parle.
+    """
+    noms = [str(c) for c in chemins[:maximum]]
+    reste = len(chemins) - len(noms)
+    if not reste:
+        return ", ".join(noms)
+    return ", ".join(noms) + t(" (+{reste} autres)", reste=reste)
+
+
 def install(
     cfg: StackConfig,
     project_dir: Path,
@@ -853,6 +873,46 @@ def install(
         cfg.data_root, cfg.config_root, list(cfg.services), owner=(cfg.puid, cfg.pgid)
     )
     on_progress(Progress("arborescence", f"{len(created)} dossiers crees"))
+
+    # Les dossiers DEJA presents ne passent pas par `create_tree`, qui ne
+    # redistribue que ce qu'il cree. Une seconde installation heritait donc des
+    # droits de la premiere : sur UGOS, le 2026-09-21, une arborescence creee en
+    # root faisait refuser leurs dossiers racines a Sonarr et Radarr — « Folder
+    # '/data/media/tv' is not writable by user 'abc' » — alors que tout le reste
+    # du cablage passait. On le regle ici, avant le premier demarrage, plutot
+    # que de le laisser eclater vingt etapes plus loin.
+    repares, restants = ouvrir_donnees(cfg.data_root, (cfg.puid, cfg.pgid))
+    if repares:
+        on_progress(
+            Progress(
+                "droits",
+                t(
+                    "{nombre} dossier(s) de donnees rendu(s) a {puid}:{pgid} : {dossiers}",
+                    nombre=len(repares),
+                    puid=cfg.puid,
+                    pgid=cfg.pgid,
+                    dossiers=_liste_courte(repares),
+                ),
+            )
+        )
+    if restants:
+        on_progress(
+            Progress(
+                "droits",
+                t(
+                    "{nombre} dossier(s) de donnees restent fermes a {puid}:{pgid} : "
+                    "{dossiers}. Les applications refuseront d'y ranger quoi que ce "
+                    "soit. Corrigez-les avec `sudo chown {puid}:{pgid} {premier}`, "
+                    "puis relancez l'installation.",
+                    nombre=len(restants),
+                    puid=cfg.puid,
+                    pgid=cfg.pgid,
+                    dossiers=_liste_courte(restants),
+                    premier=restants[0],
+                ),
+                ok=False,
+            )
+        )
 
     written = compose.write_artifacts(cfg, project_dir)
     on_progress(Progress("artefacts", ", ".join(p.name for p in written)))
@@ -956,7 +1016,25 @@ def install(
 
     _verdict_vpn(cfg, on_progress)
 
-    on_progress(Progress("cablage", "termine", ok=all(r.ok for r in results), done=True))
+    # « ERROR cablage termine » ne disait pas ce qui avait echoue : il fallait
+    # remonter le journal etape par etape pour retrouver les trois lignes en
+    # cause. La derniere ligne est celle qu'on lit en premier quand on vient
+    # chercher une panne ; elle doit porter le compte et les noms.
+    echouees = [r.name for r in results if not r.ok]
+    if echouees:
+        verdict = t(
+            "termine : {reussies}/{total} etapes, en echec : {liste}",
+            reussies=len(results) - len(echouees),
+            total=len(results),
+            liste=", ".join(echouees),
+        )
+    else:
+        verdict = t(
+            "termine : {reussies}/{total} etapes",
+            reussies=len(results),
+            total=len(results),
+        )
+    on_progress(Progress("cablage", verdict, ok=not echouees, done=True))
     return results
 
 

@@ -292,7 +292,10 @@ def wizard(
     # Deux reglages qui n'ont pas leur place DANS l'assistant : ils decident de
     # son lancement, pas de la stack. Ils vivent donc sur la commande, comme
     # leurs homologues de `install`.
-    project_dir: Path = typer.Option(Path("."), help=t("Ou ecrire les artefacts.")),
+    # Sans valeur, `chemins.dossier_de_lancement` decide : le dossier courant
+    # s'il porte deja un stack.yml, sinon, dans l'executable Windows, le
+    # dossier des instances de PlugArr plutot que Telechargements.
+    project_dir: Path | None = typer.Option(None, help=t("Ou ecrire les artefacts.")),
     open_page: bool = typer.Option(
         True, "--open/--no-open", help=t("Ouvrir la page d'acces a la fin.")
     ),
@@ -306,20 +309,46 @@ def wizard(
 
 @app.command()
 def web(
-    project_dir: Path = typer.Option(Path(".")),
+    project_dir: Path | None = typer.Option(None, help=t("Ou ecrire les artefacts.")),
     port: int = typer.Option(0, min=0, max=65535),
     open_page: bool = typer.Option(True, "--open/--no-open"),
     demo: bool = typer.Option(False, "--demo"),
 ) -> None:
     """Assistant web local. --demo simule sans Docker ni installation."""
+    from .chemins import dossier_de_lancement
     from .webwizard import run_web
 
+    project_dir = dossier_de_lancement(project_dir)
     result = run_web(project_dir, port=port, open_page=open_page, demo=demo)
     if result == "tui":
         from .interface import launch
 
         result = launch(Interface.TUI, project_dir, open_page=open_page)
     raise typer.Exit(int(result))
+
+
+@app.command(help=t("Ouvre PlugArr Administration : toutes les installations de ce poste."))
+def manager(
+    open_page: bool = typer.Option(True, "--open/--no-open", help=t("Ouvrir la fenetre.")),
+    port: int = typer.Option(0, min=0, max=65535, help=t("Port d'ecoute.")),
+    quitter: bool = typer.Option(
+        False, "--quitter", help=t("Ferme le gestionnaire ouvert, s'il y en a un.")
+    ),
+) -> None:
+    """Le gestionnaire d'installations, celui qu'ouvre le menu Demarrer.
+
+    Dans la version installee, `plugarr-admin.exe` le lance sans console. Cette
+    commande sert a tout le reste : depuis les sources, depuis l'executable
+    portable, ou pour afficher son adresse dans un terminal.
+
+    `--quitter` sert a l'installateur : il ferme le gestionnaire avant de
+    remplacer ses fichiers, et avant de le desinstaller.
+    """
+    from .gestionnaire import fermer_ouvert, principal
+
+    if quitter:
+        raise typer.Exit(0 if fermer_ouvert() else 1)
+    raise typer.Exit(principal(ouvrir=open_page, port=port))
 
 
 @app.command(help=t("Deploie et cable la stack de bout en bout, sans interaction."))

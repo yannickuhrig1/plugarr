@@ -146,11 +146,46 @@ Il tourne à chaque poussée.
 
 ## Installation
 
-### Windows : un seul fichier, sans Python
+### Windows : l'installateur
 
-Téléchargez `plugarr.exe` depuis la
-[dernière version](https://github.com/yannickuhrig1/plugarr/releases), ouvrez un
-terminal dans le dossier de téléchargement, et lancez :
+Téléchargez `PlugArr-Setup-x.y.z.exe` depuis la
+[dernière version](https://github.com/yannickuhrig1/plugarr/releases) et lancez-le.
+Il ne demande pas les droits administrateur : PlugArr s'installe pour votre compte,
+dans `%LOCALAPPDATA%\Programs\PlugArr`, et apparaît dans « Applications installées ».
+
+Le menu Démarrer propose ensuite :
+
+- **PlugArr** : le gestionnaire de vos installations, décrit plus bas ;
+- **Assistant PlugArr** : l'assistant d'installation, directement.
+
+Pour une installation locale, seul Docker Desktop est nécessaire. PlugArr embarque
+son propre interpréteur : Python n'a pas besoin d'être installé.
+
+**Où vont les fichiers.** Les programmes dans `%LOCALAPPDATA%\Programs\PlugArr`, tout
+le reste dans `%LOCALAPPDATA%\plugarr` :
+
+| Dans `%LOCALAPPDATA%\plugarr` | Contenu |
+|---|---|
+| `instances\<nom>\` | `stack.yml`, `docker-compose.yml`, `.env`, page d'accès, journal |
+| `installations.yml`, `distantes.yml` | les installations connues de ce poste, sans aucun secret |
+| `logs\`, `updates\` | journal du gestionnaire, installateurs téléchargés |
+
+La configuration des services et vos médias restent là où l'assistant les a mis
+(`C:\PlugArr\config` et `C:\PlugArr\data` par défaut). La désinstallation retire les
+programmes et ne touche à rien de tout cela : `stack.yml` est la seule copie en clair
+des mots de passe que Jellyfin ou qBittorrent ne gardent que hachés. Les services
+Docker continuent de tourner ; `plugarr uninstall` les arrête avant, si c'est ce que
+vous voulez.
+
+**Mises à jour.** Le gestionnaire regarde la dernière version publiée à son ouverture.
+Un clic télécharge le nouvel installateur, vérifie son empreinte SHA256, ferme les
+consoles ouvertes, installe en silence et rouvre PlugArr. Rien ne s'installe sans ce
+clic.
+
+### Windows : l'exécutable portable
+
+`plugarr.exe` reste publié, pour qui préfère un seul fichier sans installation. Ouvrez
+un terminal dans son dossier et lancez :
 
 ```bash
 .\plugarr.exe
@@ -160,9 +195,14 @@ Au lancement, PlugArr propose l'assistant web, qui s'ouvre dans votre navigateur
 ou le terminal, et peut mémoriser ce choix. `.\plugarr.exe --interface web` ou
 `--interface tui` choisit directement.
 
-Pour une installation locale, seul Docker Desktop est nécessaire. L'exécutable
-embarque son propre interpréteur : il fonctionne sans Python installé, ce qui a
-été vérifié en le lançant avec un `PATH` vidé.
+Une installation neuve ne s'écrit plus dans le dossier du double-clic, souvent
+Téléchargements : elle va dans `%LOCALAPPDATA%\plugarr\instances\plugarr`, comme avec
+l'installateur. Deux exceptions : un `--project-dir` donné à la main, et un dossier
+qui contient déjà un `stack.yml`. Une installation posée ailleurs par une version
+précédente est retrouvée et reprise là où elle est ; le gestionnaire sait la ranger
+ensuite.
+
+L'exécutable portable se met à jour seul à sa fermeture, comme avant.
 
 ### Installer sur un serveur ou un NAS depuis Windows
 
@@ -186,7 +226,32 @@ root, sans modifier les dossiers existants.
 
 Windows SmartScreen peut afficher un avertissement au premier lancement : le binaire
 n'est pas signé — une signature de code coûte plusieurs centaines d'euros par an.
-« Informations complémentaires », puis « Exécuter quand même ».
+« Informations complémentaires », puis « Exécuter quand même ». Avec l'installateur,
+l'avertissement ne vise que lui : les programmes qu'il pose et les mises à jour que
+PlugArr télécharge ne portent pas la marque « venu d'Internet ».
+
+### PlugArr Administration : toutes vos installations
+
+Le gestionnaire (menu Démarrer, ou `plugarr manager`) liste les installations connues
+de ce poste : celle de cet ordinateur, et celles posées par SSH sur un serveur ou un
+NAS. Pour chacune : son état, sa console, la mise à jour du pack, la sauvegarde et le
+diagnostic.
+
+- **Sur cet ordinateur**, la console s'ouvre dans sa propre fenêtre, sans commande à
+  lancer. « Ranger dans le dossier PlugArr » déplace une installation qu'une version
+  précédente avait posée dans Téléchargements : la pile est arrêtée, ses fichiers
+  déplacés (jamais copiés puis effacés), puis elle repart du nouveau dossier.
+- **Sur un serveur**, la connexion vérifie l'empreinte SSH confirmée à l'installation
+  et refuse si le serveur a changé de clé. La console distante s'ouvre par un tunnel
+  SSH, sans `ssh -L` à taper. Le mot de passe est redemandé à chaque connexion ;
+  « Se souvenir » le garde chiffré par Windows (DPAPI), lisible par votre seul compte
+  sur ce seul PC.
+- **La mise à jour du pack** montre ce que le catalogue de cette version fait avancer,
+  puis l'applique. Rien ne redescend.
+
+Une seule pile locale par Docker Desktop : deux piles sur le même moteur se disputent
+les noms de conteneurs et les ports. Une ancienne entrée dont les conteneurs tournent
+depuis un autre dossier est signalée comme telle, et ses boutons sont retirés.
 
 ### Les autres plateformes
 
@@ -225,6 +290,7 @@ Autres commandes :
 
 ```bash
 plugarr             # assistant interactif
+plugarr manager     # gestionnaire de toutes les installations de ce poste
 plugarr list        # catalogue des services
 plugarr scan        # detecte une stack existante
 plugarr adopt       # cable une stack existante sans la recreer
@@ -364,6 +430,11 @@ ignore : prowlarr : maison et 2.5.2 ne se comparent pas
 ```
 
 `--dry-run` montre le plan sans rien écrire, comme pour `install`.
+
+Dans le gestionnaire, le bouton « Mettre à jour le pack » fait la même chose,
+installation par installation, y compris sur un serveur : la pile distante est relue
+par SSH, alignée sur le catalogue de cette version, puis redéployée par le chemin de
+l'installation distante, qui garde l'ancien `stack.yml` et reprend les comptes.
 
 ### Réinstaller par-dessus une installation existante
 

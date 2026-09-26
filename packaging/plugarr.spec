@@ -64,6 +64,9 @@ a = Analysis(
         (str(SRC / "plugarr" / "web" / "graph.js"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "admin-graph.js"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "graph.css"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "gestionnaire.html"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "gestionnaire.css"), "plugarr/web"),
+        (str(SRC / "plugarr" / "web" / "gestionnaire.js"), "plugarr/web"),
         *textual_datas,
         *paramiko_datas,
         *tz_datas,
@@ -79,6 +82,14 @@ a = Analysis(
         "plugarr.interface",
         "plugarr.tui.app",
         "plugarr.tui.indexers",
+        # Le gestionnaire est importe par le lanceur seulement quand
+        # l'executable s'appelle plugarr-admin.exe.
+        "plugarr.gestionnaire",
+        "plugarr.fenetre",
+        "plugarr.tunnel",
+        "plugarr.coffre",
+        "plugarr.distantes",
+        "plugarr.chemins",
     ],
     hookspath=[],
     runtime_hooks=([] if os.environ.get("PLUGARR_RELEASE_BUILD") == "1"
@@ -94,28 +105,76 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name=os.environ.get("PLUGARR_EXE_NAME", "plugarr"),
-    # L'executable n'avait aucune icone : Windows lui collait celle, generique,
-    # de tout binaire console. `assets/plugarr.ico` porte sept tailles, de 16 a
-    # 256 px — voir scripts/icone.py, qui l'engendre depuis le visuel d'origine.
-    icon=str(ROOT / "assets" / "plugarr.ico"),
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    runtime_tmpdir=None,
-    # L'assistant est une application de TERMINAL : sans console, il n'aurait
-    # nulle part ou s'afficher.
-    console=True,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-)
+# L'executable n'avait aucune icone : Windows lui collait celle, generique,
+# de tout binaire console. `assets/plugarr.ico` porte sept tailles, de 16 a
+# 256 px — voir scripts/icone.py, qui l'engendre depuis le visuel d'origine.
+# Elle est ecrite en toutes lettres dans chaque EXE : un test la cherche.
+
+if os.environ.get("PLUGARR_ONEDIR") == "1":
+    # Version installee (packaging/installer/plugarr.iss) : un DOSSIER, deux
+    # executables, un seul `_internal` partage. Verifie avec PyInstaller 6.22.3
+    # le 26/09/2026 : les deux executables demarrent sur le meme runtime.
+    #
+    # Pas d'extraction dans %TEMP% a chaque lancement, contrairement a
+    # l'executable portable : le demarrage est plus rapide, et les antivirus
+    # voient des fichiers stables plutot qu'un binaire qui se decompresse.
+    moteur = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="plugarr",
+        icon=str(ROOT / "assets" / "plugarr.ico"),
+        debug=False,
+        strip=False,
+        upx=False,
+        # L'assistant en mode terminal et les commandes ont besoin d'une console.
+        console=True,
+    )
+    gestionnaire = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        # Le lanceur reconnait ce nom : voir packaging/launcher.py.
+        name="plugarr-admin",
+        icon=str(ROOT / "assets" / "plugarr.ico"),
+        debug=False,
+        strip=False,
+        upx=False,
+        # Le gestionnaire est une fenetre : une console noire a cote n'aurait
+        # rien a afficher.
+        console=False,
+    )
+    coll = COLLECT(
+        moteur,
+        gestionnaire,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="PlugArr",
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name=os.environ.get("PLUGARR_EXE_NAME", "plugarr"),
+        icon=str(ROOT / "assets" / "plugarr.ico"),
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        runtime_tmpdir=None,
+        # L'assistant est une application de TERMINAL : sans console, il n'aurait
+        # nulle part ou s'afficher.
+        console=True,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )

@@ -1226,3 +1226,161 @@ EN.update({
     "Ajout simule : aucun indexeur contacte.": "Simulated addition: no indexer contacted.",
     "Liens en echec : {nom} : {detail}": "Failed links: {nom}: {detail}",
 })
+
+
+# PlugArr Administration (gestionnaire.py) et l'installateur Windows.
+EN.update({
+    "ADMINISTRATION": "ADMINISTRATION",
+    "Plus": "More",
+    "Mes installations": "My installations",
+    "Chaque installation PlugArr connue de ce poste, sur cet ordinateur ou sur un serveur.": (
+        "Every PlugArr installation this computer knows, on this computer or on a server."
+    ),
+    "Nouvelle installation": "New installation",
+    "L'assistant s'ouvre dans une nouvelle fenetre.": "The wizard opens in a new window.",
+    "Fermer PlugArr": "Close PlugArr",
+    "Cet ordinateur": "This computer",
+    "Serveur": "Server",
+    "En marche": "Running",
+    "En partie arretee": "Partly stopped",
+    "Arretee": "Stopped",
+    "Docker ne repond pas": "Docker is not responding",
+    "Dossier introuvable": "Folder not found",
+    "stack.yml illisible": "stack.yml unreadable",
+    "Ecrite par une version plus recente de PlugArr": "Written by a newer version of PlugArr",
+    "Connexion requise": "Sign-in required",
+    "Docker refuse ou injoignable": "Docker refused or unreachable",
+    "Verification...": "Checking...",
+    "{n} sur {total} services en marche": "{n} of {total} services running",
+    "Pack a jour": "Pack up to date",
+    "{n} image(s) peuvent avancer": "{n} image(s) can move forward",
+    "Pack inconnu": "Pack unknown",
+    "Console": "Console",
+    "Demarrer": "Start",
+    "Arreter": "Stop",
+    "Mettre a jour le pack": "Update the pack",
+    "Diagnostiquer": "Diagnose",
+    "Ouvrir le dossier": "Open the folder",
+    "Ranger dans le dossier PlugArr": "Move into the PlugArr folder",
+    "Renommer": "Rename",
+    "Retirer de la liste": "Remove from the list",
+    "Se connecter": "Sign in",
+    "Se deconnecter": "Sign out",
+    "Oublier le mot de passe garde": "Forget the saved password",
+    "Mise a jour du pack": "Pack update",
+    "Les images que le catalogue de PlugArr {version} fait avancer. Rien ne redescend : une image deja plus recente est laissee telle quelle.": (
+        "The images that the PlugArr {version} catalog moves forward. Nothing goes back: "
+        "an image that is already newer is left as it is."
+    ),
+    "Laissees telles quelles": "Left as they are",
+    "Rien a mettre a jour : les images sont celles du catalogue, ou plus recentes.": (
+        "Nothing to update: the images match the catalog, or are newer."
+    ),
+    "Appliquer": "Apply",
+    "Annuler": "Cancel",
+    "Confirmer": "Confirm",
+    "Enregistrer": "Save",
+    "Arreter tous les services de {nom} ?": "Stop every service of {nom}?",
+    "Deplacer les fichiers de {nom} dans le dossier de PlugArr ? La pile est arretee le temps du deplacement, puis relancee. Vos medias ne bougent pas.": (
+        "Move the files of {nom} into the PlugArr folder? The stack is stopped during the "
+        "move, then started again. Your media do not move."
+    ),
+    "Retirer {nom} de la liste ? Rien n'est supprime, ni sur le disque ni sur le serveur.": (
+        "Remove {nom} from the list? Nothing is deleted, neither on the disk nor on the server."
+    ),
+    "Appliquer {n} mise(s) a jour a {nom} ? Les services concernes redemarrent.": (
+        "Apply {n} update(s) to {nom}? The services involved restart."
+    ),
+    "Installer PlugArr {version} ? Les consoles ouvertes depuis ce gestionnaire se fermeront, puis PlugArr redemarrera.": (
+        "Install PlugArr {version}? The consoles opened from this manager will close, "
+        "then PlugArr will restart."
+    ),
+    "Connexion a {nom}": "Sign in to {nom}",
+    "L'empreinte SSH confirmee a l'installation est verifiee avant tout echange.": (
+        "The SSH fingerprint confirmed at installation is checked before anything is exchanged."
+    ),
+    "Empreinte attendue": "Expected fingerprint",
+    "Mot de passe SSH": "SSH password",
+    "Fichier de cle privee": "Private key file",
+    "Phrase de passe de la cle": "Key passphrase",
+    "Mot de passe sudo (facultatif)": "sudo password (optional)",
+    "Se souvenir sur ce PC (chiffre par Windows pour votre compte)": (
+        "Remember on this PC (encrypted by Windows for your account)"
+    ),
+    "Nouveau nom": "New name",
+    "En cours": "In progress",
+    "Terminee": "Done",
+    "Echec": "Failed",
+    "Journal": "Log",
+    "PlugArr {version} est disponible.": "PlugArr {version} is available.",
+    "Installer la mise a jour": "Install the update",
+    "Voir la version": "See the release",
+    "Installation lancee : PlugArr va se fermer puis redemarrer.": (
+        "Installation started: PlugArr will close, then restart."
+    ),
+    "Aucune installation connue sur ce poste.": "No installation known on this computer.",
+    "Lancez l'assistant pour installer PlugArr sur cet ordinateur ou sur un serveur.": (
+        "Start the wizard to install PlugArr on this computer or on a server."
+    ),
+    "Fichiers hors du dossier de PlugArr": "Files outside the PlugArr folder",
+    "Donnees": "Data",
+    "Session absente ou expiree. Relancez PlugArr.": "Session missing or expired. Restart PlugArr.",
+    "Le gestionnaire ne repond plus. Relancez PlugArr.": "The manager no longer responds. Restart PlugArr.",
+    "PlugArr est ferme. Vous pouvez fermer cette fenetre.": "PlugArr is closed. You can close this window.",
+    "Aucune mise a jour installable pour cette version.": "No installable update for this version.",
+    "Telechargement de {nom}...": "Downloading {nom}...",
+    "Empreinte SHA256 verifiee.": "SHA256 checksum verified.",
+    "Fermeture des consoles, puis lancement de l'installateur.": "Closing the consoles, then starting the installer.",
+    "Installation inconnue.": "Unknown installation.",
+    "Une operation est deja en cours sur cette installation.": "An operation is already running on this installation.",
+    "La commande s'est terminee avec le code {code}.": "The command ended with code {code}.",
+    "Action inconnue.": "Unknown action.",
+    "Le dossier de cette installation n'existe plus.": "This installation's folder no longer exists.",
+    "Demarrage de la pile {nom}...": "Starting the {nom} stack...",
+    "Arret de la pile {nom}...": "Stopping the {nom} stack...",
+    "Docker a refuse l'operation.": "Docker refused the operation.",
+    "Termine.": "Done.",
+    "Aucun explorateur de fichiers disponible.": "No file explorer available.",
+    "Destination : {chemin}": "Destination: {chemin}",
+    "Arret et retrait des conteneurs depuis l'ancien dossier...": (
+        "Stopping and removing the containers from the old folder..."
+    ),
+    "Docker a refuse l'arret : rien n'a ete deplace.": "Docker refused to stop: nothing was moved.",
+    "deplace : {nom}": "moved: {nom}",
+    "Redemarrage depuis le nouveau dossier...": "Starting again from the new folder...",
+    "Fichiers deplaces, mais la pile n'a pas redemarre. Utilisez Demarrer.": (
+        "Files moved, but the stack did not start again. Use Start."
+    ),
+    "Mot de passe ou cle privee SSH requis.": "SSH password or private key required.",
+    "L'empreinte SSH du serveur a change depuis l'installation : connexion refusee. Si le serveur a ete reinstalle, retirez-le de la liste puis reinstallez PlugArr dessus.": (
+        "The server's SSH fingerprint has changed since installation: connection refused. "
+        "If the server was reinstalled, remove it from the list, then install PlugArr on it again."
+    ),
+    "Aucune pile PlugArr lisible dans {dossier} sur ce serveur.": (
+        "No readable PlugArr stack in {dossier} on this server."
+    ),
+    "Connectez-vous d'abord a ce serveur.": "Sign in to this server first.",
+    "Cette installation n'a pas de console en conteneur.": "This installation has no console container.",
+    "La session SSH est fermee. Reconnectez-vous.": "The SSH session is closed. Sign in again.",
+    "ignore : {raison}": "skipped: {raison}",
+    "Rien a mettre a jour.": "Nothing to update.",
+    "Mise a jour appliquee, mais une etape du cablage a echoue.": (
+        "Update applied, but a wiring step failed."
+    ),
+    "Tache inconnue.": "Unknown task.",
+    "Requete trop volumineuse.": "Request too large.",
+    "Requete illisible.": "Unreadable request.",
+    "Ouvrez cette adresse dans votre navigateur.": "Open this address in your browser.",
+    "Ouvre PlugArr Administration : toutes les installations de ce poste.": (
+        "Opens PlugArr Administration: every installation on this computer."
+    ),
+    "Ouvrir la fenetre.": "Open the window.",
+    "Ferme le gestionnaire ouvert, s'il y en a un.": "Closes the open manager, if there is one.",
+    "Pile lancee depuis un autre dossier": "Stack started from another folder",
+    "Les conteneurs de cette pile tournent depuis {chemin}. Ils ne sont pas pilotes d'ici.": (
+        "This stack's containers run from {chemin}. They are not controlled from here."
+    ),
+    "La pile {nom} tourne depuis un autre dossier : {dossier}. Rien n'est lance d'ici.": (
+        "The {nom} stack runs from another folder: {dossier}. Nothing is started from here."
+    ),
+})

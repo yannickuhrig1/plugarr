@@ -143,11 +143,44 @@ It runs on every push.
 
 ## Installation
 
-### Windows: a single file, no Python
+### Windows: the installer
 
-Download `plugarr.exe` from the
-[latest release](https://github.com/yannickuhrig1/plugarr/releases), open a terminal in
-your downloads folder, and run:
+Download `PlugArr-Setup-x.y.z.exe` from the
+[latest release](https://github.com/yannickuhrig1/plugarr/releases) and run it. It
+does not ask for administrator rights: PlugArr installs for your account, in
+`%LOCALAPPDATA%\Programs\PlugArr`, and shows up in "Installed apps".
+
+The Start menu then offers:
+
+- **PlugArr**: the manager of your installations, described below;
+- **PlugArr wizard**: the installation wizard, directly.
+
+For a local installation, Docker Desktop is the only requirement. PlugArr ships its
+own interpreter: Python does not need to be installed.
+
+**Where files go.** Programs in `%LOCALAPPDATA%\Programs\PlugArr`, everything else in
+`%LOCALAPPDATA%\plugarr`:
+
+| In `%LOCALAPPDATA%\plugarr` | Contents |
+|---|---|
+| `instances\<name>\` | `stack.yml`, `docker-compose.yml`, `.env`, access page, log |
+| `installations.yml`, `distantes.yml` | the installations this computer knows, with no secret |
+| `logs\`, `updates\` | manager log, downloaded installers |
+
+Service configuration and your media stay where the wizard put them
+(`C:\PlugArr\config` and `C:\PlugArr\data` by default). Uninstalling removes the
+programs and touches none of this: `stack.yml` is the only clear-text copy of the
+passwords that Jellyfin or qBittorrent only keep hashed. Docker services keep
+running; `plugarr uninstall` stops them first, if that is what you want.
+
+**Updates.** The manager checks the latest published version when it opens. One
+click downloads the new installer, verifies its SHA256 checksum, closes the open
+consoles, installs silently and reopens PlugArr. Nothing installs without that click.
+
+### Windows: the portable executable
+
+`plugarr.exe` is still published, for those who prefer a single file with no
+installation. Open a terminal in its folder and run:
 
 ```bash
 .\plugarr.exe
@@ -157,9 +190,13 @@ On launch, PlugArr offers the web wizard, which opens in your browser, or the
 terminal, and can remember that choice. `.\plugarr.exe --interface web` or
 `--interface tui` picks one directly.
 
-For a local installation, Docker Desktop is the only requirement. The
-executable ships its own interpreter: it runs without Python installed, which
-was verified by launching it with an emptied `PATH`.
+A new installation is no longer written to the folder where you double-clicked,
+often Downloads: it goes to `%LOCALAPPDATA%\plugarr\instances\plugarr`, as with the
+installer. Two exceptions: a `--project-dir` given by hand, and a folder that already
+holds a `stack.yml`. An installation that an earlier version placed elsewhere is found
+and resumed where it is; the manager can move it afterwards.
+
+The portable executable still updates itself when it closes.
 
 ### Install on a server or NAS from Windows
 
@@ -182,6 +219,30 @@ root-owned `/volume1` without changing existing directories.
 
 Windows SmartScreen may warn you on first launch: the binary is not signed, and a code
 signing certificate costs several hundred euros a year. "More info", then "Run anyway".
+With the installer, the warning only concerns the installer itself: the programs it
+places and the updates PlugArr downloads do not carry the "from the Internet" mark.
+
+### PlugArr Administration: all your installations
+
+The manager (Start menu, or `plugarr manager`) lists the installations this computer
+knows: the one on this computer, and those placed over SSH on a server or NAS. For
+each one: its state, its console, the pack update, backup and diagnosis.
+
+- **On this computer**, the console opens in its own window, with no command to run.
+  "Move into the PlugArr folder" moves an installation that an earlier version placed
+  in Downloads: the stack is stopped, its files moved (never copied then deleted),
+  then it starts again from the new folder.
+- **On a server**, signing in checks the SSH fingerprint confirmed at installation and
+  refuses if the server's key changed. The remote console opens through an SSH
+  tunnel, with no `ssh -L` to type. The password is asked at every sign-in;
+  "Remember" keeps it encrypted by Windows (DPAPI), readable only by your account on
+  this PC.
+- **The pack update** shows what this version's catalog moves forward, then applies
+  it. Nothing goes back.
+
+One local stack per Docker Desktop: two stacks on the same engine fight over
+container names and ports. An old entry whose containers run from another folder is
+flagged as such, and its buttons are removed.
 
 ### Other platforms
 
@@ -220,6 +281,7 @@ Other commands:
 
 ```bash
 plugarr             # interactive wizard
+plugarr manager     # manager of every installation on this computer
 plugarr list        # service catalogue
 plugarr scan        # detect an existing stack
 plugarr adopt       # wire an existing stack without recreating it
@@ -354,6 +416,11 @@ skipped : prowlarr: maison and 2.5.2 cannot be compared
 ```
 
 `--dry-run` shows the plan without writing anything, as `install` does.
+
+In the manager, the "Update the pack" button does the same, one installation at a
+time, servers included: the remote stack is read over SSH, aligned on this version's
+catalog, then redeployed through the remote-installation path, which keeps the old
+`stack.yml` and reuses existing accounts.
 
 ### Reinstalling over an existing installation
 

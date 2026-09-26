@@ -1,4 +1,18 @@
-"""Windows release updater. Never replaces the executable before its parent exits."""
+"""Windows release updater. Never replaces the executable before its parent exits.
+
+Deux voies, selon la facon dont PlugArr a ete pose :
+
+- **executable portable** (`plugarr.exe` seul, telecharge a la main) : il se
+  remplace lui-meme a sa fermeture, comme depuis la 0.8. Les executables deja
+  distribues cherchent un fichier de release nomme EXACTEMENT `plugarr.exe` :
+  il faut continuer de le publier, sans quoi ils restent sur leur version en
+  disant seulement « mise a jour ignoree » ;
+- **version installee** (installateur Inno Setup) : on telecharge le nouvel
+  installateur, on verifie son empreinte, et on le lance en silencieux. Il
+  remplace le dossier des programmes et ne touche pas aux donnees. Rien ne se
+  fait a la fermeture d'une commande : c'est le gestionnaire qui propose la
+  mise a jour, et l'utilisateur qui la lance.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -29,7 +43,27 @@ def version(value: str) -> tuple[int, int, int]:
     return tuple(map(int, value.removeprefix("v").split(".")))
 
 
-def check() -> dict:
+#: Nom du fichier de release que les executables portables remplacent.
+ASSET_PORTABLE = "plugarr.exe"
+
+
+def nom_installateur(tag: str) -> str:
+    """Nom de l'installateur publie pour une version : `PlugArr-Setup-0.11.0.exe`."""
+    return f"PlugArr-Setup-{tag.removeprefix('v')}.exe"
+
+
+def check(*, installateur: bool | None = None) -> dict:
+    """Derniere release stable, et le fichier qui convient a CE PlugArr.
+
+    `installateur` vaut par defaut « PlugArr a-t-il ete installe ? ». Une
+    version installee ne se remplace pas fichier par fichier : elle attend
+    l'installateur de la nouvelle version, qui sait aussi retirer ce qui a
+    disparu et tenir a jour l'entree d'« Applications installees ».
+    """
+    if installateur is None:
+        from .chemins import installe
+
+        installateur = installe()
     with httpx.Client(timeout=10, follow_redirects=False) as client:
         response = client.get(API, headers={"Accept": "application/vnd.github+json"})
         response.raise_for_status()
@@ -37,17 +71,68 @@ def check() -> dict:
     tag = release["tag_name"]
     if release.get("draft") or release.get("prerelease"):
         raise ValueError("La release n'est pas stable")
-    assets = [a for a in release.get("assets", []) if a.get("name") == "plugarr.exe"]
+    nom = nom_installateur(tag) if installateur else ASSET_PORTABLE
+    assets = [a for a in release.get("assets", []) if a.get("name") == nom]
     asset = assets[0] if len(assets) == 1 else {}
     url = asset.get("browser_download_url", "")
-    expected = f"https://github.com/{REPOSITORY}/releases/download/{tag}/plugarr.exe"
+    expected = f"https://github.com/{REPOSITORY}/releases/download/{tag}/{nom}"
     digest = asset.get("digest") or ""
     ready = url == expected and bool(re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest))
     return {"current": __version__, "latest": tag,
             "available": version(tag) > version(__version__), "verified_asset": ready,
             "url": url if ready else "", "digest": digest if ready else "",
             "size": asset.get("size", 0), "notes": str(release.get("body") or "")[:12000],
-            "release_url": f"https://github.com/{REPOSITORY}/releases/tag/{tag}"}
+            "release_url": f"https://github.com/{REPOSITORY}/releases/tag/{tag}",
+            "installateur": installateur, "asset": nom}
+
+
+def telecharger_installateur(info: dict) -> Path:
+    """Telecharge et verifie l'installateur dans le dossier des mises a jour.
+
+    Les memes garde-fous que pour l'executable portable : adresse attendue,
+    taille annoncee, empreinte SHA256 publiee par GitHub, en-tete `MZ`. Un
+    fichier du meme nom laisse par un essai precedent est remplace : il n'a
+    peut-etre jamais ete verifie.
+    """
+    if not info.get("installateur"):
+        raise ValueError("Cette version n'a pas ete installee par l'installateur")
+    from .chemins import mises_a_jour
+
+    dossier = mises_a_jour()
+    dossier.mkdir(parents=True, exist_ok=True)
+    cible = dossier / str(info["asset"])
+    if cible.name != nom_installateur(str(info["latest"])):
+        raise ValueError("Nom d'installateur inattendu")
+    cible.unlink(missing_ok=True)
+    download(info, cible)
+    return cible
+
+
+#: Options de l'installateur pour une mise a jour. `/RELANCER=1` est lu par le
+#: script Inno : il rouvre le gestionnaire une fois les fichiers remplaces.
+OPTIONS_SILENCIEUSES = ("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/SP-")
+
+
+def lancer_installateur(setup: Path, *, relancer: bool = True) -> None:
+    """Lance l'installateur, detache : il doit survivre a notre fermeture.
+
+    L'appelant se ferme juste apres. `CloseApplications` de l'installateur
+    s'occupe de ce qui tournerait encore, mais on prefere ne pas compter sur
+    lui : le gestionnaire ferme d'abord ses consoles.
+    """
+    if sys.platform != "win32":
+        raise ValueError("L'installateur ne concerne que Windows")
+    args = [str(setup), *OPTIONS_SILENCIEUSES]
+    if relancer:
+        args.append("/RELANCER=1")
+    subprocess.Popen(
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    )
 
 
 def download(info: dict, destination: Path) -> None:
@@ -95,6 +180,12 @@ def _stage(info: dict) -> Path:
         raise ValueError("Mise a jour desactivee dans ce binaire de test local")
     if sys.platform != "win32" or not getattr(sys, "frozen", False):
         raise ValueError("La mise a jour automatique concerne uniquement plugarr.exe Windows")
+    from .chemins import installe
+
+    if installe():
+        # Remplacer plugarr.exe seul laisserait le gestionnaire et le runtime
+        # partage sur l'ancienne version : c'est le travail de l'installateur.
+        raise ValueError("Version installee : la mise a jour passe par l'installateur")
     executable = Path(sys.executable).resolve()
     # Same volume for atomic moves, unique directory to prevent concurrent staging.
     directory = Path(tempfile.mkdtemp(prefix=".plugarr-update-", dir=executable.parent))
@@ -155,6 +246,18 @@ def startup() -> None:
         return
     try:
         info = check()
+        if info.get("installateur"):
+            # Version installee : se remplacer seul a la fermeture d'une
+            # commande fermerait aussi, sans prevenir, le gestionnaire et ses
+            # consoles. On annonce ; le gestionnaire propose l'installation.
+            if info["available"]:
+                print(
+                    f"PlugArr {info['latest']} est disponible (vous avez la {info['current']}). "
+                    "Ouvrez PlugArr depuis le menu Demarrer pour l'installer."
+                )
+            else:
+                print(f"PlugArr {info['current']} est a jour (GitHub : {info['latest']}).")
+            return
         if info["available"] and info["verified_asset"]:
             print(
                 f"Mise a jour PlugArr : {info['current']} -> {info['latest']} ; "

@@ -184,7 +184,14 @@ def commande(project_dir: Path, *, host: str, port: int) -> str:
     # repondait « No module named plugarr » — constate sur le banc le
     # 2026-09-20, le service redemarrait en boucle.
     base = f'"{sys.executable}"'
-    if not getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False):
+        # Depuis le gestionnaire (plugarr-admin.exe), `sys.executable` rouvrirait
+        # le gestionnaire a chaque session : c'est `plugarr.exe`, pose a cote,
+        # qui sait lancer la console.
+        from .chemins import moteur
+
+        base = f'"{moteur()[0]}"'
+    else:
         base += " -m plugarr"
     return f"{base} serve --project-dir {cible} --host {host} --port {port} --no-open"
 

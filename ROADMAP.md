@@ -9,6 +9,50 @@ séance de travail.
 
 ---
 
+## Installateur Windows et PlugArr Administration (branche `installateur-windows`, 26 septembre)
+
+Le constat : l'exécutable écrivait `stack.yml` et `.env`, avec tous leurs
+secrets, dans le dossier du double-clic, et rien ne rassemblait les
+installations d'un même poste.
+
+- [x] **Un dossier de données unique** : `%LOCALAPPDATA%\plugarr`. Une
+  installation neuve lancée par l'exécutable Windows va dans
+  `instances\<nom>`, sauf `--project-dir` explicite ou `stack.yml` déjà présent
+  dans le dossier courant. La préférence d'interface quitte `%APPDATA%`
+  (l'ancienne reste lue).
+- [x] **Installateur Inno Setup**, par utilisateur, sans UAC, dans
+  `%LOCALAPPDATA%\Programs\PlugArr`. Deux exécutables sur un seul `_internal` :
+  `plugarr.exe` (console) et `plugarr-admin.exe` (fenêtre). Raccourcis du menu
+  Démarrer, PATH en option. La désinstallation ne touche jamais aux données et
+  retire le lancement automatique de la console s'il pointait vers elle.
+  Essayé sur un vrai Windows 11 le 2026-09-26 : installation, réinstallation
+  par-dessus avec le gestionnaire ouvert (fermé puis relancé), désinstallation,
+  PATH rendu à l'identique.
+- [x] **Mise à jour de la version installée** : le gestionnaire télécharge
+  `PlugArr-Setup-x.y.z.exe`, vérifie son SHA256 et l'installe en silencieux.
+  `plugarr.exe` reste publié pour les exécutables portables déjà distribués.
+- [x] **PlugArr Administration** (`plugarr manager`) : installations locales et
+  distantes, état, console hébergée, démarrer / arrêter, mise à jour du pack,
+  sauvegarde, diagnostic, rangement d'une installation posée ailleurs.
+- [x] **Installations distantes retenues** après une installation SSH réussie
+  (`distantes.yml`, sans secret), empreinte SSH vérifiée à chaque connexion,
+  console distante par tunnel SSH, secret gardé sur demande par DPAPI.
+- [x] Mise à jour du pack **distante** par le chemin de l'installation distante :
+  aucune nouvelle image d'administration nécessaire.
+- [x] Partie distante essayée contre le VPS Oracle le 2026-09-26, en lecture
+  seule : empreinte fausse refusée, connexion en 0,3 s, pile relue (17
+  services), 18 conteneurs sur 18 en marche, pack à jour, console jointe par le
+  tunnel (401 et son formulaire, comme attendu), clé privée absente de l'état
+  publié.
+- [ ] Une vraie mise à jour du pack distante, le jour où une image avance sur
+  le VPS ou le banc.
+- [ ] Première release publiée avec l'installateur : vérifier la chaîne complète
+  depuis une version installée (bannière, téléchargement, relance).
+- [ ] Signature de code (SignPath Foundation pour l'open source, ou Azure
+  Trusted Signing, éligibilité à vérifier), puis manifeste winget.
+
+---
+
 ## Diagnostic et reprise d'une pile existante (travail local du 25 septembre)
 
 - [x] `doctor` vérifie les API *arr*, les liaisons testables, le VPN, la capacité

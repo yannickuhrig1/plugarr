@@ -20,6 +20,7 @@ ete ecrites. Elle ne contient **aucun secret** : uniquement des chemins.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -70,6 +71,13 @@ class Installation:
     @property
     def stack(self) -> Path:
         return self.project_dir / "stack.yml"
+
+    @property
+    def ident(self) -> str:
+        """Identifiant stable, tire du dossier : le gestionnaire s'en sert
+        pour designer une installation sans faire circuler son chemin."""
+        empreinte = hashlib.sha256(_normaliser(str(self.project_dir)).encode("utf-8"))
+        return "local-" + empreinte.hexdigest()[:12]
 
     @property
     def vivante(self) -> bool:

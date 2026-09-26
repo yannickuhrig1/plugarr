@@ -9,6 +9,49 @@ working session.
 
 ---
 
+## Windows installer and PlugArr Administration (branch `installateur-windows`, 26 September)
+
+The starting point: the executable wrote `stack.yml` and `.env`, with all their
+secrets, to the folder where it was double-clicked, and nothing brought
+together the installations of one computer.
+
+- [x] **A single data folder**: `%LOCALAPPDATA%\plugarr`. A new installation
+  started from the Windows executable goes to `instances\<name>`, unless
+  `--project-dir` is explicit or a `stack.yml` already sits in the current
+  folder. The interface preference leaves `%APPDATA%` (the old one is still
+  read).
+- [x] **Inno Setup installer**, per user, no UAC, in
+  `%LOCALAPPDATA%\Programs\PlugArr`. Two executables on one shared
+  `_internal`: `plugarr.exe` (console) and `plugarr-admin.exe` (window). Start
+  menu shortcuts, optional PATH. Uninstalling never touches the data, and
+  removes the console autostart if it pointed there. Tried on a real
+  Windows 11 on 2026-09-26: install, reinstall over it with the manager open
+  (closed then relaunched), uninstall, PATH restored exactly.
+- [x] **Updating the installed version**: the manager downloads
+  `PlugArr-Setup-x.y.z.exe`, verifies its SHA256 and installs it silently.
+  `plugarr.exe` is still published for portable executables already out there.
+- [x] **PlugArr Administration** (`plugarr manager`): local and remote
+  installations, state, hosted console, start / stop, pack update, backup,
+  diagnosis, moving an installation placed elsewhere.
+- [x] **Remote installations remembered** after a successful SSH install
+  (`distantes.yml`, no secret), SSH fingerprint checked at every sign-in,
+  remote console through an SSH tunnel, secret kept on request with DPAPI.
+- [x] **Remote** pack update through the remote-installation path: no new
+  admin image needed.
+- [x] Remote side tried against the Oracle VPS on 2026-09-26, read-only: wrong
+  fingerprint refused, sign-in in 0.3 s, stack read back (17 services), 18
+  containers out of 18 running, pack up to date, console reached through the
+  tunnel (401 and its form, as expected), private key absent from the
+  published state.
+- [ ] A real remote pack update, the day an image moves forward on the VPS or
+  the bench.
+- [ ] First release published with the installer: check the whole chain from an
+  installed version (banner, download, relaunch).
+- [ ] Code signing (SignPath Foundation for open source, or Azure Trusted
+  Signing, eligibility to check), then a winget manifest.
+
+---
+
 ## Diagnose and adopt an existing stack (local work, 25 September)
 
 - [x] `doctor` checks *arr* APIs, testable links, VPN routing, hardlink creation,

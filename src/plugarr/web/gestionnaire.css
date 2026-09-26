@@ -1,0 +1,82 @@
+/* Gestionnaire d'installations. Les jetons, la barre laterale et les boutons
+   viennent de wizard.css : le gestionnaire doit ressembler a l'assistant, dont
+   il prend la suite. Ce fichier n'ajoute que ce qui lui est propre. */
+
+.entete{display:flex;justify-content:space-between;align-items:flex-end;gap:16px 24px;flex-wrap:wrap;margin-bottom:22px}
+.entete .intro{margin-bottom:0}
+.entete .actions{flex-wrap:wrap}
+#chargement{color:var(--muted);font-size:.9rem}
+
+.rail-liste{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+/* wizard.css donne aux `li` de la barre laterale la forme de ses etapes. */
+.sidebar .rail-liste li{display:block;padding:0;margin:0;border-radius:0}
+.rail-liste a{display:flex;align-items:center;gap:10px;padding:10px;border-radius:9px;color:var(--muted);font-size:.88rem}
+.rail-liste a:hover{background:#ffffff08;color:#f5edff}
+.rail-liste .point{width:8px;height:8px;border-radius:50%;flex:none;background:#5d5c70}
+.rail-liste .point.ok{background:#87d7b6}.rail-liste .point.attention{background:#ffc28b}.rail-liste .point.alerte{background:#ff9da8}
+.rail-liste span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail-bottom code{font-size:.75rem;overflow-wrap:anywhere;color:#cdb6e8}
+
+.instances{display:flex;flex-direction:column;gap:12px}
+.carte{background:var(--panel);border:1px solid #30313e;border-radius:13px;padding:18px 20px;display:grid;gap:14px;scroll-margin-top:16px}
+.carte-tete{display:flex;justify-content:space-between;align-items:flex-start;gap:10px 16px;flex-wrap:wrap}
+.identite{display:grid;gap:4px;min-width:0;flex:1 1 300px}
+.nom{font-weight:650;font-size:1.06rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lieu{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:.78rem;color:var(--muted);overflow-wrap:anywhere}
+.chip{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:#cebada;border:1px solid #484255;border-radius:5px;padding:1px 6px}
+
+.pastille{flex:none;display:inline-flex;align-items:center;gap:7px;font-size:.8rem;font-weight:650;padding:4px 11px;border-radius:999px;border:1px solid #454354;color:#cfcddc;background:#1d1e2a;white-space:nowrap}
+.pastille::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pastille.ok{color:#87d7b6;background:#16261f;border-color:#2f5446}
+.pastille.attention{color:#ffc28b;background:#2a2118;border-color:#65503e}
+.pastille.alerte{color:#ff9da8;background:#2e1c24;border-color:#7a3b4c}
+
+.mesures{display:flex;gap:8px 28px;flex-wrap:wrap;font-size:.88rem;color:var(--muted)}
+.mesures strong{color:#eeedf6;font-weight:600;font-variant-numeric:tabular-nums}
+.hors-dossier{font-size:.82rem;color:#f0d2b8}
+
+.actions-carte{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.actions-carte button,.actions-carte summary{min-height:36px;padding:7px 14px;font-size:.84rem;border-radius:8px}
+.plus{position:relative;background:none;border:0;padding:0;margin:0}
+.plus summary{list-style:none;cursor:pointer;background:#1b1c28;border:1px solid #454354;color:#eee9f4;font-weight:600;display:inline-flex;align-items:center}
+.plus summary::-webkit-details-marker{display:none}
+.plus[open] summary{background:#292638}
+.plus-menu{position:absolute;z-index:5;top:calc(100% + 6px);left:0;min-width:240px;display:grid;gap:2px;padding:6px;background:#1b1c28;border:1px solid #454354;border-radius:10px;box-shadow:0 12px 30px #0008}
+.plus-menu button{justify-content:flex-start;text-align:left;background:transparent;border:0;color:#eee9f4;min-height:36px;padding:8px 10px;border-radius:7px;font-size:.84rem}
+.plus-menu button:hover{background:#2a2838}
+.plus-menu button.danger{color:#ffb4bf}
+
+.tache-ligne{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px dashed var(--line);padding-top:12px;font-size:.84rem;color:var(--muted)}
+.tache-ligne .en-cours::before{content:"";display:inline-block;width:11px;height:11px;border:2px solid #ac73d6;border-top-color:transparent;border-radius:50%;margin-right:8px;vertical-align:-1px;animation:spin 1s linear infinite}
+.tache-ligne .reussie{color:#87d7b6}.tache-ligne .echouee{color:#ff9da8}
+.tache-ligne button{min-height:32px;padding:4px 12px;font-size:.8rem;border-radius:7px}
+.tache-ligne .message{overflow-wrap:anywhere;flex:1 1 240px}
+
+.vide{padding:28px;border:1px dashed var(--line);border-radius:13px;display:grid;gap:8px}
+.vide h2{margin:0;font-size:1.1rem}
+.maj{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.maj .actions{flex-wrap:wrap}
+.lien-bouton{display:inline-flex;align-items:center;min-height:44px}
+
+dialog{background:#141520;color:#eeedf6;border:1px solid #4b435d;border-radius:14px;padding:0;width:min(660px,calc(100vw - 32px));max-height:calc(100vh - 48px)}
+dialog::backdrop{background:#05060bcc}
+.dialogue-corps{padding:22px 24px;display:grid;gap:16px;margin:0}
+.dialogue-corps h2{margin:0;font-size:1.15rem}
+#dialogue-contenu{display:grid;gap:12px;font-size:.9rem;line-height:1.55;color:#d6d4e2}
+#dialogue-actions{justify-content:flex-end;flex-wrap:wrap}
+#dialogue-contenu label{display:grid;gap:7px;font-size:.88rem}
+#dialogue-contenu input[type=text],#dialogue-contenu input[type=password]{width:100%;background:#12131d;border:1px solid #404050;border-radius:8px;padding:10px 12px;min-height:44px;color:#f4f0f8}
+#dialogue-contenu input[type=file]{font-size:.84rem;color:var(--muted)}
+#dialogue-contenu .coche{display:flex;gap:10px;align-items:flex-start}
+#dialogue-contenu .coche input{width:18px;height:18px;accent-color:var(--purple);margin:2px 0;flex:none}
+#dialogue-contenu code{font-size:.8rem;color:#cdb6e8}
+.journal{max-height:52vh;overflow:auto;background:#0f1018;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0;font-size:.78rem;line-height:1.55;color:#d6d4e2;white-space:pre-wrap;overflow-wrap:anywhere}
+.table-defile{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table.pack{width:100%;border-collapse:collapse;font-size:.86rem}
+table.pack th,table.pack td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+table.pack tr:last-child td{border-bottom:0}
+table.pack th{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);background:#171821}
+table.pack td{font-variant-numeric:tabular-nums}
+.ecartes{margin:0;padding-left:18px;color:var(--muted);font-size:.84rem;display:grid;gap:4px}
+
+@media(max-width:700px){.carte{padding:15px}.plus-menu{left:auto;right:0}}

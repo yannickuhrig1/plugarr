@@ -1105,7 +1105,12 @@ def admin_command(project_dir: Path) -> str:
     """
     cible = f'"{Path(project_dir).resolve()}"'
     if getattr(sys, "frozen", False):
-        return f'"{Path(sys.executable).resolve()}" serve --project-dir {cible}'
+        # `moteur()` et non `sys.executable` : ecrit depuis le gestionnaire
+        # fenetre (plugarr-admin.exe), le lanceur aurait rouvert le
+        # gestionnaire au lieu de la console.
+        from .chemins import moteur
+
+        return f'"{Path(moteur()[0]).resolve()}" serve --project-dir {cible}'
     return f'"{Path(sys.executable).resolve()}" -m plugarr serve --project-dir {cible}'
 
 

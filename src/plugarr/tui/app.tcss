@@ -232,3 +232,21 @@ Checkbox.service.-on > .toggle--button {
 .hidden {
     display: none;
 }
+
+/* -- configurer mon telephone (parite avec l'assistant web) --------------- */
+
+#phone {
+    padding: 1 2;
+}
+
+.ph-row {
+    height: auto;
+}
+
+.ph-row Select {
+    width: 1fr;
+}
+
+#ph-fields, #ph-notice, #ph-qr {
+    margin: 1 0 0 0;
+}

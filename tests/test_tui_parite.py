@@ -232,3 +232,113 @@ async def test_l_activation_de_l_acces_distant_exige_la_confirmation(app, monkey
         assert await attendre(pilot, lambda: "Autorisez ce serveur" in str(zone.render()))
 
     assert appels == ["tailscale"]
+
+
+# ------------------------------------------------ 6. configuration du telephone
+
+
+async def _telephone(pilot):
+    from plugarr.tui.telephone import PhoneScreen
+
+    pilot.app.selection = ["sonarr", "radarr", "qbittorrent", "sabnzbd"]
+    pilot.app.stack_config = pilot.app.build_config()
+    pilot.app.results = []
+    await pilot.app.push_screen(ReportScreen())
+    await pilot.pause()
+    pilot.app.screen.query_one("#phone", Button).press()
+    await pilot.pause()
+    assert isinstance(pilot.app.screen, PhoneScreen)
+    return pilot.app.screen
+
+
+@pytest.mark.asyncio
+async def test_le_fichier_nzb360_du_tui_est_celui_du_web(app, tmp_path):
+    from textual.widgets import Checkbox
+
+    from plugarr import telephone
+
+    async with app.run_test() as pilot:
+        ecran = await _telephone(pilot)
+        enregistrer = ecran.query_one("#ph-save", Button)
+        assert enregistrer.disabled is True, "la restauration remplace tout : consentement d'abord"
+
+        ecran.query_one("#ph-confirm", Checkbox).value = True
+        await pilot.pause()
+        assert enregistrer.disabled is False
+        enregistrer.press()
+        await pilot.pause()
+
+        attendu = telephone.nzb360_export(telephone.donnees_rapport(pilot.app.stack_config), "local")["bytes"]
+
+    assert (tmp_path / "plugarr-nzb360-24.4.1-local.zip").read_bytes() == attendu
+
+
+@pytest.mark.asyncio
+async def test_qbremote_exige_un_mot_de_passe_et_produit_un_fichier_chiffre(app, tmp_path):
+    from textual.widgets import Checkbox, Input, Select
+
+    from plugarr import telephone
+
+    async with app.run_test() as pilot:
+        ecran = await _telephone(pilot)
+        ecran.query_one("#ph-client", Select).value = "qbremote"
+        await pilot.pause()
+        ecran.query_one("#ph-confirm", Checkbox).value = True
+        ecran.query_one("#ph-password", Input).value = "abc"
+        await pilot.pause()
+        assert ecran.query_one("#ph-save", Button).disabled is True
+
+        ecran.query_one("#ph-password", Input).value = "abcd"
+        await pilot.pause()
+        ecran.query_one("#ph-save", Button).press()
+        await pilot.pause()
+
+    fichiers = dict(telephone.lire_zip((tmp_path / "qbRemote_plugarr-local.backup.zip").read_bytes(), "abcd"))
+    assert set(fichiers) == {"manifest.json", "servers.json"}
+
+
+@pytest.mark.asyncio
+async def test_les_fiches_a_recopier_masquent_les_secrets(app):
+    from textual.widgets import Checkbox, Select
+
+    async with app.run_test() as pilot:
+        ecran = await _telephone(pilot)
+        ecran.query_one("#ph-client", Select).value = "other"
+        await pilot.pause()
+        ecran.query_one("#ph-service", Select).value = "sonarr"
+        await pilot.pause()
+        fiche = ecran.query_one("#ph-fields", Static)
+        cle = pilot.app.stack_config.services["sonarr"].api_key
+        assert "Sonarr" in str(fiche.render())
+        assert cle not in str(fiche.render())
+
+        ecran.query_one("#ph-show", Checkbox).value = True
+        await pilot.pause()
+        assert cle in str(fiche.render())
+
+
+@pytest.mark.asyncio
+async def test_l_envoi_au_telephone_affiche_un_qr_code(app, monkeypatch):
+    from textual.widgets import Checkbox
+
+    from plugarr import phone_share
+
+    class FauxPartage:
+        def __init__(self, hote):
+            self.hote = hote
+
+        def publier(self, contenu, nom):
+            return {"url": "http://192.0.2.50:49152/t/jeton", "expires_in": 600, "firewall_prompt": False}
+
+        def arreter(self):
+            pass
+
+    monkeypatch.setattr(phone_share, "PartageTelephone", FauxPartage)
+
+    async with app.run_test() as pilot:
+        ecran = await _telephone(pilot)
+        ecran.query_one("#ph-confirm", Checkbox).value = True
+        await pilot.pause()
+        ecran.query_one("#ph-send", Button).press()
+        await pilot.pause()
+        assert pilot.app.screen.dernier_lien == "http://192.0.2.50:49152/t/jeton"

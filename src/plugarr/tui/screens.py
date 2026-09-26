@@ -2014,6 +2014,7 @@ class ReportScreen(WizardScreen):
         yield Horizontal(
             Button("Ouvrir la page d'acces", variant="success", id="open-page"),
             Button(t("Ouvrir l'administration"), id="open-admin"),
+            Button("Configurer mon telephone", id="phone"),
             Button("Fermer", variant="primary", id="close"),
             classes="actions",
         )
@@ -2044,6 +2045,13 @@ class ReportScreen(WizardScreen):
             if donnees["unchecked"]:
                 texte += "\n" + t("[dim]Non verifiees : {noms}[/dim]", noms=", ".join(donnees["unchecked"]))
         self.app.call_from_thread(self.query_one("#report-updates", Static).update, texte)
+
+    @on(Button.Pressed, "#phone")
+    def open_phone(self) -> None:
+        """Parite avec l'assistant web : fichiers nzb360, qbRemote, Arr Control."""
+        from .telephone import PhoneScreen
+
+        self.app.push_screen(PhoneScreen())
 
     @on(Button.Pressed, "#open-admin")
     def open_admin(self) -> None:
@@ -2191,6 +2199,8 @@ class ReportScreen(WizardScreen):
                     "identifiants des applications."
                 ),
             }
+        # Les fichiers du telephone en ont besoin : ce sont les adresses distantes.
+        self.app.remote_result = resultat
         self.app.call_from_thread(self._afficher_acces, resultat)
 
     def _ouvrir_automatiquement(self) -> None:

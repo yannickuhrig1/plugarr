@@ -81,15 +81,80 @@ jobs:
           Write-Output "plugarr.exe : $mo Mo"
         shell: pwsh
 
+      - name: Le tag et la version du code concordent
+        # La mise a jour d'une version installee cherche un fichier nomme
+        # d'apres le TAG (PlugArr-Setup-<tag sans v>.exe), et l'installateur
+        # est nomme d'apres __version__. Un ecart ne se verrait nulle part :
+        # les versions installees resteraient simplement sur place.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = python -c "import plugarr; print(plugarr.__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "tag ${{ github.ref_name }} et __version__ $version divergent"
+          }
+        shell: pwsh
+
+      - name: Version installee, un dossier et deux executables
+        env:
+          PLUGARR_ONEDIR: "1"
+          PLUGARR_RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+        run: pyinstaller packaging/plugarr.spec --noconfirm --distpath dist-onedir --workpath build-onedir
+        shell: pwsh
+
+      - name: Les deux executables repondent
+        run: |
+          dist-onedir\PlugArr\plugarr.exe --version
+          $connu = dist-onedir\PlugArr\plugarr.exe manager --help | Select-String -Pattern "quitter" -Quiet
+          if (-not $connu) { throw "plugarr manager ne connait pas --quitter, dont l'installateur a besoin" }
+          if (-not (Test-Path dist-onedir\PlugArr\plugarr-admin.exe)) { throw "plugarr-admin.exe absent" }
+        shell: pwsh
+
+      - name: Installateur Inno Setup
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          }
+          $version = python -c "import plugarr; print(plugarr.__version__)"
+          & $iscc /Q "/DVersion=$version" "/DSource=$PWD\dist-onedir\PlugArr" "/DSortie=$PWD\dist" packaging\installer\plugarr.iss
+          if ($LASTEXITCODE) { throw "ISCC a echoue" }
+          "VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Installer, relancer, desinstaller, en silencieux
+        # Ce que fera la mise a jour depuis le gestionnaire, sur une machine
+        # propre : installer, reinstaller par-dessus, puis tout retirer. Les
+        # DONNEES (PLUGARR_HOME) doivent survivre a la desinstallation.
+        run: |
+          $dossier = "$env:RUNNER_TEMP\PlugArr-essai"
+          $env:PLUGARR_HOME = "$env:RUNNER_TEMP\plugarr-donnees"
+          New-Item -ItemType Directory -Force $env:PLUGARR_HOME | Out-Null
+          $setup = "dist\PlugArr-Setup-$env:VERSION.exe"
+          foreach ($passe in 1, 2) {
+            $p = Start-Process $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/DIR=`"$dossier`"" -Wait -PassThru
+            if ($p.ExitCode) { throw "installation $passe : code $($p.ExitCode)" }
+          }
+          & "$dossier\plugarr.exe" --version
+          $p = Start-Process "$dossier\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          Start-Sleep 3
+          if (Test-Path "$dossier\plugarr.exe") { throw "la desinstallation a laisse plugarr.exe" }
+          if (-not (Test-Path $env:PLUGARR_HOME)) { throw "la desinstallation a efface les donnees" }
+        shell: pwsh
+
       - uses: actions/upload-artifact@v4
         with:
           name: plugarr-windows
-          path: dist/plugarr.exe
+          path: |
+            dist/plugarr.exe
+            dist/PlugArr-Setup-*.exe
           if-no-files-found: error
 
       - name: Publier sur la release
+        # `plugarr.exe` reste publie : les executables portables deja
+        # distribues cherchent ce nom exact pour se mettre a jour.
         if: startsWith(github.ref, 'refs/tags/v')
-        run: gh release upload "${{ github.ref_name }}" dist/plugarr.exe --clobber
+        run: gh release upload "${{ github.ref_name }}" dist/plugarr.exe "dist/PlugArr-Setup-$env:VERSION.exe" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh

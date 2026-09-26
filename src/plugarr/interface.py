@@ -21,19 +21,37 @@ class Interface(str, Enum):
 
 
 def preference_path() -> Path:
+    """Sous Windows, dans le dossier de PlugArr, a cote du registre.
+
+    Elle vivait seule dans `%APPDATA%` (le profil itinerant) alors que tout le
+    reste de PlugArr est dans `%LOCALAPPDATA%` : deux dossiers a connaitre pour
+    un seul programme. L'ancien emplacement est encore lu, voir
+    `_ancienne_preference`.
+    """
     if sys.platform == "win32":
-        root = Path(os.environ.get("APPDATA", str(Path.home() / "AppData/Roaming")))
-    else:
-        root = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+        from .chemins import racine
+
+        return racine() / "interface.json"
+    root = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
     return root / "plugarr" / "interface.json"
 
 
+def _ancienne_preference() -> Path | None:
+    if sys.platform != "win32" or os.environ.get("PLUGARR_HOME", "").strip():
+        return None
+    return Path(os.environ.get("APPDATA", str(Path.home() / "AppData/Roaming"))) / "plugarr" / "interface.json"
+
+
 def read_preference() -> Interface:
-    try:
-        value = json.loads(preference_path().read_text(encoding="utf-8"))
-        return Interface(value["interface"])
-    except (OSError, ValueError, KeyError, TypeError):
-        return Interface.AUTO
+    for chemin in (preference_path(), _ancienne_preference()):
+        if chemin is None:
+            continue
+        try:
+            value = json.loads(chemin.read_text(encoding="utf-8"))
+            return Interface(value["interface"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return Interface.AUTO
 
 
 def save_preference(mode: Interface) -> None:
@@ -63,7 +81,10 @@ def launch(
     *,
     open_page: bool = True,
 ) -> int:
+    from .chemins import dossier_de_lancement
+
     mode = Interface(mode)
+    project_dir = dossier_de_lancement(project_dir)
     terminal = sys.stdin.isatty() and sys.stdout.isatty()
     if mode == Interface.AUTO:
         mode = read_preference()
@@ -88,7 +109,7 @@ def launch(
     if mode == Interface.WEB:
         from .webwizard import run_web
 
-        result = run_web(project_dir or Path.cwd(), open_page=open_page)
+        result = run_web(project_dir, open_page=open_page)
         if result != "tui":
             return int(result)
     from .tui.app import run_wizard

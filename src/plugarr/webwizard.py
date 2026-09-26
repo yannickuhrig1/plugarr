@@ -37,6 +37,7 @@ from . import (
     catalog,
     compose,
     dashboard,
+    distantes,
     downloadclients,
     i18n,
     imageref,
@@ -1351,6 +1352,29 @@ class WizardState:
             aide_acces=self.acces_depuis_ce_poste(),
         ).encode("utf-8")
 
+    def _retenir_distante(self, target):
+        """Note le serveur pour le gestionnaire d'instances. Aucun secret.
+
+        `target` porte l'empreinte que l'utilisateur a confirmee : c'est elle
+        qui fera refuser une connexion future si le serveur change de cle.
+        """
+        cfg = self.cfg
+        distantes.enregistrer(
+            distantes.Distante(
+                host=target.host,
+                port=target.port,
+                user=target.username,
+                empreinte=target.expected_fingerprint,
+                project_dir=self.remote_project_dir,
+                project_name=cfg.project_name,
+                config_root=cfg.config_root,
+                data_root=cfg.data_root,
+                console_port=cfg.console_port if cfg.console_enabled else 0,
+                uid=cfg.puid,
+                gid=cfg.pgid,
+            )
+        )
+
     def close_resources(self):
         self.backup_indexers = {}
         self.remote_connections = {}
@@ -1912,6 +1936,8 @@ class WizardState:
                     on_event=remote_event,
                 )
                 self.deployed = result.status in ("done", "partial")
+                if self.deployed:
+                    self._retenir_distante(target)
                 self.set_status(result.status)
                 return
             journal.start(self.project_dir, "web")

@@ -598,6 +598,10 @@ class _ParamikoSession:
         error = stderr.read().decode("utf-8", errors="replace")
         return stdout.channel.recv_exit_status(), error
 
+    def transport(self):
+        """Le transport SSH, pour ouvrir un tunnel vers un port du serveur."""
+        return self._client.get_transport()
+
     def close(self) -> None:
         self._client.close()
 
@@ -696,6 +700,20 @@ def _verified_session(
             "L'empreinte SSH a change depuis sa confirmation. Installation refusee."
         )
     return session
+
+
+def open_verified_session(
+    target: RemoteTarget,
+    credentials: RemoteCredentials,
+    *,
+    connect: Connector,
+) -> SSHSession:
+    """Session SSH qui reste ouverte, empreinte verifiee si elle est connue.
+
+    Pour le gestionnaire d'instances : il garde la session pour relire l'etat
+    de la pile et porter le tunnel vers la console. L'appelant la ferme.
+    """
+    return _verified_session(target, credentials, connect)
 
 
 def _remote_path(value: str, label: str) -> str:

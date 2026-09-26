@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark"><title>PlugArr</title>
+<link rel="stylesheet" href="/wizard.css"><link rel="stylesheet" href="/gestionnaire.css">
+<script src="/gestionnaire.js" defer></script>
+</head>
+<body>
+<div class="shell">
+<aside class="sidebar">
+<a class="brand" href="#" aria-label="PlugArr"><img id="icone" alt="" width="44" height="44" hidden><span>Plug<span class="arr">Arr</span></span></a>
+<p class="rail-label" data-t="rail">ADMINISTRATION</p>
+<nav aria-label="Installations"><ul id="rail" class="rail-liste"></ul></nav>
+<div class="rail-bottom"><p class="muted"><span data-t="donnees">Donnees</span><br><code id="donnees"></code></p><button id="quitter" class="quiet" type="button" data-t="quitter">Fermer PlugArr</button></div>
+</aside>
+<main>
+<header class="topbar"><span class="breadcrumb" data-t="titre">Mes installations</span><div class="top-controls"><span id="version" class="badge"></span></div></header>
+<div class="workspace">
+<div id="maj" class="notice maj" hidden><span id="maj-texte"></span><span class="actions"><a id="maj-page" class="secondary lien-bouton" target="_blank" rel="noopener" hidden data-t="majTelecharger">Voir la version</a><button id="maj-installer" class="primary" type="button" hidden data-t="majInstaller">Installer la mise a jour</button></span></div>
+<div id="erreur" class="notice error" role="alert" hidden></div>
+<div class="entete">
+<div><h1 data-t="titre">Mes installations</h1><p class="intro" data-t="sousTitre"></p></div>
+<div class="actions"><button id="actualiser" class="secondary" type="button" data-t="actualiser">Actualiser</button><button id="nouvelle" class="primary" type="button" data-t="nouvelle">Nouvelle installation</button></div>
+</div>
+<p id="info" class="notice" role="status" hidden></p>
+<div id="chargement" role="status">...</div>
+<div id="liste" class="instances"></div>
+<div id="vide" class="vide" hidden><h2 data-t="vide"></h2><p class="muted" data-t="videAide"></p></div>
+</div>
+</main>
+</div>
+<dialog id="dialogue" aria-labelledby="dialogue-titre"><form method="dialog" id="dialogue-form" class="dialogue-corps"><h2 id="dialogue-titre"></h2><div id="dialogue-contenu"></div><div id="dialogue-actions" class="actions"></div></form></dialog>
+</body>
+</html>

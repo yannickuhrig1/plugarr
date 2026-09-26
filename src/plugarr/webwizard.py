@@ -301,7 +301,9 @@ class WizardState:
                     "name": s.display_name,
                     "category": s.category.value,
                     "notes": i18n.t(s.notes),
+                    "notes_i18n": i18n.bilingue(s.notes),
                     "experimental": i18n.t(s.experimental),
+                    "experimental_i18n": i18n.bilingue(s.experimental),
                     "requires": list(s.requires),
                     "requires_one_of": list(s.requires_one_of),
                 }
@@ -667,9 +669,11 @@ class WizardState:
         warning = path_warning(data_root)
         uid, gid, source, certain = resolve_ids(platform)
         if self.demo:
+            detail = i18n.phrase("Demonstration : creation et hardlink simules.")
             return {
                 "ok": True,
-                "detail": "Demonstration : creation et hardlink simules.",
+                "detail": i18n.t(detail),
+                "detail_i18n": i18n.bilingue(detail),
                 "target": data_root,
                 "warning": warning,
                 "puid": uid,
@@ -1060,13 +1064,19 @@ class WizardState:
             )
         ):
             raise ValueError("Champs d'indexeur invalides.")
+        message_i18n = None
         if self.demo:
-            ok, message, configured = True, "Ajout simule : aucun indexeur contacte.", [definition.name]
+            texte = i18n.phrase("Ajout simule : aucun indexeur contacte.")
+            ok, message, configured = True, i18n.t(texte), [definition.name]
+            message_i18n = i18n.bilingue(texte)
         else:
             indexers = self._ensure_indexers()
             ok, message = indexers.add(definition, values)
             configured = [str(i.get("name", "?")) for i in indexers.configured()]
-        return {"ok": ok, "message": self.redact(message), "configured": configured}
+        response = {"ok": ok, "message": self.redact(message), "configured": configured}
+        if message_i18n:
+            response["message_i18n"] = {code: self.redact(v) for code, v in message_i18n.items()}
+        return response
 
     def prepare_indexer_backup(self):
         """Refuse AVANT de recevoir le fichier, pas apres l'avoir lu."""
@@ -1156,16 +1166,25 @@ class WizardState:
     def report(self):
         self._require_completed()
         failed = [result for result in self.results if not result.ok]
-        next_steps = (
-            [
-                f"Liens en echec : {result.name} : "
-                f"{next(iter(result.detail.splitlines()), 'aucun detail')}"
-                for result in failed
-            ]
-            if failed
-            else orchestrator.prochaine_etape(self.cfg)
-        )
+        def etapes(langue):
+            if failed:
+                return [
+                    i18n.traduire(
+                        "Liens en echec : {nom} : {detail}",
+                        langue,
+                        nom=result.name,
+                        detail=next(iter(result.detail.splitlines()), None)
+                        or i18n.traduire("aucun detail", langue),
+                    )
+                    for result in failed
+                ]
+            return orchestrator.prochaine_etape(self.cfg, langue)
+
+        # Les deux langues : la page choisit la sienne, et peut en changer ensuite.
+        next_steps_i18n = {code: etapes(code) for code, _ in i18n.DISPONIBLES}
+        next_steps = next_steps_i18n.get(i18n.langue(), next_steps_i18n["fr"])
         return {
+            "next_steps_i18n": next_steps_i18n,
             "services": [
                 {
                     "id": sid,
@@ -1706,6 +1725,13 @@ class WizardState:
             event = {
                 "phase": str(phase),
                 "message": self.redact(message),
+                # Chaque langue, pour que la page affiche la sienne. Un texte deja
+                # traduit, ou hors catalogue, revient tel quel dans les deux.
+                "phase_i18n": i18n.bilingue(str(phase)),
+                "message_i18n": {
+                    code: self.redact(texte)
+                    for code, texte in i18n.bilingue(str(message)).items()
+                },
                 "ok": ok,
                 "step_id": step_id,
                 "started": started,
@@ -1773,26 +1799,28 @@ class WizardState:
         try:
             if self.demo:
                 self.results = []
+                # Phrases passees en francais, la langue source : `event` en
+                # derive les deux langues, la page affiche la sienne.
                 for phase in (
-                    "Verification simulee",
-                    "Dossiers simules",
-                    "Demarrage simule",
-                    "Cablage simule",
+                    i18n.phrase("Verification simulee"),
+                    i18n.phrase("Dossiers simules"),
+                    i18n.phrase("Demarrage simule"),
+                    i18n.phrase("Cablage simule"),
                 ):
-                    self.event(phase, "Demonstration : aucune operation reelle.")
+                    self.event(phase, i18n.phrase("Demonstration : aucune operation reelle."))
                     time.sleep(0.35)
-                self.event("demarrage-termine", "Demonstration : conteneurs simules.")
+                self.event("demarrage-termine", i18n.phrase("Demonstration : conteneurs simules."))
                 for step_id in self.graph["etapes"]:
                     self.event(
                         step_id,
-                        "Demonstration : etape simulee en cours.",
+                        i18n.phrase("Demonstration : etape simulee en cours."),
                         step_id=step_id,
                         started=True,
                     )
                     time.sleep(0.18)
                     self.event(
                         step_id,
-                        "Demonstration : resultat simule, aucun test reel.",
+                        i18n.phrase("Demonstration : resultat simule, aucun test reel."),
                         step_id=step_id,
                     )
                 self.set_status("done")

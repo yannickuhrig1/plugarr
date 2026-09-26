@@ -1210,3 +1210,19 @@ EN.update({
     "impossible sous Windows : Docker Desktop ne monte pas un dossier C:\\... au meme chemin dans un conteneur Linux. Decochez-la ; la console s'ouvre sur ce PC avec {lanceur}.": "not possible on Windows: Docker Desktop cannot mount a C:\\... folder at the same path in a Linux container. Untick it; the console opens on this PC with {lanceur}.",
     "[cyan]Installation retrouvee dans {dossier} : ses applications sont cochees.[/cyan] [dim]En decocher une retire ses conteneurs de la pile, pas ses donnees.[/dim]": "[cyan]Installation found in {dossier}: its applications are ticked.[/cyan] [dim]Unticking one removes its containers from the stack, not its data.[/dim]",
 })
+
+# Assistant web : textes rendus par le serveur dans les DEUX langues, la page
+# choisissant la sienne. Ceux de la demonstration n'etaient pas traduits du tout.
+EN.update({
+    "Verification simulee": "Simulated check",
+    "Dossiers simules": "Simulated folders",
+    "Demarrage simule": "Simulated start",
+    "Cablage simule": "Simulated wiring",
+    "Demonstration : aucune operation reelle.": "Demonstration: no real operation.",
+    "Demonstration : conteneurs simules.": "Demonstration: simulated containers.",
+    "Demonstration : etape simulee en cours.": "Demonstration: simulated step in progress.",
+    "Demonstration : resultat simule, aucun test reel.": "Demonstration: simulated result, no real test.",
+    "Demonstration : creation et hardlink simules.": "Demonstration: simulated creation and hardlink.",
+    "Ajout simule : aucun indexeur contacte.": "Simulated addition: no indexer contacted.",
+    "Liens en echec : {nom} : {detail}": "Failed links: {nom}: {detail}",
+})

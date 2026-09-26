@@ -129,6 +129,8 @@ Object.assign(EN, {
   backupIgnoredapplications:'applications', backupIgnoreddownload_clients:'download clients', backupIgnoredproxies:'proxies', backupIgnorednotifications:'notifications',
   backupImporting:'Importing', backupSelectNone:'Tick at least one indexer.', backupDone:'Import finished',
 });
+// Textes rendus par le serveur : il les envoie dans chaque langue, la page prend la sienne.
+const pick = (variants, fallback) => (variants && typeof variants === 'object' ? variants[lang] ?? variants.fr : undefined) ?? fallback;
 let token = new URLSearchParams(location.hash.slice(1)).get('token');
 try {
   if (token) sessionStorage.setItem('plugarr-wizard-token', token);
@@ -319,8 +321,8 @@ function renderServices() {
         updateConditional();
         scheduleGraph();
       });
-      label.append(input, E('p', service.notes));
-      if (service.experimental) label.append(E('p', service.experimental, 'experimental'));
+      label.append(input, E('p', pick(service.notes_i18n, service.notes)));
+      if (service.experimental) label.append(E('p', pick(service.experimental_i18n, service.experimental), 'experimental'));
       grid.append(label);
     }
     target.append(grid);
@@ -845,7 +847,7 @@ async function checkPaths() {
   $('path-status').textContent = tr('checkingAction');
   try {
     const result = await api('/api/path-check', {platform:$('platform').value, data_root:$('data_root').value});
-    $('path-status').textContent = `${result.ok ? '✓' : '!'} ${tr(result.ok ? 'pathOk' : 'pathFailed')} ${result.detail}${result.warning ? ' · ' + result.warning : ''}`;
+    $('path-status').textContent = `${result.ok ? '✓' : '!'} ${tr(result.ok ? 'pathOk' : 'pathFailed')} ${pick(result.detail_i18n, result.detail)}${result.warning ? ' · ' + result.warning : ''}`;
     $('ids-summary').textContent = `${result.puid}:${result.pgid}`;
     $('ids-detail').textContent = result.ids_source + (result.ids_certain ? '' : ' · ' + tr('unavailable'));
   } catch (failure) { $('path-status').textContent = '× ' + failure.message; }
@@ -961,7 +963,7 @@ function renderReport(report) {
   }
   $('report-services').replaceChildren(...rows);
   $('env-path').textContent = `${tr('envFile')} : ${report.env_path}`;
-  const etapes = [...report.next_steps, ...(report.console_url && report.console_password_kept ? [tr('consoleKeptHelp')] : [])];
+  const etapes = [...pick(report.next_steps_i18n, report.next_steps), ...(report.console_url && report.console_password_kept ? [tr('consoleKeptHelp')] : [])];
   const items = etapes.map(item => E('li', item));
   // Validation reelle du 26/09/2026 : liens vers l'adresse privee du VPS,
   // injoignables depuis ce poste, sans explication.
@@ -1033,7 +1035,7 @@ function indexerCard(result) {
     const values = Object.fromEntries([...fields.querySelectorAll('[data-field]')].map(input => [input.dataset.field, input.value]));
     try {
       const response = await api('/api/indexers/add', {key:result.key, values});
-      $('indexer-status').textContent = `${response.ok ? '✓' : '×'} ${response.message || tr(response.ok ? 'indexerAdded' : 'unavailable')}`;
+      $('indexer-status').textContent = `${response.ok ? '✓' : '×'} ${pick(response.message_i18n, response.message) || tr(response.ok ? 'indexerAdded' : 'unavailable')}`;
       renderConfigured(response.configured || []);
     } catch (failure) { $('indexer-status').textContent = '× ' + failure.message; }
     finally { add.disabled = false; }
@@ -1144,9 +1146,9 @@ function renderProgress(data) {
   const recent = data.events.slice(-10);
   $('event-list').replaceChildren(...recent.map(event => {
     const item = E('li'); item.append(E('b', event.started ? '…' : event.ok ? '✓' : '×', event.started ? 'pending' : event.ok ? 'ok' : 'fail'));
-    const text = E('div'); text.append(E('span', event.phase), E('small', event.message)); item.append(text); return item;
+    const text = E('div'); text.append(E('span', pick(event.phase_i18n, event.phase)), E('small', pick(event.message_i18n, event.message))); item.append(text); return item;
   }));
-  $('logs').textContent = data.events.map(event => `${event.started ? 'EN COURS' : event.ok ? 'OK' : 'ERREUR'} · ${event.phase} · ${event.message}`).join('\n');
+  $('logs').textContent = data.events.map(event => `${event.started ? 'EN COURS' : event.ok ? 'OK' : 'ERREUR'} · ${pick(event.phase_i18n, event.phase)} · ${pick(event.message_i18n, event.message)}`).join('\n');
   const remoteAdminPending = typeof form !== 'undefined' && form?.install_target === 'ssh' && !reportData?.console_url;
   $('admin').hidden = !['done','partial'].includes(data.status) || remoteAdminPending;
   $('retry').hidden = data.status !== 'error';

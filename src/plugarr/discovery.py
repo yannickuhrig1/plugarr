@@ -53,6 +53,10 @@ class Found:
     config_dir: str | None = None
     api_key: str | None = None
     url_base: str = ""
+    #: Bind mounts relevant to media paths; destination -> host source.
+    data_mounts: dict[str, str] = field(default_factory=dict)
+    #: Docker network namespace owner, when NetworkMode is container:<id/name>.
+    network_owner: str | None = None
     #: True quand le conteneur porte le marqueur pose par plugarr.
     managed_by_us: bool = False
     problems: list[str] = field(default_factory=list)
@@ -104,11 +108,56 @@ def _published_port(container: dict, internal_port: int) -> int | None:
     return None
 
 
+def _qbittorrent_webui_port(config_dir: str | None, default: int) -> int:
+    """Read the actual WebUI port without exposing the rest of qBittorrent.conf."""
+    if not config_dir:
+        return default
+    path = Path(config_dir) / "qBittorrent" / "qBittorrent.conf"
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for _, line in zip(range(4096), handle, strict=False):
+                if not line.startswith(r"WebUI\Port="):
+                    continue
+                port = int(line.partition("=")[2].strip())
+                return port if 1 <= port <= 65535 else default
+    except (OSError, ValueError):
+        pass
+    return default
+
+
+def _network_owner(container: dict, containers: list[dict]) -> dict | None:
+    """Find the container publishing ports for a shared network namespace."""
+    mode = str((container.get("HostConfig") or {}).get("NetworkMode") or "")
+    if not mode.startswith("container:"):
+        return None
+    reference = mode.partition(":")[2].lstrip("/")
+    if not reference:
+        return None
+    matches = [
+        candidate for candidate in containers
+        if candidate is not container and (
+            str(candidate.get("Id") or "").startswith(reference)
+            or str(candidate.get("Name") or "").lstrip("/") == reference
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _config_mount(container: dict) -> str | None:
     for mount in container.get("Mounts") or []:
         if mount.get("Destination") == "/config":
             return mount.get("Source")
     return None
+
+
+def _data_mounts(container: dict) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for mount in container.get("Mounts") or []:
+        destination = str(mount.get("Destination") or "")
+        source = str(mount.get("Source") or "")
+        if destination in ("/data", "/downloads", "/media") and source:
+            result[destination] = source
+    return result
 
 
 def _read_url_base(config_xml: Path) -> str:
@@ -148,12 +197,25 @@ def scan(*, include_stopped: bool = False) -> list[Found]:
         spec = catalog.get(service_id)
         name = str(container.get("Name", "")).lstrip("/")
 
+        config_dir = _config_mount(container)
+        internal_port = (
+            _qbittorrent_webui_port(config_dir, spec.internal_port)
+            if service_id == "qbittorrent" else spec.internal_port
+        )
+        host_port = _published_port(container, internal_port)
+        owner = _network_owner(container, containers)
+        if host_port is None and owner is not None:
+            host_port = _published_port(owner, internal_port)
+
         entry = Found(
             service_id=service_id,
             container=name,
             image=image,
-            host_port=_published_port(container, spec.internal_port),
-            config_dir=_config_mount(container),
+            host_port=host_port,
+            config_dir=config_dir,
+            data_mounts=_data_mounts(container),
+            network_owner=(str(owner.get("Name") or "").lstrip("/") or None)
+            if owner is not None else None,
             managed_by_us=_pose_par_nous(container),
         )
         if entry.host_port is None:
@@ -161,7 +223,7 @@ def scan(*, include_stopped: bool = False) -> list[Found]:
                 t(
                     "aucun port de l'hote ne publie {port} : plugarr ne pourra "
                     "pas le joindre",
-                    port=spec.internal_port,
+                    port=internal_port,
                 )
             )
         if spec.api_family == "arr":

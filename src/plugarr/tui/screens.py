@@ -505,6 +505,20 @@ class SauvegardeScreen(WizardScreen):
 # ------------------------------------------------------------------- selection
 
 
+def _installation_retrouvee(app):
+    """L'installation que la reprise suivra, tant que le choix de reprendre tient.
+
+    Meme recherche que `build_config`, avec la meme cle : le `CONFIG_ROOT` s'il
+    a deja ete saisi, sinon le repertoire de lancement puis le registre.
+    """
+    if not getattr(app, "reprendre", True):
+        return None
+    from .. import reprise
+
+    depart = getattr(app, "_project_dir_lance", None) or app.project_dir or "."
+    return reprise.trouver(Path(depart), app.config_root)
+
+
 class ServicesScreen(WizardScreen):
     SUB_TITLE = "Etape 1/3 - Quels services installer ?"
 
@@ -513,6 +527,26 @@ class ServicesScreen(WizardScreen):
     COLUMNS = ((Category.ARR,), (Category.DOWNLOAD, Category.MEDIA, Category.UI))
 
     def content(self) -> ComposeResult:
+        # En reprise, les applications de l'installation retrouvee, pas celles
+        # par defaut. Essai reel du 26/09/2026 : six applications cochees
+        # d'office, et `docker compose up` retirait les conteneurs des dix
+        # autres de la pile reprise. Meme choix que l'assistant web.
+        precedente = _installation_retrouvee(self.app)
+        cochees = (
+            {sid for sid in precedente.cfg.services if precedente.cfg.enabled(sid)}
+            if precedente is not None
+            else set(catalog.DEFAULT_SELECTION)
+        )
+        if precedente is not None:
+            yield Static(
+                t(
+                    "[cyan]Installation retrouvee dans {dossier} : ses applications "
+                    "sont cochees.[/cyan] [dim]En decocher une retire ses conteneurs "
+                    "de la pile, pas ses donnees.[/dim]",
+                    dossier=precedente.project_dir,
+                ),
+                id="services-reprise",
+            )
         with Horizontal(id="services"):
             for index, categories in enumerate(self.COLUMNS):
                 with VerticalScroll(classes="service-column", id=f"column-{index}"):
@@ -524,7 +558,7 @@ class ServicesScreen(WizardScreen):
                         for spec in sorted(specs, key=lambda s: s.display_name):
                             yield Checkbox(
                                 spec.display_name,
-                                value=spec.id in catalog.DEFAULT_SELECTION,
+                                value=spec.id in cochees,
                                 id=f"svc-{spec.id}",
                                 classes="service",
                             )
@@ -578,7 +612,19 @@ class ServicesScreen(WizardScreen):
     @on(Button.Pressed, "#next")
     def go(self) -> None:
         self.app.selection = catalog.resolve_dependencies(self.selection())
+        if self._reprise_directe():
+            self.app.push_screen(SummaryScreen(saute=True))
+            return
         self.app.push_screen(PathsScreen())
+
+    def _reprise_directe(self) -> bool:
+        """Parite avec l'assistant web : en reprise, les ecrans Chemins, VPN et
+        Qualite ne feraient que redemander ce qui est deja connu."""
+        if not getattr(self.app, "reprendre", True):
+            return False
+        self.app.stack_config = None
+        self.app.build_config()
+        return getattr(self.app, "reprise", None) is not None
 
     @on(Button.Pressed, "#back")
     def back(self) -> None:
@@ -591,12 +637,23 @@ class ServicesScreen(WizardScreen):
 class PathsScreen(WizardScreen):
     SUB_TITLE = "Etape 2/3 - Chemins et plateforme"
 
+    def __init__(self, *args: object, depart=None, **kw: object) -> None:
+        #: La configuration en cours, depuis « Modifier les reglages » en
+        #: reprise : on part de SES chemins. Les valeurs par defaut du profil
+        #: auraient fait basculer, sans un mot, vers une installation neuve.
+        self.depart = depart
+        super().__init__(*args, **kw)
+
+    def _profil_de_depart(self) -> PlatformProfile:
+        return self.depart.platform if self.depart is not None else default_profile()
+
     def content(self) -> ComposeResult:
         # Le profil propose est celui de la machine. Proposer generic-linux a un
         # utilisateur Windows le menait droit dans le piege : il gardait des
         # chemins Linux, crees ensuite a la racine du disque courant.
-        courant = default_profile()
+        courant = self._profil_de_depart()
         defaults = PROFILE_DEFAULTS[courant]
+        depart = self.depart
         # `VerticalScroll` et non `Vertical` : l'ecran a grossi (identifiant,
         # adresse de la machine) et depassait la fenetre. Sans defilement, les
         # derniers champs etaient simplement INACCESSIBLES — il fallait
@@ -613,13 +670,19 @@ class PathsScreen(WizardScreen):
             yield Static(id="platform-note")
 
             yield Label("Racine des configurations", classes="group-title")
-            yield Input(value=defaults.config_root, id="config-root")
+            yield Input(
+                value=depart.config_root if depart is not None else defaults.config_root,
+                id="config-root",
+            )
 
             yield Label(
                 "Racine des donnees [dim](montee sur /data dans TOUS les conteneurs)[/dim]",
                 classes="group-title",
             )
-            yield Input(value=defaults.data_root, id="data-root")
+            yield Input(
+                value=depart.data_root if depart is not None else defaults.data_root,
+                id="data-root",
+            )
 
             yield Label(
                 "Identifiant [dim](le meme pour tous les services installes)[/dim]",
@@ -650,7 +713,9 @@ class PathsScreen(WizardScreen):
                 "[dim](a changer pour en installer une SECONDE a cote)[/dim]",
                 classes="group-title",
             )
-            yield Input(value="plugarr", id="project-name")
+            yield Input(
+                value=depart.project_name if depart is not None else "plugarr", id="project-name"
+            )
 
             yield Label("Fuseau horaire", classes="group-title")
             yield Input(value="Europe/Paris", id="tz")
@@ -721,7 +786,7 @@ class PathsScreen(WizardScreen):
         return courante if any(lang.code == courante for lang in langues.PROPOSEES) else "en"
 
     def on_mount(self) -> None:
-        self._update_note(default_profile())
+        self._update_note(self._profil_de_depart())
 
     @on(RadioSet.Changed, "#platform")
     def _on_platform(self, event: RadioSet.Changed) -> None:
@@ -979,12 +1044,12 @@ class TemplatesScreen(WizardScreen):
         if not self._validate():
             return
         self.app.recyclarr_templates = self.choices()
-        self.app.push_screen(SummaryScreen())
+        self.app.push_screen(ecran_avant_recapitulatif(self.app))
 
     @on(Button.Pressed, "#skip")
     def skip(self) -> None:
         self.app.recyclarr_templates = {}
-        self.app.push_screen(SummaryScreen())
+        self.app.push_screen(ecran_avant_recapitulatif(self.app))
 
     @on(Button.Pressed, "#back")
     def back(self) -> None:
@@ -1138,6 +1203,11 @@ class VpnScreen(WizardScreen):
                 with Vertical(id="vpn-wireguard"):
                     yield Label("Cle privee WireGuard", classes="group-title")
                     yield Input(password=True, id="vpn-key")
+                    yield Label(
+                        "Adresses WireGuard (si demandees par le fournisseur)",
+                        classes="group-title",
+                    )
+                    yield Input(placeholder="10.x.x.x/32", id="vpn-addresses")
 
                 with Vertical(id="vpn-openvpn", classes="hidden"):
                     yield Label("Identifiant OpenVPN", classes="group-title")
@@ -1339,6 +1409,7 @@ class VpnScreen(WizardScreen):
                 provider=fournisseur if isinstance(fournisseur, str) else "",
                 vpn_type=str(self.query_one("#vpn-type", Select).value),
                 wireguard_private_key=self.query_one("#vpn-key", Input).value.strip(),
+                wireguard_addresses=self.query_one("#vpn-addresses", Input).value.strip(),
                 openvpn_user=self.query_one("#vpn-user", Input).value.strip(),
                 openvpn_password=self.query_one("#vpn-pass", Input).value.strip(),
                 countries=",".join(self.query_one("#vpn-lieux", SelectionList).selected),
@@ -1439,7 +1510,112 @@ def _suite_apres_vpn(app) -> None:
     ):
         app.push_screen(TemplatesScreen())
     else:
-        app.push_screen(SummaryScreen())
+        app.push_screen(ecran_avant_recapitulatif(app))
+
+
+# ------------------------------------------------------------- acces distant
+
+
+def ecran_avant_recapitulatif(app):
+    """L'acces distant ne concerne que Sonarr, Radarr et qBittorrent."""
+    from .. import remote_access
+
+    if any(sid in app.selection for sid in remote_access.SUPPORTED):
+        return RemoteAccessScreen()
+    return SummaryScreen()
+
+
+class RemoteAccessScreen(WizardScreen):
+    """Parite avec l'assistant web, qui avait seul cet ecran : acces local,
+    HTTPS avec un domaine, ou Tailscale. Rien n'est active avant la fin de
+    l'installation, ou le rapport propose l'activation."""
+
+    SUB_TITLE = "Acces distant"
+
+    def content(self) -> ComposeResult:
+        with VerticalScroll(id="remote-access"):
+            yield Static(
+                "Choisissez comment joindre vos applications hors de chez vous. "
+                "[dim]Rien n'est active maintenant : l'activation se fait apres "
+                "l'installation, depuis le rapport.[/dim]",
+                id="ra-intro",
+            )
+            with RadioSet(id="ra-mode"):
+                yield RadioButton("Local uniquement", value=True, id="ra-local")
+                yield RadioButton("HTTPS avec votre domaine", id="ra-https")
+                yield RadioButton("Tailscale (reseau prive)", id="ra-tailscale")
+            yield Input(placeholder="votre-domaine.fr", id="ra-domain", classes="hidden")
+            yield SelectionList(id="ra-services", classes="hidden")
+            yield Static(id="ra-aide")
+        yield Horizontal(
+            Button("Suivant", variant="primary", id="next"),
+            Button("Retour", id="back"),
+            classes="actions",
+        )
+
+    def on_mount(self) -> None:
+        from textual.widgets.selection_list import Selection
+
+        from .. import remote_access
+
+        actuel = self.app.remote_access or self.app.build_config().remote_access
+        self.query_one(f"#ra-{actuel.mode}", RadioButton).value = True
+        self.query_one("#ra-domain", Input).value = actuel.domain
+        liste = self.query_one("#ra-services", SelectionList)
+        choisis = set(actuel.services) or set(remote_access.SUPPORTED)
+        for sid in remote_access.SUPPORTED:
+            if sid in self.app.selection:
+                liste.add_option(Selection(catalog.get(sid).display_name, sid, sid in choisis))
+        self._afficher(actuel.mode)
+
+    def _mode(self) -> str:
+        bouton = self.query_one("#ra-mode", RadioSet).pressed_button
+        return (bouton.id or "ra-local").removeprefix("ra-") if bouton else "local"
+
+    def _afficher(self, mode: str) -> None:
+        https = mode == "https"
+        self.query_one("#ra-domain", Input).set_class(not https, "hidden")
+        self.query_one("#ra-services", SelectionList).set_class(not https, "hidden")
+        aides = {
+            "local": t("Vos applications restent joignables depuis votre reseau seulement."),
+            "https": t(
+                "Chaque application recoit une adresse HTTPS sur votre domaine. Les "
+                "sous-domaines doivent pointer vers votre connexion publique, et la box "
+                "doit transmettre les ports 80 et 443 a cette machine."
+            ),
+            "tailscale": t(
+                "Vos appareils rejoignent le reseau prive Tailscale de ce serveur. "
+                "Sur Linux, PlugArr prepare Tailscale et donne le lien de connexion a la fin."
+            ),
+        }
+        self.query_one("#ra-aide", Static).update("[dim]" + aides[mode] + "[/dim]")
+
+    @on(RadioSet.Changed, "#ra-mode")
+    def _changer(self, _event: RadioSet.Changed) -> None:
+        self._afficher(self._mode())
+
+    @on(Button.Pressed, "#next")
+    def go(self) -> None:
+        from ..remote_models import RemoteAccessConfig
+
+        mode = self._mode()
+        domaine = self.query_one("#ra-domain", Input).value.strip() if mode == "https" else ""
+        services = list(self.query_one("#ra-services", SelectionList).selected) if mode == "https" else []
+        try:
+            choix = RemoteAccessConfig(mode=mode, domain=domaine, services=services)
+            if mode == "https" and (not choix.domain or not choix.services):
+                raise ValueError(t("Indiquez un domaine seul et choisissez au moins une application."))
+        except ValueError as exc:
+            message = exc.errors()[0]["msg"] if hasattr(exc, "errors") else str(exc)
+            self.query_one("#ra-aide", Static).update(f"[red]{message}[/red]")
+            return
+        self.app.remote_access = choix
+        self.app.stack_config = None
+        self.app.push_screen(SummaryScreen())
+
+    @on(Button.Pressed, "#back")
+    def back(self) -> None:
+        self.app.pop_screen()
 
 
 # ----------------------------------------------------------------- recapitulatif
@@ -1448,8 +1624,21 @@ def _suite_apres_vpn(app) -> None:
 class SummaryScreen(WizardScreen):
     SUB_TITLE = "Etape 3/3 - Recapitulatif (rien n'est encore ecrit)"
 
+    def __init__(self, *args: object, saute: bool = False, **kw: object) -> None:
+        #: Arrive directement depuis les applications, en reprise.
+        self.saute = saute
+        super().__init__(*args, **kw)
+
     def content(self) -> ComposeResult:
         with VerticalScroll(id="summary"):
+            yield Static(
+                t(
+                    "[cyan]Reglages repris : les ecrans Chemins, VPN et Qualite ont "
+                    "ete passes.[/cyan] [dim]« Modifier les reglages » pour y revenir.[/dim]"
+                ),
+                id="saute",
+                classes="" if self.saute else "hidden",
+            )
             yield DataTable(id="summary-table", cursor_type="row")
             yield Static(id="summary-paths")
             yield Static(id="summary-warnings")
@@ -1467,9 +1656,14 @@ class SummaryScreen(WizardScreen):
                 yield RadioButton("Supprimer et repartir de zero", id="cfg-supprimer")
         yield Horizontal(
             Button("Installer et cabler", variant="success", id="install"),
+            Button(t("Modifier les reglages"), id="modifier", classes="" if self.saute else "hidden"),
             Button("Retour", id="back"),
             classes="actions",
         )
+
+    @on(Button.Pressed, "#modifier")
+    def modifier(self) -> None:
+        self.app.push_screen(PathsScreen(depart=self.app.build_config()))
 
     def on_mount(self) -> None:
         cfg = self.app.build_config()
@@ -1491,6 +1685,11 @@ class SummaryScreen(WizardScreen):
             ),
             f"[b]PUID:PGID[/b]      {cfg.puid}:{cfg.pgid} [dim]({t(cfg.ids_source)})[/dim]",
             f"[b]UMASK / TZ[/b]     {cfg.umask}   {cfg.timezone}",
+            t("[b]Acces distant[/b]  {mode}", mode=(
+                f"HTTPS · {cfg.remote_access.domain}"
+                if cfg.remote_access.mode == "https"
+                else "Tailscale" if cfg.remote_access.mode == "tailscale" else t("Local uniquement")
+            )),
         ]
         concurrents = downloadclients.concurrents(cfg.services)
         if concurrents:
@@ -1704,11 +1903,27 @@ class InstallScreen(WizardScreen):
         yield RichLog(id="install-log", markup=True, wrap=True)
         yield Horizontal(
             Button("Terminer", variant="primary", id="done", disabled=True),
+            Button(t("Revoir les reglages et reessayer"), id="retry", classes="hidden"),
             classes="actions",
         )
 
     def on_mount(self) -> None:
         self.run_install()
+
+    def _proposer_relance(self) -> None:
+        # Parite avec l'assistant web, qui offrait deja ce bouton : apres un
+        # echec, le TUI ne proposait que « Terminer ».
+        self.query_one("#retry", Button).remove_class("hidden")
+
+    @on(Button.Pressed, "#retry")
+    def retry(self) -> None:
+        """Retour au recapitulatif, reconstruit : l'essai interrompu a pu ecrire
+        une configuration, que la reprise doit maintenant reconnaitre."""
+        self.app.stack_config = None
+        self.app.results = []
+        self.app.pop_screen()
+        self.app.pop_screen()
+        self.app.push_screen(SummaryScreen())
 
     def _log(self, text: str) -> None:
         self.query_one("#install-log", RichLog).write(text)
@@ -1770,6 +1985,7 @@ class InstallScreen(WizardScreen):
             app.call_from_thread(self._log, f"[red]{exc}[/red]")
             app.call_from_thread(self._phase, "[red]Installation interrompue[/red]")
             app.call_from_thread(self._enable_done, [])
+            app.call_from_thread(self._proposer_relance)
             return
         except Exception as exc:  # noqa: BLE001 - rien ne doit tuer l'assistant
             # Sans ce filet, une erreur imprevue fait disparaitre la fenetre en
@@ -1785,6 +2001,7 @@ class InstallScreen(WizardScreen):
             )
             app.call_from_thread(self._phase, "[red]Installation interrompue[/red]")
             app.call_from_thread(self._enable_done, [])
+            app.call_from_thread(self._proposer_relance)
             return
         app.call_from_thread(self._enable_done, results)
 
@@ -1834,10 +2051,92 @@ class ReportScreen(WizardScreen):
         with VerticalScroll(id="report"):
             yield DataTable(id="report-table", cursor_type="row")
             yield Static(id="report-next")
+            yield Static(t("[b]Mises a jour disponibles[/b]  [dim]recherche...[/dim]"), id="report-updates")
+            yield Static(id="report-admin")
+            # Acces distant : parite avec l'assistant web, qui l'activait ici.
+            yield Static(id="report-remote", classes="hidden")
+            yield Checkbox(
+                "Je comprends que cette passerelle rend ces applications joignables hors de chez moi.",
+                id="remote-confirm",
+                classes="hidden",
+            )
+            with Horizontal(id="remote-actions", classes="hidden"):
+                yield Button("Activer l'acces distant", id="remote-activate", disabled=True)
+                yield Button("Actualiser", id="remote-refresh")
+                yield Button("Desactiver", id="remote-deactivate", disabled=True)
         yield Horizontal(
             Button("Ouvrir la page d'acces", variant="success", id="open-page"),
+            Button(t("Ouvrir l'administration"), id="open-admin"),
+            Button("Configurer mon telephone", id="phone"),
             Button("Fermer", variant="primary", id="close"),
             classes="actions",
+        )
+
+    @work(thread=True)
+    def chercher_mises_a_jour(self) -> None:
+        """Parite avec l'assistant web : versions testees installees, les plus
+        recentes signalees. Rien n'est change."""
+        from .. import updates
+
+        cfg = self.app.stack_config
+        if cfg is None:
+            return
+        try:
+            donnees = updates.disponibles(cfg)
+        except Exception as exc:  # noqa: BLE001 - le rapport doit rester lisible
+            texte = t("[b]Mises a jour disponibles[/b]  [yellow]recherche impossible : {erreur}[/yellow]", erreur=exc)
+        else:
+            if donnees["updates"]:
+                texte = t("[b]Mises a jour disponibles[/b]") + "\n" + "\n".join(
+                    f"  {u['name']} : {u['current']} -> {u['latest']}" for u in donnees["updates"]
+                ) + "\n" + t(
+                    "[dim]PlugArr installe les versions qu'il a testees ; ces mises a jour "
+                    "se font ensuite depuis l'administration.[/dim]"
+                )
+            else:
+                texte = t("[b]Mises a jour disponibles[/b]  toutes les applications sont dans leur derniere version.")
+            if donnees["unchecked"]:
+                texte += "\n" + t("[dim]Non verifiees : {noms}[/dim]", noms=", ".join(donnees["unchecked"]))
+        self.app.call_from_thread(self.query_one("#report-updates", Static).update, texte)
+
+    @on(Button.Pressed, "#phone")
+    def open_phone(self) -> None:
+        """Parite avec l'assistant web : fichiers nzb360, qbRemote, Arr Control."""
+        from .telephone import PhoneScreen
+
+        self.app.push_screen(PhoneScreen())
+
+    @on(Button.Pressed, "#open-admin")
+    def open_admin(self) -> None:
+        """Meme mecanisme que l'assistant web : la console tourne dans ce
+        processus, sur 127.0.0.1, le temps que l'assistant reste ouvert."""
+        import webbrowser
+
+        from .. import admin
+
+        zone = self.query_one("#report-admin", Static)
+        if getattr(self.app, "admin_url", None) is None:
+            cfg = self.app.stack_config
+            if cfg is None:
+                return
+            jeton = admin.generate_token()
+            serveur = admin.build_server(
+                cfg, Path(self.app.project_dir), host="127.0.0.1", port=0, token=jeton
+            )
+            import threading
+
+            threading.Thread(target=serveur.serve_forever, daemon=True).start()
+            self.app.admin_server = serveur
+            self.app.admin_url = f"http://127.0.0.1:{serveur.server_address[1]}/?t={jeton}"
+        try:
+            ouverte = webbrowser.open(self.app.admin_url)
+        except Exception:  # noqa: BLE001 - un NAS n'a pas de navigateur
+            ouverte = False
+        zone.update(
+            (t("[green]Administration ouverte dans votre navigateur.[/green]") if ouverte
+             else t("[yellow]Aucun navigateur ici : ouvrez cette adresse sur cette machine.[/yellow]"))
+            + f"\n[dim]{self.app.admin_url}[/dim]\n"
+            + t("[dim]Elle reste disponible tant que l'assistant est ouvert ; ensuite, lancez administration.sh.[/dim]")
         )
 
     def on_mount(self) -> None:
@@ -1880,6 +2179,82 @@ class ReportScreen(WizardScreen):
         )
         self.query_one("#report-next", Static).update(body)
         self._ouvrir_automatiquement()
+        self.chercher_mises_a_jour()
+        self._preparer_acces_distant()
+
+    def _preparer_acces_distant(self) -> None:
+        from .. import remote_access
+
+        cfg = self.app.stack_config
+        if cfg is None or cfg.remote_access.mode == "local":
+            return
+        for selecteur in ("#report-remote", "#remote-confirm", "#remote-actions"):
+            self.query_one(selecteur).remove_class("hidden")
+        self._afficher_acces(remote_access.summary(cfg))
+
+    def _afficher_acces(self, resultat: dict) -> None:
+        lignes = [t("[b]Acces distant[/b]  {message}", message=resultat.get("message", ""))]
+        lignes += [f"  {sid} : {url}" for sid, url in (resultat.get("urls") or {}).items()]
+        if resultat.get("auth_url"):
+            lignes.append(t("  Lien d'association Tailscale : {lien}", lien=resultat["auth_url"]))
+        self.query_one("#report-remote", Static).update("\n".join(lignes))
+
+    @on(Checkbox.Changed, "#remote-confirm")
+    def _confirmer_acces(self, event: Checkbox.Changed) -> None:
+        self.query_one("#remote-activate", Button).disabled = not event.value
+        self.query_one("#remote-deactivate", Button).disabled = not event.value
+
+    @on(Button.Pressed, "#remote-activate")
+    def _activer(self) -> None:
+        self.operation_acces("activate")
+
+    @on(Button.Pressed, "#remote-refresh")
+    def _actualiser(self) -> None:
+        self.operation_acces("inspect")
+
+    @on(Button.Pressed, "#remote-deactivate")
+    def _desactiver(self) -> None:
+        self.operation_acces("deactivate")
+
+    @work(thread=True, exclusive=True, group="acces-distant")
+    def operation_acces(self, action: str) -> None:
+        """Meme sequence que l'assistant web : operation, puis page d'acces
+        reecrite avec le resultat. Une erreur imprevue ne montre jamais son
+        detail : il peut contenir un lien d'autorisation Tailscale."""
+        from .. import dashboard, remote_access
+
+        cfg = self.app.stack_config
+        if cfg is None:
+            return
+        if action in ("activate", "deactivate") and not self.query_one("#remote-confirm", Checkbox).value:
+            return
+        self.app.call_from_thread(
+            self._afficher_acces, {"message": t("Configuration de l'acces distant en cours...")}
+        )
+        operation = {
+            "activate": remote_access.activate,
+            "inspect": remote_access.inspect,
+            "deactivate": remote_access.deactivate,
+        }[action]
+        try:
+            resultat = operation(cfg, Path(self.app.project_dir))
+            chemin = Path(self.app.project_dir) / dashboard.FILENAME
+            chemin.write_text(dashboard.render(cfg, remote_report=resultat), encoding="utf-8")
+            chemin.chmod(0o600)
+        except ValueError as exc:
+            resultat = {**remote_access.summary(cfg), "message": str(exc)}
+        except Exception:  # noqa: BLE001
+            journal.LOGGER.exception("acces distant")
+            resultat = {
+                **remote_access.summary(cfg),
+                "message": t(
+                    "Verification distante impossible. Verifiez Docker, le reseau et les "
+                    "identifiants des applications."
+                ),
+            }
+        # Les fichiers du telephone en ont besoin : ce sont les adresses distantes.
+        self.app.remote_result = resultat
+        self.app.call_from_thread(self._afficher_acces, resultat)
 
     def _ouvrir_automatiquement(self) -> None:
         """Ouvre la page d'acces sans attendre un clic.

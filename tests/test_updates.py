@@ -129,3 +129,17 @@ def test_adopted_services_are_never_offered_an_update():
         adopt.build_plan([entry]), data_root="/d", config_root="/c"
     )
     assert updates.check(cfg, check_tags=False) == []
+
+
+def test_les_tags_linuxserver_avec_base_et_construction_se_comparent():
+    """Jellyfin 12 n'existe chez LinuxServer que sous `12.1ubu2604-ls50`."""
+    from plugarr.updates import _same_shape, parse_version
+
+    assert parse_version("12.1ubu2604-ls51") > parse_version("12.1ubu2604-ls50")
+    assert parse_version("12.1.1ubu2604-ls52") > parse_version("12.1ubu2604-ls50")
+    assert parse_version("12.2ubu2604-ls1") > parse_version("12.1.1ubu2604-ls99")
+    assert _same_shape("12.2ubu2604-ls53", "12.1ubu2604-ls50")
+    assert not _same_shape("12.2", "12.1ubu2604-ls50")
+    assert not _same_shape("version-12.2ubu2604", "12.1ubu2604-ls50")
+    assert not _same_shape("nightly-2026092110ubu2604-ls103", "12.1ubu2604-ls50")
+

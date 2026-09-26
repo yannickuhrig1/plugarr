@@ -133,10 +133,10 @@ def _fichiers_config(racine: Path, dire: Callable[[str], None]):
 def volumes_du_projet(cfg: StackConfig) -> list[str]:
     """Volumes Docker qui portent de l'etat a sauvegarder.
 
-    Deduits du catalogue : la base de Silo et celle de DroppedNeedle
-    aujourd'hui. Une sauvegarde qui n'archive que des dossiers les manquerait
-    en silence, et la restauration rendrait des services qui refusent les
-    identifiants annonces.
+    Deduits du catalogue : bases de donnees, caches applicatifs et etat des
+    compagnons internes comme Libation. Une sauvegarde qui n'archive que des
+    dossiers les manquerait en silence, et la restauration rendrait des
+    services incomplets ou qui refusent les identifiants annonces.
     """
     from .orchestrator import volumes_nommes
 
@@ -200,7 +200,9 @@ def sauvegarder(
     arrete = False
     if not live:
         dire(t("arret des conteneurs (une base copiee a chaud est corrompue)"))
-        arrete, _ = runner.stop()
+        # Jamais la console : c'est elle qui pilote la sauvegarde quand on la
+        # lance depuis son bouton, et elle ne porte aucune base a proteger.
+        arrete, _ = runner.stop(sauf=("console",))
 
     temporaires = destination.parent / f".{destination.stem}-volumes"
     complete = False

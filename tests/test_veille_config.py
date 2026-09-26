@@ -95,7 +95,13 @@ def test_la_veille_travaille_avec_le_fichier_reduit(tmp_path, monkeypatch):
     assert veille._adresse(reduit, "qbittorrent", True) == "http://gluetun:8080"
     assert veille._adresse(reduit, "sonarr", True) == "http://sonarr:8989"
     assert veille.conteneurs(reduit, interne=True) == []
-    assert veille.disques(reduit) == veille.disques(cfg)
+    # Memes disques, memes dossiers, meme capacite. L'espace LIBRE se mesure a
+    # deux instants : une ecriture disque entre les deux faisait echouer ce
+    # test au hasard (releve le 26/09/2026, 2,4 Mo d'ecart pendant un build).
+    def stable(disques):
+        return [{cle: d[cle] for cle in ("dossiers", "chemin", "total")} for d in disques]
+
+    assert stable(veille.disques(reduit)) == stable(veille.disques(cfg))
 
 
 def test_l_original_n_est_pas_touche(tmp_path):

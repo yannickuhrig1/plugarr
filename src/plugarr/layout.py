@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -327,7 +328,12 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
 #: creait le dossier en root et Recyclarr se faisait jeter a l'ecriture. Il
 #: n'avait alors aucune interface pour le dire : seule une synchronisation en
 #: echec, sans cause lisible.
-SANS_PUID = frozenset({"seerr", "recyclarr"})
+#:
+#: Flood ne lit pas davantage PUID/PGID et son image ne demarre pas en root pour
+#: corriger le volume. Le conteneur recoit donc `user:` dans le compose et son
+#: dossier doit appartenir a ce meme compte, y compris quand une installation
+#: anterieure l'a deja cree sous root.
+SANS_PUID = frozenset({"seerr", "recyclarr", "flood"})
 
 
 def create_tree(
@@ -353,21 +359,25 @@ def create_tree(
     appartient a root — donnait une pile qui demarre et qui ne telecharge rien.
     Les images reprennent leur configuration, jamais les donnees.
 
-    Les dossiers DEJA presents ne sont pas repris : un `chown -R` sur une
-    mediatheque de plusieurs tera serait long, et ce n'est pas a une
-    installation de redistribuer ce qu'elle n'a pas cree.
+    Le CONTENU des dossiers deja presents n'est jamais repris : un `chown -R`
+    sur une mediatheque de plusieurs tera serait long, et ce n'est pas a une
+    installation de redistribuer ce qu'elle n'a pas cree. En revanche, chaque
+    dossier attendu qui appartient encore a root est repare individuellement.
+    Cela reprend sans danger une premiere installation `sudo` interrompue sur
+    UGOS, sans parcourir ni modifier les fichiers qu'elle contient.
     """
     created: list[Path] = []
     data_root, config_root = Path(data_root), Path(config_root)
+    data_root.mkdir(parents=True, exist_ok=True)
+    if owner is not None:
+        _reparer_dossier_donnees(data_root, owner)
     for sub in DATA_SUBDIRS:
         p = data_root / sub
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
             created.append(p)
-            if owner is not None:
-                # Tout juste cree, donc vide : le parcours de `_donner` ne coute
-                # rien et n'atteint aucun fichier de l'utilisateur.
-                _donner(p, owner)
+        if owner is not None:
+            _reparer_dossier_donnees(p, owner)
     for sid in service_ids:
         spec = catalog.CATALOG.get(sid)
         # On cree le dossier que le compose MONTE, pas un dossier portant le nom
@@ -393,6 +403,33 @@ def _est_root() -> bool:
     return os.name == "posix" and os.geteuid() == 0
 
 
+def _reparer_dossier_donnees(dossier: Path, owner: tuple[int, int]) -> None:
+    """Reprend un dossier root sans toucher a ce qu'il contient.
+
+    UGOS impose souvent de lancer l'installation avec ``sudo``. Une premiere
+    tentative interrompue peut donc laisser l'arborescence `/data` a root ; la
+    relance la trouvait deja presente et Sonarr/Radarr ne pouvaient pas y creer
+    leurs dossiers racines. On corrige uniquement les repertoires connus de
+    PlugArr, uniquement s'ils appartiennent encore a root, et jamais de facon
+    recursive. Un lien symbolique est ignore pour ne pas changer sa cible.
+    """
+    if not _est_root():
+        return
+    if not stat.S_ISDIR(os.stat(dossier, follow_symlinks=False).st_mode):
+        return
+    options = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    descripteur = os.open(dossier, options)
+    try:
+        informations = os.fstat(descripteur)
+        if not stat.S_ISDIR(informations.st_mode) or informations.st_uid != 0:
+            return
+        os.fchown(descripteur, *owner)
+        droits = stat.S_IMODE(informations.st_mode) | 0o770
+        os.fchmod(descripteur, droits)
+    finally:
+        os.close(descripteur)
+
+
 def _donner(dossier: Path, owner: tuple[int, int]) -> None:
     """Attribue le dossier et son contenu. Seul root le peut ; hors root, le
     dossier appartient deja a l'utilisateur qui lance PlugArr."""
@@ -402,6 +439,88 @@ def _donner(dossier: Path, owner: tuple[int, int]) -> None:
         return
     for chemin in (dossier, *dossier.rglob("*")):
         os.chown(chemin, *owner, follow_symlinks=False)
+
+
+def _inscriptible_par(dossier: Path, owner: tuple[int, int]) -> bool:
+    """Le compte (uid, gid) des conteneurs peut-il ECRIRE dans ce dossier ?
+
+    On lit les droits du dossier, on ne les essaie pas : le seul essai qui
+    vaudrait serait fait SOUS cet utilisateur, et plugarr ne peut pas devenir
+    quelqu'un d'autre. La lecture suffit pour le cas qui nous occupe, un dossier
+    laisse a root.
+
+    Hors POSIX, la question n'a pas de sens : Docker Desktop ne reporte pas la
+    propriete Unix sur un montage venu de Windows, et les bits de mode qu'y
+    rend `stat` sont decoratifs. On repond oui plutot que d'inventer un
+    probleme.
+    """
+    import stat as _stat
+
+    if os.name != "posix":
+        return True
+    uid, gid = owner
+    if uid == 0:
+        return True
+    try:
+        infos = dossier.stat()
+    except OSError:
+        # Un dossier qu'on n'arrive meme pas a interroger n'est pas un dossier
+        # dont on a quelque chose a dire ici.
+        return True
+    if infos.st_uid == uid:
+        return bool(infos.st_mode & _stat.S_IWUSR)
+    if infos.st_gid == gid:
+        return bool(infos.st_mode & _stat.S_IWGRP)
+    return bool(infos.st_mode & _stat.S_IWOTH)
+
+
+def donnees_inaccessibles(data_root: str | Path, owner: tuple[int, int]) -> list[Path]:
+    """Dossiers de donnees DEJA presents ou l'utilisateur des conteneurs ne
+    peut pas ecrire.
+
+    Constate le 2026-09-21 sur UGOS, journal a l'appui : une premiere
+    installation avait cree `/volume2/data` en root, la suivante n'y touchait
+    plus — `create_tree` ne reprend que ce qu'il cree — et Sonarr comme Radarr
+    refusaient leurs dossiers racines sur « Folder '/data/media/tv' is not
+    writable by user 'abc' ». Rien, dans l'installation, n'avait vu venir cette
+    panne : l'arborescence etait complete, seuls les droits ne l'etaient pas.
+    """
+    racine = Path(data_root)
+    presents = (racine / sous for sous in DATA_SUBDIRS)
+    return [p for p in presents if p.is_dir() and not _inscriptible_par(p, owner)]
+
+
+def ouvrir_donnees(data_root: str | Path, owner: tuple[int, int]) -> tuple[list[Path], list[Path]]:
+    """Rend aux conteneurs les dossiers de donnees qu'ils ne peuvent pas ecrire.
+
+    Renvoie (repares, restants) : ce qui a ete rendu, et ce qui resiste encore
+    et doit donc etre dit a l'utilisateur.
+
+    Le `chown` porte sur le DOSSIER SEUL, jamais sur son contenu. La distinction
+    est tout le sujet : donner le dossier suffit a ce que les conteneurs y
+    ecrivent, alors qu'un `chown -R` sur une mediatheque de plusieurs tera
+    prendrait des heures et redistribuerait des fichiers que plugarr n'a pas
+    crees. On repare le point de montage, on ne touche pas aux medias.
+
+    Et on ne repare QUE ce qui est casse : un dossier deja inscriptible n'est
+    pas repris, pour ne pas defaire un partage voulu (un dossier de groupe en
+    2775, par exemple).
+    """
+    repares: list[Path] = []
+    restants: list[Path] = []
+    for dossier in donnees_inaccessibles(data_root, owner):
+        if not _est_root():
+            # Sans elevation, il n'y a rien a tenter : `chown` est refuse a tout
+            # le monde sauf root, meme sur ses propres dossiers.
+            restants.append(dossier)
+            continue
+        try:
+            os.chown(dossier, *owner, follow_symlinks=False)
+        except OSError:
+            restants.append(dossier)
+        else:
+            repares.append(dossier)
+    return repares, restants
 
 
 def _dossiers_absents(chemin: Path) -> list[Path]:
@@ -457,7 +576,17 @@ def hardlink_supported(data_root: str | Path) -> tuple[bool, str]:
                 erreur=exc,
             )
 
-        fd, src = tempfile.mkstemp(dir=src_dir, prefix=".plugarr-hardlink-")
+        try:
+            fd, src = tempfile.mkstemp(dir=src_dir, prefix=".plugarr-hardlink-")
+        except OSError as exc:
+            # Essai reel du 25/09/2026 : la console en conteneur monte DATA_ROOT
+            # en lecture seule, et cette exception faisait planter `doctor` et le
+            # bouton de diagnostic de la console au lieu de rendre un controle.
+            return False, t(
+                "test des hardlinks impossible : {source} n'accepte pas d'ecriture ici ({erreur}).",
+                source=src_dir,
+                erreur=exc,
+            )
         os.close(fd)
         dst = dst_dir / (Path(src).name + ".link")
         try:

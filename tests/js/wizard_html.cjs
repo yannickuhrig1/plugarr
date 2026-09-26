@@ -52,3 +52,113 @@ for (const [, key, texte] of placeholders) {
   assert.notEqual(vm.runInContext(`tr(${JSON.stringify(key)})`, context), key,
     `placeholder anglais absent pour ${key}`);
 }
+
+vm.runInContext("lang = 'fr';", context);
+assert.equal(vm.runInContext("tr('sshRemoteBadge')", context), 'SSH DISTANT',
+  'le badge SSH distant doit etre traduit en francais');
+
+// Une installation distante doit ignorer les choix de reprise et de nettoyage
+// de l'installation locale, meme si leurs boutons radio restent coches dans le
+// DOM. C'etait ce qui empechait /api/validate de fournir un plan_id.
+const fieldsSource = source.slice(
+  source.indexOf('function readVpnFields()'),
+  source.indexOf('function updatePlatformInfo()'),
+);
+const values = Object.fromEntries([
+  'platform','project_name','data_root','config_root','username','host',
+  'timezone','language','vpn-provider','vpn-type','vpn-key','vpn-addresses',
+  'vpn-user','vpn-password','vpn-manual-countries',
+].map(id => [id, {value:''}]));
+Object.assign(values, {
+  'project-dir': {textContent:'/srv/plugarr'},
+  'remote-replace': {checked:false},
+  'vpn-enabled': {checked:false},
+  'veille-enabled': {checked:false},
+  'veille-port': {value:'7374'},
+  'veille-docker': {checked:false},
+  'console-enabled': {checked:false},
+  'console-port': {value:'7373'},
+});
+const fieldsContext = {
+  form:{}, remoteProbe:{connection_id:'remote-1', fingerprint:'SHA256:test'}, remoteExisting:null,
+  bootstrap:{providers:{'':{choices:[]}}, existing:true, download_clients:[]},
+  effective:[], lang:'fr', competingClients:()=>[], selectedPlaces:()=>[],
+  $:id => values[id],
+  document:{querySelector:selector => {
+    if (selector === 'input[name="install-target"]:checked') return {value:'ssh'};
+    if (selector === 'input[name="resume"]:checked') return {value:'yes'};
+    if (selector === 'input[name="reset"]:checked') return {value:'delete'};
+    if (selector === 'input[name="sab-route"]:checked') return {value:'direct'};
+    return null;
+  }},
+  PlugArrRemote:{read:()=>({mode:'local',domain:'',services:[]})},
+};
+vm.createContext(fieldsContext);
+vm.runInContext(fieldsSource, fieldsContext);
+vm.runInContext('readFields()', fieldsContext);
+assert.equal(fieldsContext.form.install_target, 'ssh');
+assert.equal(fieldsContext.form.reprendre, false,
+  'la reprise locale ne doit jamais partir dans une validation SSH');
+assert.equal(fieldsContext.form.reset_config, true,
+  'le nettoyage distant demande reste dans la validation SSH');
+assert.equal(fieldsContext.form.remote_replace, false,
+  'le remplacement distant doit demander une confirmation separee');
+// Second passage reel du 25/09/2026 : la pile trouvee SUR LE SERVEUR se reprend.
+vm.runInContext("remoteExisting = {services:[]}; readFields()", fieldsContext);
+assert.equal(fieldsContext.form.reprendre, true,
+  'une pile PlugArr trouvee sur le serveur doit etre reprise');
+vm.runInContext('remoteExisting = null', fieldsContext);
+values['remote-replace'].checked = true;
+vm.runInContext('readFields()', fieldsContext);
+assert.equal(fieldsContext.form.remote_replace, true,
+  'la confirmation de remplacement distant doit etre transmise');
+
+// Essai reel du 25/09/2026 : apres un echec, le bouton de relance etait dans
+// #post-install, qui reste cache tant que l'installation n'a pas abouti.
+{
+  const retry = html.indexOf('id="retry"');
+  const post = html.indexOf('<div id="post-install"');
+  assert.ok(retry > 0 && post > 0, 'bouton retry ou bloc post-install introuvable');
+  assert.ok(retry < post, 'le bouton de relance ne doit pas etre dans #post-install, cache en cas d echec');
+}
+// Et le statut SSH affichait la cle brute « sshReady ».
+for (const cle of ['sshReady', 'sshPrivateHost']) {
+  vm.runInContext("lang = 'fr';", context);
+  assert.notEqual(vm.runInContext(`tr(${JSON.stringify(cle)})`, context), cle, `${cle} absent en francais`);
+  vm.runInContext("lang = 'en';", context);
+  assert.notEqual(vm.runInContext(`tr(${JSON.stringify(cle)})`, context), cle, `${cle} absent en anglais`);
+}
+assert.ok(source.includes("result.suggested_host || sshHost"),
+  "l'adresse de la machine doit reprendre celle proposee par le test SSH");
+console.log('Retry visible after failure, SSH status translated, suggested host used: OK');
+
+// Demande du 26/09/2026 : en reprise, « Continuer » saute les pages deja connues.
+{
+  const debut = source.indexOf('function repriseDirecte(');
+  const fonction = source.slice(debut, source.indexOf('\n}\n', debut) + 3);
+  const cas = (install_target, existante, choix, existingLocal = false, reprendre = true) => {
+    const ctx = {
+      form: {install_target, reprendre}, remoteExisting: existante, bootstrap: {existing: existingLocal},
+      document: {querySelector: sel => sel.includes('ssh-existing') && choix ? {value: choix} : null},
+    };
+    vm.createContext(ctx); vm.runInContext(fonction, ctx);
+    return vm.runInContext('repriseDirecte()', ctx);
+  };
+  assert.equal(cas('ssh', {services: []}, 'resume'), true, 'reprise SSH : pages sautees');
+  assert.equal(cas('ssh', {services: []}, 'fresh'), false, 'repartir de zero : toutes les pages');
+  assert.equal(cas('ssh', null, null), false, 'serveur neuf : toutes les pages');
+  assert.equal(cas('local', null, null, true), true, 'reprise locale : pages sautees');
+  assert.equal(cas('local', null, null, false), false, 'installation locale neuve : toutes les pages');
+  assert.ok(source.includes('showStep(direct ? 5 : step + 1)'), 'le raccourci doit mener a la verification');
+  console.log('Resume skips known pages, fresh install does not: OK');
+}
+
+// Validation reelle du 26/09/2026 : la reprise perdait les pays du VPN.
+{
+  const debut = source.indexOf('function applyRemoteExisting(');
+  const corps = source.slice(debut, source.indexOf('\n}\n', debut));
+  const vide = corps.indexOf("$('vpn-places').replaceChildren()");
+  assert.ok(vide > 0 && vide < corps.indexOf('updatePlaces()'),
+    'la liste des pays doit etre videe avant d etre reconstruite depuis le reglage repris');
+  console.log('Resumed VPN countries rebuilt from the resumed setting: OK');
+}

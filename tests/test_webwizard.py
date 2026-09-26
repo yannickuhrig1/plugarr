@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import re
 import threading
 from pathlib import Path
 from unittest.mock import Mock
@@ -11,12 +14,22 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from plugarr import compose, interface, orchestrator, webwizard
+from plugarr import adminauth, catalog, compose, interface, orchestrator, remote_install, webwizard
 from plugarr.cli import app
 from plugarr.layout import default_profile
 from plugarr.models import VpnConfig
 from plugarr.runner import Check
 from plugarr.wiring import StepResult
+
+
+@pytest.fixture(autouse=True)
+def _aucune_pile_distante(monkeypatch):
+    """Le test SSH inspecte aussi la pile distante : par defaut, il n'y en a pas."""
+    monkeypatch.setattr(
+        remote_install,
+        "inspect_project",
+        lambda *_args, **_kwargs: remote_install.RemoteProjectState(exists=False, managed=False),
+    )
 
 
 @pytest.fixture
@@ -168,6 +181,310 @@ def test_api_rejects_other_origins_hosts_and_missing_sessions(server):
     assert client.get("/wizard-profile.css").status_code == 200
     assert client.get("/wizard-parity.css").status_code == 200
     assert client.get("/api/unknown").status_code == 404
+
+
+def test_api_sonde_une_cible_ssh_et_ne_renvoie_jamais_son_secret(server, monkeypatch):
+    srv, client = server
+
+    def fake_probe(target, credentials, *, connect):
+        assert target.host == "nas.local"
+        assert target.port == 2222
+        assert target.username == "yannick"
+        assert credentials.password == "secret-ssh"
+        assert connect is remote_install.connect_paramiko
+        return remote_install.RemoteProbe(
+            fingerprint="SHA256:serveur-maison",
+            system="Linux",
+            machine="x86_64",
+            uid=1000,
+            gid=100,
+            home="/home/yannick",
+            docker_version="29.8.1",
+        )
+
+    monkeypatch.setattr(remote_install, "probe", fake_probe)
+    response = client.post(
+        "/api/remote-install/probe",
+        json={
+            "host": "nas.local",
+            "port": 2222,
+            "username": "yannick",
+            "password": "secret-ssh",
+            "private_key": "",
+            "passphrase": "",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["connection_id"]
+    assert result["fingerprint"] == "SHA256:serveur-maison"
+    assert result["ready"] is True
+    assert result["project_dir"] == "/home/yannick/plugarr"
+    assert result["config_root"] == "/home/yannick/plugarr/config"
+    assert "secret-ssh" not in response.text
+    assert result["connection_id"] in srv.state.remote_connections
+
+
+def test_web_installe_sur_la_cible_confirmee_sans_preflight_docker_local(server, monkeypatch):
+    srv, client = server
+    srv.state.demo = False
+    monkeypatch.setattr(
+        remote_install,
+        "probe",
+        lambda *_args, **_kwargs: remote_install.RemoteProbe(
+            fingerprint="SHA256:serveur-maison",
+            system="Linux",
+            machine="x86_64",
+            uid=1000,
+            gid=100,
+            home="/home/yannick",
+            docker_version="29.8.1",
+        ),
+    )
+    monkeypatch.setattr(
+        remote_install,
+        "inspect_project",
+        lambda *_args, **_kwargs: remote_install.RemoteProjectState(
+            exists=False, managed=False
+        ),
+    )
+    probe_result = client.post(
+        "/api/remote-install/probe",
+        json={
+            "host": "nas.local",
+            "port": 22,
+            "username": "yannick",
+            "password": "secret-ssh",
+        },
+    ).json()
+    local_preflight = Mock(side_effect=AssertionError("preflight local interdit"))
+    monkeypatch.setattr(orchestrator, "preflight", local_preflight)
+    deployments = []
+
+    def fake_deploy(target, credentials, deployment, *, connect, on_event):
+        deployments.append((target, credentials, deployment, connect))
+        on_event({"kind": "progress", "phase": "images Docker", "message": "Images pretes"})
+        on_event(
+            {
+                "kind": "step",
+                "name": "Prowlarr vers Sonarr",
+                "detail": "Connexion verifiee",
+                "ok": True,
+                "step_id": "prowlarr-sonarr",
+            }
+        )
+        on_event({"kind": "credentials", "services": {
+            "prowlarr": {"api_key": "a" * 32},
+            "qbittorrent": {"username": "ancien", "password": "mot-de-passe-repris"},
+        }})
+        on_event({"kind": "done", "status": "done"})
+        return remote_install.RemoteDeployResult(status="done", events=())
+
+    monkeypatch.setattr(remote_install, "deploy", fake_deploy)
+    form = fields(srv.state)
+    form.update(
+        {
+            "services": ["sonarr", "prowlarr", "qbittorrent"],
+            "install_target": "ssh",
+            "remote_connection_id": probe_result["connection_id"],
+            "remote_fingerprint": probe_result["fingerprint"],
+            "remote_project_dir": probe_result["project_dir"],
+            "platform": "generic-linux",
+            "config_root": probe_result["config_root"],
+            "data_root": probe_result["data_root"],
+            "host": "nas.local",
+            "reprendre": False,
+            "console_enabled": True,
+        }
+    )
+    plan = client.post("/api/validate", json=form)
+
+    assert plan.status_code == 200, plan.text
+    summary = plan.json()
+    assert summary["install_target"] == "ssh"
+    assert summary["project_dir"] == "/home/yannick/plugarr"
+    assert summary["puid"] == 1000
+    assert summary["pgid"] == 100
+    assert summary["plan_id"]
+    started = client.post(
+        "/api/install", json={"plan_id": summary["plan_id"], "confirm": True}
+    )
+    assert started.status_code == 200
+    srv.state.worker.join(timeout=5)
+
+    assert client.get("/api/progress").json()["status"] == "done"
+    assert len(deployments) == 1
+    target, credentials, deployment, connect = deployments[0]
+    assert target.expected_fingerprint == "SHA256:serveur-maison"
+    assert credentials.password == "secret-ssh"
+    assert connect is remote_install.connect_paramiko
+    assert deployment.project_dir == "/home/yannick/plugarr"
+    assert "services:" in deployment.stack_yaml
+    assert list(srv.state.launch_project_dir.iterdir()) == []
+    local_preflight.assert_not_called()
+    report = client.get("/api/report").json()
+    assert report["console_url"] == "http://nas.local:7373/"
+    assert report["console_password"]
+    assert adminauth.verify_password(
+        report["console_password"], srv.state.cfg.admin_password_hash
+    )
+    assert report["console_password"] not in deployment.stack_yaml
+    assert srv.state.cfg.admin_password_hash in deployment.stack_yaml
+    assert report["console_password"] not in client.get("/api/progress").text
+    assert report["console_password"] in client.get("/api/access").text
+    services = {item["id"]: item for item in report["services"]}
+    assert services["prowlarr"]["api_key"] == "a" * 32
+    assert services["qbittorrent"]["password"] == "mot-de-passe-repris"
+    assert "mot-de-passe-repris" not in client.get("/api/progress").text
+
+
+def test_pile_ssh_existante_demande_une_confirmation_distante_et_ignore_le_nettoyage_local(
+    tmp_path, monkeypatch
+):
+    state = webwizard.WizardState(tmp_path, demo=True)
+    state.previous = orchestrator.build_config(
+        services=["sonarr"],
+        config_root=str(tmp_path / "ancienne-config"),
+        data_root=str(tmp_path / "medias"),
+        platform=default_profile(),
+    )
+    probe_result = remote_install.RemoteProbe(
+        fingerprint="SHA256:serveur-maison",
+        system="Linux",
+        machine="aarch64",
+        uid=1000,
+        gid=1000,
+        home="/home/yannick",
+        docker_version="29.8.1",
+    )
+    state.remote_connections["remote-1"] = {
+        "target": remote_install.RemoteTarget(
+            host="nas.local", username="yannick"
+        ),
+        "credentials": remote_install.RemoteCredentials(password="secret"),
+        "probe": probe_result,
+        "created_at": webwizard.time.monotonic(),
+    }
+    monkeypatch.setattr(
+        remote_install,
+        "inspect_project",
+        lambda *_args, **_kwargs: remote_install.RemoteProjectState(
+            exists=True, managed=True, stack_sha="ancienne-pile",
+            project_name="plugarr", config_root="/home/yannick/plugarr/config",
+            data_root="/home/yannick/data", services=("sonarr",),
+        ),
+    )
+    form = fields(state)
+    form.update(
+        install_target="ssh",
+        remote_connection_id="remote-1",
+        remote_fingerprint=probe_result.fingerprint,
+        remote_project_dir="/home/yannick/plugarr",
+        platform="generic-linux",
+        config_root="/home/yannick/plugarr/config",
+        data_root="/home/yannick/data",
+        host="nas.local",
+        reprendre=False,
+        reset_config=False,
+    )
+
+    blocked = state.validate(form)
+    assert blocked["blocked"] is True
+    assert blocked["plan_id"] is None
+    assert blocked["remote_replace_required"] is True
+    assert blocked["remote_replace_managed"] is True
+    assert blocked["reset_candidates"] == ["sonarr"]
+
+    form["remote_replace"] = True
+    confirmed = state.validate(form)
+    assert confirmed["blocked"] is False
+    assert confirmed["plan_id"]
+    assert confirmed["remote_replace_confirmed"] is True
+    assert confirmed["reset_candidates"] == ["sonarr"]
+    assert confirmed["reset_requested"] is False
+
+    form["reset_config"] = True
+    reset_plan = state.validate(form)
+    assert reset_plan["blocked"] is False
+    assert reset_plan["reset_requested"] is True
+    assert reset_plan["reset_locations"] == []
+
+
+def test_essai_vpn_ssh_utilise_le_docker_distant(server, monkeypatch):
+    srv, client = server
+    srv.state.demo = False
+    monkeypatch.setattr(
+        remote_install,
+        "probe",
+        lambda *_args, **_kwargs: remote_install.RemoteProbe(
+            fingerprint="SHA256:serveur-maison",
+            system="Linux",
+            machine="aarch64",
+            uid=1000,
+            gid=1000,
+            home="/home/yannick",
+            docker_version="29.8.1",
+        ),
+    )
+    probe_result = client.post(
+        "/api/remote-install/probe",
+        json={
+            "host": "nas.local",
+            "port": 22,
+            "username": "yannick",
+            "password": "secret-ssh",
+        },
+    ).json()
+    local_test = Mock(side_effect=AssertionError("Docker local interdit"))
+    monkeypatch.setattr(webwizard.vpnessai, "essayer", local_test)
+    calls = []
+
+    def fake_remote_test(target, credentials, vpn, **kwargs):
+        calls.append((target, credentials, vpn, kwargs))
+        return {
+            "name": "Essai VPN",
+            "ok": True,
+            "detail": "tunnel distant etabli",
+            "blocking": False,
+        }
+
+    monkeypatch.setattr(remote_install, "test_vpn", fake_remote_test)
+    response = client.post(
+        "/api/vpn-test",
+        json={
+            "install_target": "ssh",
+            "remote_connection_id": probe_result["connection_id"],
+            "remote_fingerprint": probe_result["fingerprint"],
+            "vpn": {
+                "enabled": True,
+                "provider": "protonvpn",
+                "vpn_type": "wireguard",
+                "wireguard_private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "countries": "France",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["detail"] == "tunnel distant etabli"
+    assert len(calls) == 1
+    target, credentials, _vpn, kwargs = calls[0]
+    assert target.expected_fingerprint == probe_result["fingerprint"]
+    assert credentials.password == "secret-ssh"
+    assert kwargs["uid"] == 1000
+    assert kwargs["gid"] == 1000
+    local_test.assert_not_called()
+
+
+def test_ports_veille_et_console_restent_des_champs_numeriques_larges():
+    html = (webwizard.ASSETS / "wizard.html").read_text(encoding="utf-8")
+    css = (webwizard.ASSETS / "wizard-parity.css").read_text(encoding="utf-8")
+
+    assert 'class="port-field"><span data-i18n="veillePort"' in html
+    assert 'class="port-field"><span data-i18n="consolePort"' in html
+    assert '.choice-box input[type="checkbox"]' in css
+    assert '.choice-box .port-field input[type="number"]' in css
 
 
 def test_validation_failure_invalidates_previous_plan_and_hides_secret_input(server):
@@ -445,6 +762,21 @@ def test_demo_post_install_indexers_report_and_access_page(server):
     access = client.get("/api/access")
     assert access.headers["content-type"].startswith("text/html")
     assert "plugarr.lan" in access.text
+    preview = client.post("/api/access-preview", json={}).json()["url"]
+    assert preview.startswith("/access-preview/")
+    assert srv.token not in preview
+    rendered = client.get(preview, headers={"Authorization": ""})
+    assert rendered.status_code == 200
+    assert rendered.content == access.content
+    assert "style-src 'unsafe-inline'" in rendered.headers["content-security-policy"]
+    assert "'unsafe-inline'" not in rendered.headers["content-security-policy"].split("script-src ")[1].split(";")[0]
+    assert "'sha256-" in rendered.headers["content-security-policy"]
+    scripts = re.findall(rb"<script(?:\s[^>]*)?>(.*?)</script>", rendered.content, re.IGNORECASE | re.DOTALL)
+    for script in scripts:
+        digest = base64.b64encode(hashlib.sha256(script).digest()).decode()
+        assert f"'sha256-{digest}'" in rendered.headers["content-security-policy"]
+    assert client.get(preview, headers={"Authorization": ""}).status_code == 404
+    assert client.get(preview, headers={"Host": "attacker.test"}).status_code == 403
 
     overview = client.get("/api/indexers").json()
     assert overview["available"] and overview["count"] == 2
@@ -461,6 +793,56 @@ def test_demo_post_install_indexers_report_and_access_page(server):
         "/api/indexers/add", json={"key": public["key"], "values": {}}
     ).json()
     assert added["ok"] and public["name"] in added["configured"]
+
+
+def test_server_texts_follow_the_language_chosen_in_the_page(server):
+    """La langue de l'assistant web se choisit DANS la page, et change a tout moment.
+
+    Le serveur traduisait avec la langue du processus : en passant la page en
+    anglais, les notes du catalogue, les etapes de la demonstration et le
+    rapport final restaient en francais. Constate en capturant l'assistant pour
+    Discord le 13 septembre 2026. Le serveur envoie donc chaque texte dans les
+    deux langues, sans jamais basculer celle du processus : une installation
+    tourne dans un autre fil pendant ce temps.
+    """
+    from plugarr import i18n
+    from plugarr.traductions import EN
+
+    srv, client = server
+    before = i18n.langue()
+    note = "Pivot du cablage : alimente les autres en indexeurs."
+
+    prowlarr = next(
+        s for s in client.get("/api/bootstrap").json()["catalog"] if s["id"] == "prowlarr"
+    )
+    assert prowlarr["notes_i18n"] == {"fr": note, "en": EN[note]}
+
+    form = fields(srv.state)
+    form.update(services=["prowlarr", "sonarr"])
+    plan = client.post("/api/validate", json=form).json()
+    assert client.post(
+        "/api/install", json={"plan_id": plan["plan_id"], "confirm": True}
+    ).status_code == 200
+    srv.state.worker.join(timeout=5)
+
+    events = client.get("/api/progress").json()["events"]
+    results = [e for e in events if e["step_id"] and not e["started"]]
+    assert results
+    assert {e["message_i18n"]["en"] for e in results} == {
+        "Demonstration: simulated result, no real test."
+    }
+    assert {e["message_i18n"]["fr"] for e in results} == {
+        "Demonstration : resultat simule, aucun test reel."
+    }
+    phases = {e["phase_i18n"]["en"] for e in events if not e["step_id"]}
+    assert "Simulated wiring" in phases
+
+    report = client.get("/api/report").json()
+    assert report["next_steps_i18n"]["fr"][0] == (
+        "Prochaine etape : ajoutez vos indexeurs dans Prowlarr."
+    )
+    assert report["next_steps_i18n"]["en"][0] == "Next step: add your indexers in Prowlarr."
+    assert i18n.langue() == before
 
 
 def test_web_assets_cover_every_tui_stage():
@@ -496,6 +878,7 @@ def test_web_assets_cover_every_tui_stage():
         "/api/indexers/add",
         "/api/report",
         "/api/access",
+        "/api/access-preview",
         "/api/close",
     ):
         assert route in javascript
@@ -835,3 +1218,330 @@ def test_l_assistant_web_porte_la_note_du_profil():
     assert 'id="platform-note"' in html
     assert "platform-note" in javascript
     assert "profile.note" in javascript
+
+
+def test_installation_distante_n_interroge_pas_prowlarr_depuis_ce_poste(server, monkeypatch):
+    """VPS reel du 25/09/2026 : Prowlarr a l'adresse privee, injoignable d'ici."""
+    srv, client = server
+    form = fields(srv.state)
+    form.update(services=["prowlarr", "sonarr"], host="10.0.0.30")
+    plan = client.post("/api/validate", json=form).json()
+    assert client.post(
+        "/api/install", json={"plan_id": plan["plan_id"], "confirm": True}
+    ).status_code == 200
+    srv.state.worker.join(timeout=5)
+    srv.state.install_target = "ssh"
+    srv.state.demo = False
+    monkeypatch.setattr(
+        srv.state,
+        "_ensure_indexers",
+        Mock(side_effect=AssertionError("Prowlarr interroge depuis le poste")),
+    )
+
+    overview = client.get("/api/indexers").json()
+
+    assert overview["available"] is False
+
+
+
+def test_ssh_reprend_la_pile_trouvee_sur_le_serveur(server, monkeypatch):
+    """Second passage reel du 25/09/2026 sur un VPS : sans reprise, l'assistant
+    regenerait les mots de passe et perdait la cle VPN."""
+    import yaml
+
+    srv, client = server
+    srv.state.demo = False
+    ancienne = orchestrator.build_config(
+        services=["sonarr", "qbittorrent"],
+        config_root="/home/ubuntu/plugarr/config",
+        data_root="/home/ubuntu/data",
+        host="10.0.0.30",
+    )
+    ancienne.services["sonarr"].password = "mot-de-passe-du-serveur"
+    ancienne.vpn = VpnConfig(
+        enabled=True,
+        provider="protonvpn",
+        vpn_type="wireguard",
+        wireguard_private_key="a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=",
+        server_countries="France",
+    )
+    monkeypatch.setattr(
+        remote_install,
+        "probe",
+        lambda *_args, **_kwargs: remote_install.RemoteProbe(
+            fingerprint="SHA256:vps",
+            system="Linux",
+            machine="aarch64",
+            uid=1001,
+            gid=1001,
+            home="/home/ubuntu",
+            docker_version="29.1.3",
+        ),
+    )
+    monkeypatch.setattr(
+        remote_install,
+        "inspect_project",
+        lambda *_args, **_kwargs: remote_install.RemoteProjectState(
+            exists=True,
+            managed=True,
+            stack_sha="x",
+            stack_yaml=compose.render_stack(ancienne),
+        ),
+    )
+    probe_result = client.post(
+        "/api/remote-install/probe",
+        json={"host": "203.0.113.10", "port": 22, "username": "ubuntu", "private_key": "cle"},
+    ).json()
+
+    assert probe_result["existing"] is True
+    assert probe_result["existing_form"]["vpn"]["enabled"] is True
+    assert "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=" not in json.dumps(probe_result)
+    assert "mot-de-passe-du-serveur" not in json.dumps(probe_result)
+
+    deployments = []
+
+    def fake_deploy(target, credentials, deployment, *, connect, on_event):
+        deployments.append(deployment)
+        on_event({"kind": "done", "status": "done"})
+        return remote_install.RemoteDeployResult(status="done", events=())
+
+    monkeypatch.setattr(remote_install, "deploy", fake_deploy)
+    form = fields(srv.state)
+    form.update(probe_result["existing_form"])
+    form.update(
+        {
+            "install_target": "ssh",
+            "remote_connection_id": probe_result["connection_id"],
+            "remote_fingerprint": probe_result["fingerprint"],
+            "remote_project_dir": probe_result["project_dir"],
+            "platform": "generic-linux",
+            "config_root": probe_result["config_root"],
+            "data_root": probe_result["data_root"],
+            "host": "10.0.0.30",
+            "reprendre": True,
+            "remote_replace": True,
+        }
+    )
+    plan = client.post("/api/validate", json=form)
+    assert plan.status_code == 200, plan.text
+    assert client.post(
+        "/api/install", json={"plan_id": plan.json()["plan_id"], "confirm": True}
+    ).status_code == 200
+    srv.state.worker.join(timeout=5)
+
+    pile = yaml.safe_load(deployments[0].stack_yaml)
+    assert pile["services"]["sonarr"]["password"] == "mot-de-passe-du-serveur"
+    assert pile["vpn"]["enabled"] is True
+    assert pile["vpn"]["wireguard_private_key"] == "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="
+
+
+def _installation_terminee(srv, client):
+    form = fields(srv.state)
+    form.update(services=["prowlarr", "sonarr"], host="plugarr.lan")
+    plan = client.post("/api/validate", json=form).json()
+    assert client.post(
+        "/api/install", json={"plan_id": plan["plan_id"], "confirm": True}
+    ).status_code == 200
+    srv.state.worker.join(timeout=5)
+
+
+def test_le_rapport_liste_les_mises_a_jour_sans_rien_changer(server, monkeypatch):
+    """Demande du 26/09/2026 : versions testees installees, les plus recentes signalees."""
+    srv, client = server
+    _installation_terminee(srv, client)
+    assert client.get("/api/updates").json() == {"demo": True, "updates": [], "unchecked": []}
+
+    srv.state.demo = False
+    vues = []
+
+    def newer(image, *, timeout):
+        vues.append(image)
+        if "sonarr" in image:
+            return ["4.0.21", "4.0.22"], None
+        return [], "registre injoignable"
+
+    monkeypatch.setattr(webwizard.updates, "newer_tags", newer)
+
+    donnees = client.get("/api/updates").json()
+
+    assert donnees["updates"] == [
+        {"id": "sonarr", "name": "Sonarr", "current": "4.0.20", "latest": "4.0.22"}
+    ]
+    assert donnees["unchecked"] == ["Prowlarr"]
+    assert "4.0.22" not in (srv.state.cfg.services["sonarr"].image or "")
+
+
+
+def _pile_distante_ancienne(monkeypatch):
+    ancienne = orchestrator.build_config(
+        services=["sonarr", "jellyfin"],
+        config_root="/home/ubuntu/plugarr/config",
+        data_root="/home/ubuntu/data",
+        host="10.0.0.30",
+    )
+    ancienne.services["sonarr"].image = "lscr.io/linuxserver/sonarr:4.0.19"
+    ancienne.services["jellyfin"].image = "lscr.io/linuxserver/jellyfin:10.11.11"
+    ancienne.services["sonarr"].password = "mot-de-passe-du-serveur"
+    monkeypatch.setattr(
+        remote_install,
+        "probe",
+        lambda *_a, **_k: remote_install.RemoteProbe(
+            fingerprint="SHA256:vps", system="Linux", machine="aarch64",
+            uid=1001, gid=1001, home="/home/ubuntu", docker_version="29.1.3",
+        ),
+    )
+    monkeypatch.setattr(
+        remote_install,
+        "inspect_project",
+        lambda *_a, **_k: remote_install.RemoteProjectState(
+            exists=True, managed=True, stack_sha="x", stack_yaml=compose.render_stack(ancienne)
+        ),
+    )
+
+
+def _deployer(srv, client, monkeypatch, probe_result, **choix):
+    import yaml
+
+    deployments = []
+
+    def fake_deploy(target, credentials, deployment, *, connect, on_event):
+        deployments.append(deployment)
+        on_event({"kind": "done", "status": "done"})
+        return remote_install.RemoteDeployResult(status="done", events=())
+
+    monkeypatch.setattr(remote_install, "deploy", fake_deploy)
+    form = fields(srv.state)
+    form.update(probe_result["existing_form"])
+    form.update({
+        "install_target": "ssh",
+        "remote_connection_id": probe_result["connection_id"],
+        "remote_fingerprint": probe_result["fingerprint"],
+        "remote_project_dir": probe_result["project_dir"],
+        "platform": "generic-linux",
+        "config_root": probe_result["config_root"],
+        "data_root": probe_result["data_root"],
+        "host": "10.0.0.30",
+        "remote_replace": True,
+        **choix,
+    })
+    plan = client.post("/api/validate", json=form)
+    assert plan.status_code == 200, plan.text
+    assert client.post(
+        "/api/install", json={"plan_id": plan.json()["plan_id"], "confirm": True}
+    ).status_code == 200
+    srv.state.worker.join(timeout=5)
+    return yaml.safe_load(deployments[0].stack_yaml)
+
+
+def test_le_test_ssh_annonce_les_versions_testees_plus_recentes(server, monkeypatch):
+    """Demande du 26/09/2026 : choisir reprise ou zero juste apres la connexion,
+    et voir ce que « passer aux versions testees » changerait."""
+    srv, client = server
+    srv.state.demo = False
+    _pile_distante_ancienne(monkeypatch)
+
+    resultat = client.post(
+        "/api/remote-install/probe",
+        json={"host": "203.0.113.10", "port": 22, "username": "ubuntu", "private_key": "cle"},
+    ).json()
+
+    changements = {c["id"]: c for c in resultat["version_changes"]}
+    assert changements["jellyfin"]["installed"] == "10.11.11"
+    assert changements["jellyfin"]["major"] is True
+    assert changements["sonarr"]["installed"] == "4.0.19"
+    assert changements["sonarr"]["major"] is False
+    assert resultat["fresh_form"]["vpn"]["enabled"] is False
+    assert "mot-de-passe-du-serveur" not in json.dumps(resultat)
+
+
+@pytest.mark.parametrize("monter", [False, True])
+def test_la_reprise_ne_change_de_version_que_sur_demande(server, monkeypatch, monter):
+    srv, client = server
+    srv.state.demo = False
+    _pile_distante_ancienne(monkeypatch)
+    resultat = client.post(
+        "/api/remote-install/probe",
+        json={"host": "203.0.113.10", "port": 22, "username": "ubuntu", "private_key": "cle"},
+    ).json()
+
+    pile = _deployer(srv, client, monkeypatch, resultat, reprendre=True, upgrade_images=monter)
+
+    assert pile["services"]["sonarr"]["password"] == "mot-de-passe-du-serveur"
+    attendu = (
+        {"sonarr": catalog.get("sonarr").image, "jellyfin": catalog.get("jellyfin").image}
+        if monter
+        else {"sonarr": "lscr.io/linuxserver/sonarr:4.0.19", "jellyfin": "lscr.io/linuxserver/jellyfin:10.11.11"}
+    )
+    assert {sid: pile["services"][sid]["image"] for sid in attendu} == attendu
+
+
+@pytest.mark.parametrize("nouveau", [False, True])
+def test_la_reprise_garde_ou_remplace_le_mot_de_passe_de_la_console(server, monkeypatch, nouveau):
+    """Validation reelle du 26/09/2026 : en reprise, l'ancien mot de passe etait
+    garde en silence et le rapport n'en disait rien ; la console restait fermee."""
+    srv, client = server
+    srv.state.demo = False
+    ancienne = orchestrator.build_config(
+        services=["sonarr"], config_root="/home/ubuntu/plugarr/config",
+        data_root="/home/ubuntu/data", host="10.0.0.30",
+    )
+    ancienne.console_enabled = True
+    ancienne.admin_password_hash = adminauth.hash_password("ancien-mot-de-passe")
+    monkeypatch.setattr(
+        remote_install, "probe",
+        lambda *_a, **_k: remote_install.RemoteProbe(
+            fingerprint="SHA256:vps", system="Linux", machine="aarch64",
+            uid=1001, gid=1001, home="/home/ubuntu", docker_version="29.1.3",
+        ),
+    )
+    monkeypatch.setattr(
+        remote_install, "inspect_project",
+        lambda *_a, **_k: remote_install.RemoteProjectState(
+            exists=True, managed=True, stack_sha="x", stack_yaml=compose.render_stack(ancienne)
+        ),
+    )
+    resultat = client.post(
+        "/api/remote-install/probe",
+        json={"host": "203.0.113.10", "port": 22, "username": "ubuntu", "private_key": "cle"},
+    ).json()
+
+    pile = _deployer(srv, client, monkeypatch, resultat, reprendre=True, new_console_password=nouveau)
+    rapport = client.get("/api/report").json()
+
+    garde = adminauth.verify_password("ancien-mot-de-passe", pile["admin_password_hash"])
+    assert garde is (not nouveau)
+    assert rapport["console_password_kept"] is (not nouveau)
+    assert bool(rapport["console_password"]) is nouveau
+    if nouveau:
+        assert adminauth.verify_password(rapport["console_password"], pile["admin_password_hash"])
+
+
+def test_le_rapport_explique_comment_joindre_une_adresse_privee(server, monkeypatch):
+    """Validation reelle du 26/09/2026 : liens vers 10.0.0.30, injoignables depuis
+    le poste, sans aucune explication."""
+    srv, client = server
+    srv.state.demo = False
+    _pile_distante_ancienne(monkeypatch)
+    resultat = client.post(
+        "/api/remote-install/probe",
+        json={"host": "203.0.113.10", "port": 2222, "username": "ubuntu", "private_key": "cle"},
+    ).json()
+    _deployer(srv, client, monkeypatch, resultat, reprendre=True)
+
+    aide = client.get("/api/report").json()["access_help"]
+
+    assert aide == {
+        "host": "10.0.0.30",
+        "ssh": "ssh -N -D 1080 ubuntu@203.0.113.10 -p 2222",
+        "proxy": "socks5://127.0.0.1:1080",
+    }
+    page = client.get("/api/access").text
+    assert "ssh -N -D 1080 ubuntu@203.0.113.10 -p 2222" in page
+
+
+def test_une_installation_locale_n_a_pas_besoin_de_proxy(server):
+    srv, client = server
+    _installation_terminee(srv, client)
+
+    assert client.get("/api/report").json()["access_help"] is None
+

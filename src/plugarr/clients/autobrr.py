@@ -60,6 +60,7 @@ class AutobrrClient:
         self.base_url = base_url.rstrip("/")
         self._http = new_client(self.base_url)
         self._token: str | None = None
+        self._chemin_clients: str | None = None
 
     def close(self) -> None:
         self._http.close()
@@ -179,8 +180,24 @@ class AutobrrClient:
 
     # -- clients et applications ---------------------------------------------
 
+    def _clients_path(self) -> str:
+        """Chemin des clients de telechargement selon la version d'autobrr.
+
+        v1.87.0 a renomme `/api/download_clients` en `/api/downloaders`, meme
+        forme de donnees (verifie dans internal/domain/downloader.go). Constate
+        a l'installation reelle du 26/09/2026 : HTTP 404 a l'ajout de Sonarr.
+        L'ancien chemin reste servi par les versions precedentes, adoptees ou
+        epinglees ailleurs.
+        """
+        if self._chemin_clients is None:
+            resp = self._request("GET", "/api/downloaders")
+            self._chemin_clients = (
+                "/api/download_clients" if resp.status_code == 404 else "/api/downloaders"
+            )
+        return self._chemin_clients
+
     def clients(self) -> list[dict]:
-        resp = self._request("GET", "/api/download_clients")
+        resp = self._request("GET", self._clients_path())
         return resp.json() if resp.status_code == 200 else []
 
     def ensure_client(
@@ -236,7 +253,7 @@ class AutobrrClient:
             # `r.Put("/", h.update)` et l'identifiant voyage dans le corps.
             # `/{id}` n'accepte que GET et DELETE, et repond 405 au reste.
             self._expect(
-                self._request("PUT", "/api/download_clients", json=payload),
+                self._request("PUT", self._clients_path(), json=payload),
                 f"mise a jour de {name}",
                 200,
                 204,
@@ -244,7 +261,7 @@ class AutobrrClient:
             return False, "identifiants mis a jour"
 
         self._expect(
-            self._request("POST", "/api/download_clients", json=payload),
+            self._request("POST", self._clients_path(), json=payload),
             f"ajout de {name}",
             200,
             201,
@@ -256,7 +273,7 @@ class AutobrrClient:
         target = next((c for c in self.clients() if c.get("name") == name), None)
         if target is None:
             return False, t("introuvable a la relecture")
-        resp = self._request("POST", "/api/download_clients/test", json=target)
+        resp = self._request("POST", self._clients_path() + "/test", json=target)
         if resp.status_code in (200, 204):
             return True, "test OK"
         return False, resp.text.strip()[:200]

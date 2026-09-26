@@ -2,8 +2,9 @@
 
 # Compatibilité
 
-Tout ce qui figure ici a été **vérifié contre une instance réelle**, pas déduit de la
-documentation. Les tags d'image sont épinglés dans `src/plugarr/catalog.py`.
+Sauf les entrées explicitement marquées **avant-première**, tout ce qui figure
+ici a été **vérifié contre une instance réelle**, pas déduit de la documentation.
+Les tags d'image sont épinglés dans `src/plugarr/catalog.py`.
 
 Dernière campagne de vérification : **2026-08-31**, Docker Engine 29.6.1,
 Docker Compose v5.3.0, Docker Desktop sous Windows 11 (backend WSL2).
@@ -12,15 +13,17 @@ Docker Compose v5.3.0, Docker Desktop sous Windows 11 (backend WSL2).
 
 | Service | Image | Tag | Version rapportée par l'API |
 |---|---|---|---|
-| Sonarr | `lscr.io/linuxserver/sonarr` | `4.0.19` | 4.0.19.2979 |
-| Radarr | `lscr.io/linuxserver/radarr` | `6.3.0` | vérifié au démarrage |
-| Prowlarr | `lscr.io/linuxserver/prowlarr` | `2.5.2` | vérifié au démarrage |
+| Sonarr | `lscr.io/linuxserver/sonarr` | `4.0.20` | à confirmer (4.0.19.2979 vérifiée) |
+| Radarr | `lscr.io/linuxserver/radarr` | `6.4.4` | à confirmer (6.3.0 vérifiée) |
+| Prowlarr | `lscr.io/linuxserver/prowlarr` | `2.6.5` | à confirmer (2.5.2 vérifiée) |
 | Transmission | `lscr.io/linuxserver/transmission` | `4.1.3` | — |
-| Jellyfin | `lscr.io/linuxserver/jellyfin` | `10.11.11` | 10.11.11 |
+| Jellyfin | `lscr.io/linuxserver/jellyfin` | `12.1ubu2604-ls50` | 12.1.0 : assistant, clé API et bibliothèques vérifiés le 26/09/2026 |
 | Lidarr | `lscr.io/linuxserver/lidarr` | `3.1.0` | 3.1.0.4875 |
 | qBittorrent | `lscr.io/linuxserver/qbittorrent` | `5.2.3` | v5.2.3 |
 | VueTorrent (mod de qBittorrent, en option) | `ghcr.io/vuetorrent/vuetorrent-lsio-mod` | `2.35.0@sha256:f6445ce1…` | page servie : « VueTorrent » |
-| Flood | `jesec/flood` | `4.16.1` | pas encore testé |
+| Flood | `jesec/flood` | `4.16.2` | à confirmer (4.16.1 démarrée sur VPS arm64) |
+| Shelfarr **(avant-première)** | `ghcr.io/pedro-revez-silva/shelfarr` | `2026.09.18.1@sha256:a7afa12a…` | démarrage réel vérifié sur VPS arm64 le 25/09/2026 (conteneur sain, page servie) |
+| Libation pour Shelfarr **(avant-première, interne)** | `ghcr.io/pedro-revez-silva/shelfarr-libation` | `2026.09.18.1@sha256:f3e7b166…` | démarrage réel vérifié sur VPS arm64 le 25/09/2026 (conteneur sain) |
 
 ## Constats vérifiés expérimentalement
 
@@ -225,6 +228,37 @@ Deux conséquences dans le code :
 Sources : [forums Unraid](https://forums.unraid.net/topic/117661-docker-user-puid-and-group-pgid-settings/)
 · [Marius Hosting, UID/GID sur Synology](https://mariushosting.com/synology-how-to-find-uid-userid-and-gid-groupid/)
 
+## Dossiers de données déjà présents — vérifié sur UGOS le 2026-09-21
+
+Une installation qui trouve son arborescence déjà en place ne la reprenait pas : `create_tree`
+ne donne au PUID/PGID que les dossiers **qu'il crée**, pour ne pas lancer un `chown -R` de
+plusieurs heures sur une médiathèque et ne pas redistribuer des fichiers qui ne sont pas les
+siens. La règle est bonne pour le contenu ; elle était fausse pour le point de montage.
+
+Journal d'un utilisateur, trois dossiers racines refusés d'un coup alors que tout le reste du
+câblage passait :
+
+```
+ECHEC sonarr/rootfolder/tv - sonarr: POST rootfolder a echoue
+  cause : HTTP 400 - "Folder '/data/media/tv' is not writable by user 'abc'"
+  action : le gabarit renvoye par /schema a peut-etre change de forme
+```
+
+`abc` est l'utilisateur interne des images LinuxServer : il **porte** le PUID/PGID du
+conteneur. Le dossier existait, l'arborescence était complète, seuls les droits ne l'étaient
+pas — et l'action proposée envoyait chercher une incompatibilité d'API.
+
+Deux conséquences dans le code :
+
+- avant le premier démarrage, l'installation regarde les dossiers de données déjà présents et
+  rend à `PUID:PGID` **ceux, et seulement ceux, où le compte des conteneurs ne peut pas
+  écrire**. Le `chown` porte sur le dossier seul, jamais sur son contenu : donner le point de
+  montage suffit, et un dossier déjà partagé en `2775` n'est pas repris. Sans élévation, rien
+  n'est tenté — `chown` est refusé à tout le monde sauf root — mais la liste et la commande à
+  passer sont écrites dans le journal ;
+- le refus de Sonarr ou de Radarr est traduit en ce qu'il faut faire, avec le chemin **de
+  l'hôte** : `/data/media/tv` ne mène nulle part depuis un terminal.
+
 ## Coexistence avec une stack existante — vérifié
 
 Observation faite sur un Unraid réel faisant tourner 75 conteneurs, dont un
@@ -419,6 +453,19 @@ machine.
 
 `adopt` détecte donc l'adresse de la machine sur le réseau local, et refuse de continuer
 s'il n'y arrive pas plutôt que de câbler des URL mortes.
+
+### Client torrent derrière Gluetun
+
+Sur une pile Unraid examinée en lecture seule le 25 septembre 2026, qBittorrent
+partageait l'espace réseau de Gluetun : son propre conteneur ne publiait aucun
+port, alors que Gluetun publiait sa WebUI sur `8090`. `scan` lit désormais le
+port WebUI dans `qBittorrent.conf` et cherche la publication correspondante sur
+le conteneur propriétaire du réseau. Il ne modifie ni le VPN ni qBittorrent.
+Si le propriétaire ou le port reste introuvable, le client reste non adoptable.
+
+Cette observation ne valide pas encore un câblage sur cette pile : elle contient
+deux Sonarr, donc un choix explicite est nécessaire, et ses montages ne suivent
+pas tous l'arborescence `/data` de PlugArr.
 
 ### Un nom de conteneur ne prouve rien
 

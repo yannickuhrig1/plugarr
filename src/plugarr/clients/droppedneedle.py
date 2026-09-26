@@ -208,7 +208,13 @@ class DroppedNeedleClient:
             if cle != "api_key"
         )
         if inchange and actuel.get("api_key"):
-            return False
+            # Installation reelle du 26/09/2026 : SABnzbd recree avec une
+            # nouvelle cle, DroppedNeedle garde l'ancienne, masquee, et chaque
+            # test rendait « API Key Incorrect ». Son propre test tranche : on ne
+            # renvoie la cle que s'il echoue.
+            valide, _detail = self.test_sabnzbd()
+            if valide:
+                return False
         self._request("PUT", "/download-clients/sabnzbd", json=voulu)
         return True
 

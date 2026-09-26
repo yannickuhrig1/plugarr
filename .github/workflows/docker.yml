@@ -1,16 +1,21 @@
 name: Image Docker
 
 # Construite a chaque poussee, pour amd64 et arm64 : sans arm64, les NAS ARM
-# restent dehors. PUBLIEE seulement sur un tag de version, sur ghcr.io, avec
-# le numero de version comme tag. Jamais de `latest` : le catalogue epingle
-# tout, l'image de PlugArr ne fait pas exception.
+# restent dehors. PUBLIEE sur ghcr.io pour un tag de version, ou sous un tag de
+# preversion strictement borne lors d'un declenchement manuel. Jamais de
+# `latest` : le catalogue epingle tout, l'image de PlugArr ne fait pas exception.
 on:
   push:
-    branches: [main, "roadmap-*"]
+    branches: [main, "roadmap-*", "codex/stack7-preview-2"]
     tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      preview_tag:
+        description: "Tag Docker de preversion (0.10.0-stack7-preview.N)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,6 +28,16 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/plugarr
     steps:
       - uses: actions/checkout@v4
+
+      - name: Valider le tag de preversion manuel
+        if: github.event_name == 'workflow_dispatch' && inputs.preview_tag != ''
+        env:
+          PREVIEW_TAG: ${{ inputs.preview_tag }}
+        run: |
+          if ! [[ "$PREVIEW_TAG" =~ ^0\.10\.0-stack7-preview\.[0-9]+$ ]]; then
+            echo "Tag refuse : attendu 0.10.0-stack7-preview.N"
+            exit 1
+          fi
 
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -63,6 +78,10 @@ jobs:
           docker run --rm --entrypoint docker plugarr:essai-admin --version
           docker run --rm --entrypoint docker plugarr:essai-admin compose version
           test "$(docker run --rm --entrypoint id plugarr:essai-admin -u)" = "1000"
+          # Une image admin plus ancienne que stack.yml boucle au demarrage.
+          attendu=$(sed -n 's/^VERSION_COURANTE = //p' src/plugarr/migrations.py)
+          obtenu=$(docker run --rm --entrypoint python plugarr:essai-admin -c "from plugarr.migrations import VERSION_COURANTE; print(VERSION_COURANTE)")
+          test "$obtenu" = "$attendu"
 
       - name: Tags de publication
         id: meta
@@ -73,21 +92,23 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ inputs.preview_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.preview_tag != '' }}
+            type=raw,value=0.10.0-stack7-preview.2,enable=${{ github.ref == 'refs/heads/codex/stack7-preview-2' }}
 
       - name: Connexion a ghcr.io
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.preview_tag != '') || github.ref == 'refs/heads/codex/stack7-preview-2'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Construire amd64 + arm64, publier sur un tag de version
+      - name: Construire amd64 + arm64 et publier si demande
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.preview_tag != '') || github.ref == 'refs/heads/codex/stack7-preview-2' }}
           tags: ${{ steps.meta.outputs.tags || 'plugarr:multi' }}
           labels: ${{ steps.meta.outputs.labels }}
 
@@ -104,6 +125,8 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ inputs.preview_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.preview_tag != '' }}
+            type=raw,value=0.10.0-stack7-preview.2,enable=${{ github.ref == 'refs/heads/codex/stack7-preview-2' }}
 
       - name: Construire et publier la variante admin
         uses: docker/build-push-action@v7
@@ -111,6 +134,34 @@ jobs:
           context: .
           target: admin
           platforms: linux/amd64,linux/arm64
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.preview_tag != '') || github.ref == 'refs/heads/codex/stack7-preview-2' }}
           tags: ${{ steps.meta-admin.outputs.tags || 'plugarr:multi-admin' }}
           labels: ${{ steps.meta-admin.outputs.labels }}
+
+      - name: Verifier la preversion publiee
+        if: github.ref == 'refs/heads/codex/stack7-preview-2'
+        run: |
+          normal="${IMAGE}:0.10.0-stack7-preview.2"
+          admin="${IMAGE}:0.10.0-stack7-preview.2-admin"
+          for reference in "$normal" "$admin"; do
+            manifeste=$(docker buildx imagetools inspect "$reference" --format '{{json .Manifest}}')
+            MANIFESTE="$manifeste" python3 - <<'PY'
+          import json
+          import os
+
+          manifeste = json.loads(os.environ["MANIFESTE"])
+          plateformes = {
+              (entree.get("platform") or {}).get("os", "") + "/"
+              + (entree.get("platform") or {}).get("architecture", "")
+              for entree in manifeste.get("manifests", [])
+              if (entree.get("platform") or {}).get("os") not in {None, "", "unknown"}
+          }
+          attendues = {"linux/amd64", "linux/arm64"}
+          if not attendues.issubset(plateformes):
+              raise SystemExit(f"Plateformes manquantes: {sorted(attendues - plateformes)}")
+          PY
+          done
+          for plateforme in linux/amd64 linux/arm64; do
+            schema=$(docker run --rm --platform "$plateforme" --entrypoint python "$admin" -c "from plugarr.migrations import VERSION_COURANTE; print(VERSION_COURANTE)")
+            test "$schema" = "7"
+          done

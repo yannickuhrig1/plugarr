@@ -37,6 +37,10 @@ _UNSTABLE = ("develop", "nightly", "beta", "alpha", "rc", "master", "latest", "e
 
 _VERSION = re.compile(r"^v?(\d+(?:\.\d+)*)$")
 _BUILD = re.compile(r"^build-(\d+)$")
+#: Tags LinuxServer quand ils portent leur base et leur construction :
+#: `12.1ubu2604-ls50`. Releve le 26/09/2026 : Jellyfin 12 n'est publie par
+#: LinuxServer QUE sous cette forme, sans tag `12.1` nu.
+_LSIO = re.compile(r"^(\d+(?:\.\d+)*)ubu\d+-ls(\d+)$")
 
 
 @dataclass
@@ -66,6 +70,12 @@ def parse_version(tag: str) -> tuple[int, ...] | None:
     build = _BUILD.match(propre)
     if build is not None:
         return (int(build.group(1)),)
+    lsio = _LSIO.match(propre)
+    if lsio is not None:
+        # Version completee a quatre rangs AVANT le numero de construction :
+        # sans cela `12.1.1ubu2604-ls52` passerait derriere `12.1ubu2604-ls50`.
+        version = [int(part) for part in lsio.group(1).split(".")]
+        return (*version, *[0] * (4 - len(version)), int(lsio.group(2)))
     match = _VERSION.match(propre)
     if match is None:
         return None
@@ -82,6 +92,10 @@ def _same_shape(candidate: str, current: str) -> bool:
     current_build = _BUILD.fullmatch(current) is not None
     if candidate_build or current_build:
         return candidate_build and current_build
+    candidate_lsio = _LSIO.fullmatch(candidate) is not None
+    current_lsio = _LSIO.fullmatch(current) is not None
+    if candidate_lsio or current_lsio:
+        return candidate_lsio and current_lsio
     if candidate.startswith("v") != current.startswith("v"):
         return False
     return candidate.count(".") == current.count(".")
@@ -262,10 +276,50 @@ def remote_digest(image: str) -> str | None:
     experimental.
     """
     code, out = _docker("buildx", "imagetools", "inspect", image)
-    if code != 0:
+    match = re.search(r"Digest:\s+(sha256:[0-9a-f]+)", out) if code == 0 else None
+    if match:
+        return match.group(1)
+    # Console reelle du 25/09/2026 : ni son image ni le VPS n'avaient `buildx`,
+    # et chaque image epinglee par tag affichait « verification incomplete ».
+    # Le registre donne le meme condensat par une simple requete HTTP.
+    return _registry_digest(image)
+
+
+#: Ce que `buildx imagetools` compare : l'index multi-architecture s'il existe,
+#: sinon le manifeste simple. `RepoDigests` retient le meme condensat au pull.
+_MANIFEST_TYPES = (
+    "application/vnd.oci.image.index.v1+json, "
+    "application/vnd.docker.distribution.manifest.list.v2+json, "
+    "application/vnd.oci.image.manifest.v1+json, "
+    "application/vnd.docker.distribution.manifest.v2+json"
+)
+
+
+def _registry_digest(image: str, *, timeout: float = 15.0) -> str | None:
+    ref = imageref.parse(image)
+    reference = ref.repository
+    if "/" not in reference or "." not in reference.split("/")[0]:
+        host = "registry-1.docker.io"
+        repo = reference if "/" in reference else f"library/{reference}"
+    else:
+        host, repo = reference.split("/", 1)
+    url = f"https://{host}/v2/{repo}/manifests/{ref.tag or 'latest'}"
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            headers = {"Accept": _MANIFEST_TYPES}
+            resp = client.head(url, headers=headers)
+            if resp.status_code == 401:
+                token = _bearer_token(client, resp.headers.get("www-authenticate", ""), repo)
+                if token is None:
+                    return None
+                headers["Authorization"] = f"Bearer {token}"
+                resp = client.head(url, headers=headers)
+            if resp.status_code != 200:
+                return None
+            digest = resp.headers.get("docker-content-digest", "")
+            return digest if re.fullmatch(r"sha256:[0-9a-f]{64}", digest) else None
+    except httpx.HTTPError:
         return None
-    match = re.search(r"Digest:\s+(sha256:[0-9a-f]+)", out)
-    return match.group(1) if match else None
 
 
 # -------------------------------------------------------------------- controle
@@ -320,3 +374,40 @@ def check(cfg: StackConfig, *, check_tags: bool = True) -> list[UpdateInfo]:
         info.service = sid
         results.append(info)
     return results
+
+
+def disponibles(cfg) -> dict:
+    """Versions plus recentes que celles installees, application par application.
+
+    Commun a l'assistant web et au TUI : PlugArr installe les versions qu'il a
+    testees, puis dit ce qui existe de plus recent. Rien n'est change ici.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from . import catalog, orchestrator
+
+    cibles = [
+        (sid, catalog.get(sid).display_name, inst.image or catalog.get(sid).image)
+        for sid, inst in orchestrator.iter_selected(cfg)
+        if (inst.image or catalog.get(sid).image) and not inst.adopted
+    ]
+
+    def verifier(cible):
+        sid, nom, image = cible
+        try:
+            recentes, probleme = newer_tags(image, timeout=10.0)
+        except Exception as exc:  # noqa: BLE001 - un registre ne doit pas casser le rapport
+            recentes, probleme = [], str(exc)
+        return sid, nom, image, recentes, probleme
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        resultats = list(pool.map(verifier, cibles))
+    return {
+        "updates": [
+            {"id": sid, "name": nom, "current": imageref.parse(image).tag, "latest": recentes[-1]}
+            for sid, nom, image, recentes, probleme in resultats
+            if recentes and not probleme
+        ],
+        "unchecked": [nom for _sid, nom, _image, _recentes, probleme in resultats if probleme],
+    }
+

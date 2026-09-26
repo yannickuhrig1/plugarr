@@ -88,12 +88,14 @@ vérifié réellement (lire les README, pas de mémoire), avant la phase 1.
   audiobooks, sources web/torrent/usenet/IRC configurables, métadonnées Hardcover /
   Open Library / Google Books. Évolution de Calibre-Web-Automated-Book-Downloader.
 - **Shelfarr** — [`Pedro-Revez-Silva/shelfarr`](https://github.com/Pedro-Revez-Silva/shelfarr)
-  (**cible confirmée**, 326 étoiles, actif au 30/08/2026). « Jellyseerr pour les livres » :
+  (**cible confirmée**). « Jellyseerr pour les livres » :
   demandes utilisateurs → recherche via indexeurs **Prowlarr** / Jackett / Newznab →
   download via Transmission / qBittorrent / SABnzbd / Deluge / NZBGet →
   livraison dans **Audiobookshelf**.
-  ⚠️ **Ruby on Rails + PostgreSQL** : seul service du catalogue à traîner une base de
-  données. Voir §11.2. Le fork `presswizards/abs-shelfarr` est abandonné, l'ignorer.
+  L'image officielle persiste ses bases SQLite et sa clé générée sous
+  `/rails/storage`. Son Compose courant inclut un compagnon Libation interne,
+  sans port hôte, pour la sauvegarde Audible optionnelle. Voir §11.2. Le fork
+  `presswizards/abs-shelfarr` est abandonné, l'ignorer.
   ⚠️ Intègre une source « Anna's Archive » : **ne jamais la préactiver**, voir §11.3.
 - Optionnel : **Calibre-Web**, **LazyLibrarian**.
 
@@ -206,7 +208,7 @@ Pas de `sleep 30`.
 | Jellyfin | système de fichiers | création des bibliothèques via l'API de wizard |
 | Plex | système de fichiers | claim token + bibliothèques |
 | Audiobookshelf | système de fichiers | bibliothèques livres / podcasts |
-| Shelfarr | Prowlarr + client download + Audiobookshelf + PostgreSQL | à établir depuis sa doc réelle |
+| Shelfarr | Prowlarr + client download + Audiobookshelf + Libation interne | volumes et topologie générés ; réglages applicatifs manuels jusqu'à vérification d'une API publique |
 | Flood | Transmission (RPC) | UI seule, aucun impact sur le reste du câblage |
 | Shelfmark | sources + client download | à établir depuis sa doc réelle |
 | Recyclarr | Sonarr / Radarr | profils qualité + custom formats TRaSH |
@@ -401,11 +403,13 @@ Vérifié via l'API GitHub le 2026-08-31 :
 
 Le fork n'a reçu aucun commit depuis sa création. Question close.
 
-Shelfarr est écrit en **Ruby on Rails** et nécessite **PostgreSQL**. Conséquence :
-c'est le seul service du catalogue qui traîne une base de données à provisionner.
-Le générateur doit gérer ce cas (conteneur Postgres dédié, volume, credentials générés,
-`depends_on` avec healthcheck). À prévoir dans le modèle de services dès le départ,
-sinon c'est un cas particulier douloureux à rattraper.
+Shelfarr est écrit en **Ruby on Rails**, mais son déploiement officiel courant
+persiste ses bases SQLite, Active Storage, ses journaux et sa clé générée sous
+`/rails/storage` : aucun PostgreSQL séparé n'est requis. Le Compose officiel
+2026.09.18.1 inclut en revanche `shelfarr-libation`, compagnon interne sans port
+hôte. Ses volumes privés `/config`, `/data` et `/control` doivent être sauvegardés
+avec l'état principal, et les deux images doivent toujours être mises à jour
+ensemble.
 
 ### 11.3 Anna's Archive : point de vigilance juridique
 

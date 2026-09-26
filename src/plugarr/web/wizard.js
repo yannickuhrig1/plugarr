@@ -9,6 +9,7 @@ const E = (tag, text, cls) => {
 };
 
 const EN = {
+  installWhere:'Where should PlugArr be installed?', installHere:'On this computer', installHereHelp:'PlugArr uses Docker on this computer.', installSsh:'On a server or NAS', installSshHelp:'Simple SSH connection. Only Docker must already be installed on the target.', sshTitle:'Server connection', sshHelp:'SSH credentials stay in memory only until this wizard closes.', sshHost:'IP address or host name', sshPort:'SSH port', sshUser:'SSH user', sshAuth:'Authentication', sshPassword:'Password', sshKey:'Private key', sshKeyFile:'Private key file', sshKeyHelp:'The key is read into memory and is not copied to disk by PlugArr.', sshPassphrase:'Key passphrase, if needed', sshSudo:'Sudo password, if the NAS protects these folders', sshSudoHelp:'Optional. Useful for /volume1 folders on some NAS devices. It is never stored.', sshTest:'Test connection', sshFingerprint:'Server fingerprint', sshConfirm:'I recognize this fingerprint and confirm this server.', sshTesting:'Connecting and checking Docker…', sshReady:'Server ready', sshRemoteBadge:'REMOTE SSH', sshConfirmRequired:'Test the SSH connection and confirm the server fingerprint.',
   qbUiTitle:'qBittorrent web interface', qbUiHelp:'VueTorrent replaces the qBittorrent interface with a more modern one, also handy on a phone. Sonarr, Radarr and mobile apps are not affected.', qbUiOrigin:'Original interface', qbUiVue:'VueTorrent', qbUiTradeoff:'The first qBittorrent start needs Internet to download VueTorrent (version pinned by PlugArr). It is then kept in the qBittorrent folder and survives restarts without Internet. To go back, choose the original interface and run the installation again.', qbUiShort:'qBittorrent interface',
   veilleTitle:'Watch page', veilleHelp:'A read-only page: free space, throughput, VPN exit, container CPU and memory. It runs inside the stack, survives a reboot even when nobody logs in, and can be read from a phone. It can neither stop nor change anything.', veilleEnable:'Install the watch page', veilleNote:'It asks for the console password. Without a password set, it only listens on this machine.', veillePort:'Watch port', veilleShort:'Watch', veilleOn:'Installed',
   veilleDocker:'Also show CPU and memory per container', veilleDockerNote:'The watch gets a read-only view of Docker, through a proxy that refuses every POST, on an internal network it alone can reach. Restarts and out-of-memory kills stay absent: they can only be read through a route that also carries your keys.',
@@ -23,19 +24,33 @@ const EN = {
   vpnTitle:'Your download connection.', vpnIntro:'Use Gluetun to route selected download clients through your VPN provider.', noTorrent:'No download client selected: this step is not needed.', enableVpn:'Enable VPN', vpnHelp:'Your VPN credentials stay on this computer.', provider:'Provider', protocol:'Protocol', wireguardKey:'WireGuard private key', wireguardAddress:'WireGuard addresses (if required by your provider)', vpnUser:'OpenVPN username', vpnPassword:'OpenVPN password', location:'VPN locations', locationSearch:'Filter locations', locationManual:'Country or region', vpnPreserved:'Leave credentials empty to keep those of the same provider and protocol.', vpnTest:'Test disposable tunnel', vpnWarning:'Without a VPN, BitTorrent traffic will use this computer’s public IP address, visible to peers.', sabRouteTitle:'SABnzbd network route', sabRouteHelp:'SABnzbd talks to a Usenet server, not peers. A VPN is optional and does not replace SSL/TLS.', sabDirect:'Direct connection + provider SSL/TLS (recommended)', sabVpn:'Also route SABnzbd through the VPN', sabTradeoff:'The VPN hides the Usenet server from your ISP, but adds a Gluetun dependency and may reduce throughput.', sabRoute:'SABnzbd route', sabDirectShort:'Direct + SSL/TLS', sabVpnShort:'Via Gluetun + SSL/TLS', preferredTitle:'Preferred download client', preferredHelp:'Sonarr and Radarr use it first. The others stay declared as a fallback: without this choice, they would alternate between them on every download.', preferredShort:'Preferred client',
   qualityTitle:'The quality you want.', qualityIntro:'Recyclarr applies TRaSH profiles to Sonarr and Radarr.', noQuality:'Select Recyclarr with Sonarr or Radarr to use quality profiles.', qualityDefaults:'Choose one profile per application from all available templates, or keep the default profile.', loadProfiles:'Refresh available profiles', sizeDisclaimer:'Broad estimates only, not download limits. Actual size depends on duration, source, codec, audio tracks and the release found.',
   reviewTitle:'Check before you start.', reviewIntro:'Review applications, paths and operations. Nothing starts before your confirmation.', resumeTitle:'Existing installation', resumeYes:'Resume available settings and credentials', resumeNo:'Start fresh with the entered settings', resetTitle:'Clean up old settings', resetKeep:'Keep the old settings', resetDelete:'Delete these settings and start fresh', mediaSafe:'Media files are never deleted.', recheck:'Check again', confirm:'I confirm the settings and operations shown above.',
+  remoteReplaceTitle:'Existing remote PlugArr stack', remoteReplaceHelp:'PlugArr can update this stack. Settings and media will be preserved.', remoteReplaceResetHelp:'The stack will be replaced. The selected old settings will be deleted; media files will be preserved.', remoteReplaceConfirm:'I confirm updating the remote PlugArr stack in this folder.',
   progressTitle:'Your stack is taking shape.', progressIntro:'Keep PlugArr open during installation. Completed steps appear below.', logs:'Detailed log', reportTitle:'Access your applications', reportHelp:'Keep this report: it contains generated URLs and credentials.', application:'Application', password:'Password', indexerTitle:'Add indexers to Prowlarr', indexerSearch:'Search for an indexer', search:'Search', openAdmin:'Open administration', accessPage:'Open access page', downloadAccess:'Download access file', finish:'Finish and close', adminLink:'Open administration in a new tab', retry:'Review settings and try again', remember:'Use the web interface next time', back:'Back', next:'Continue',
   services:'Applications', folders:'Folders', vpn:'VPN', quality:'Quality', review:'Review', installation:'Installation', arr:'Automation', download:'Downloads', media:'Media libraries', ui:'Interfaces', selected:'applications selected', dependencies:'dependencies', plannedLinks:'links to configure', defaultProfile:'PlugArr default', profile:'Profile',
   checking:'Checking configuration…', install:'Confirm and install', simulate:'Run simulation', blocked:'Resolve the blocking checks before continuing.', demoCheck:'Checks are simulated. Docker availability has not been checked.', ready:'Ready for confirmation', running:'Installation in progress…', done:'Installation completed', partial:'Installation completed with wiring errors', error:'Installation interrupted', demoDone:'Simulation completed — nothing was installed.', idle:'Waiting to start',
   checkingTemplates:'Loading available profiles…', noTemplates:'Profiles could not be loaded. Keep the default profiles or try again.', templatesReady:'Available profiles loaded.', bundledProfiles:'Complete catalog bundled with this demo.', saving:'Saving your choice…', sessionMissing:'Session missing. Open the full URL shown in the terminal.', networkError:'Connection lost. Keep the PlugArr terminal open and try again.', noSelection:'Choose at least one application.', dockerRequired:'Docker must be available before installation.', switched:'Return to the terminal: the TUI is opening. Unsaved web entries were not transferred.', retryWarning:'Review the settings and run the checks again before retrying.', unavailable:'Unavailable', vpnOn:'Enabled', vpnOff:'Disabled', simulation:'SIMULATION', localBadge:'LOCAL', profile:'Profile', notInstalled:'The demo administration opens in a new tab. No service was installed.', progressError:'Progress temporarily unavailable. Reconnecting…', optional:'optional', qualityInherited:'Existing profile', sizeEstimate:'Indicative size', movie2h:'2-hour movie', episode45:'45-minute episode',
   dockerReady:'Docker is ready.', dockerBlocked:'Docker is unavailable. Fix the reported issue, then refresh.', checkingAction:'Checking…', pathOk:'Folder and hardlink test succeeded.', pathFailed:'The folder is writable, but hardlinks are unavailable.', backupWorking:'Creating backup… Keep this page open.', backupDone:'Backup created', restoreReading:'Reading archive…', restoreWorking:'Restoring… Keep this page open.', restoreDone:'Restoration completed. Reloading the assistant…', hotBackup:'This archive was created live; its databases may be inconsistent.', servicesInArchive:'services in archive',
   portForward:'port forwarding', portForwardReady:'Port forwarding locations only', noPortForward:'No port forwarding advertised', locations:'locations', placesSelected:'locations selected', noLocation:'No location selected', tunnelWorking:'Starting a disposable tunnel…', tunnelSuccess:'VPN tunnel test succeeded.', tunnelFailure:'VPN tunnel test failed.',
+  updatesTitle:'Available updates', updatesLoading:'Looking for newer versions…', updatesNone:'Every application is on its latest version.', updatesUnchecked:'Not checked', updatesKept:'PlugArr installs the versions it has tested; these updates are then applied from the console.',
+  sshMajor:'major version: one-way migration', sshExistingTitle:'PlugArr is already installed on this server', sshExistingResume:'Resume its configuration: applications, VPN and passwords', sshExistingFresh:'Start from scratch: default settings, nothing is reused', sshUpgrade:'Move to the versions tested by this PlugArr release', sshUpgradeHelp:'Without this box, each application keeps its current version.',
+  resumeSkipped:'Settings resumed: the Folders, VPN, Quality and Access steps were skipped. Use Back to change them.',
+  sshConsolePassword:'Generate a new password for the administration console', consoleKept:'unchanged (set by a previous installation)', consoleKeptHelp:'Console password unchanged. To set a new one: run the wizard again with “Generate a new password” ticked, or run “plugarr admin-password” in the plugarr-console container.',
+  accessHelpIntro:'The {host} addresses can only be reached from the server network. From this computer:', accessHelpSsh:'1. open an SSH proxy and keep that terminal open:', accessHelpBrowser:'2. open a browser set to this SOCKS proxy:', accessHelpTailscale:'PlugArr’s Tailscale access is the other way.',
+  sshReady:'SSH connection ready.', sshExisting:'PlugArr stack found on the server: its settings are resumed.', sshPrivateHost:'The SSH address does not belong to the server (translated public IP): machine address set to {host}.',
   resumeOrigin:'Previous installation', resumedSettings:'Settings resumed', resumedServices:'Credentials resumed', freshInstall:'Fresh configuration selected.', resetCandidates:'Existing settings concerned', resetEnabled:'These settings will be removed immediately before installation.', resetDisabled:'These settings will be kept.',
   puid:'PUID', pgid:'PGID', umask:'UMASK', address:'Address', projectPath:'Project path', envFile:'.env file',
   reportLoading:'Loading final report…', indexersAvailable:'indexer definitions available', configured:'Configured', noneConfigured:'No indexer configured yet.', noIndexerResult:'No matching indexer.', addIndexer:'Add this indexer', addingIndexer:'Adding indexer…', indexerAdded:'Indexer added.', mirrors:'Known mirrors', accessOpening:'Preparing the access page…', accessDownloading:'Preparing the access file…', accessDownloaded:'Access file downloaded.', popupBlocked:'The browser blocked the new tab. Allow pop-ups and try again.', adminWaiting:'Opening administration…', adminOpened:'Administration opened in another tab. You can keep this installation summary open.', adminBlocked:'Use the link below to open administration in a new tab.', closed:'Assistant closed. You can close this tab.',
 };
 
 const FR = {
-  qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée', consoleShort:'Console en conteneur',
+  remoteReplaceResetHelp:'La pile sera remplacée. Les anciennes configurations sélectionnées seront supprimées ; les médias seront conservés.',
+  updatesTitle:'Mises à jour disponibles', updatesLoading:'Recherche des versions plus récentes…', updatesNone:'Toutes les applications sont dans leur dernière version.', updatesUnchecked:'Non vérifiées', updatesKept:'PlugArr installe les versions qu’il a testées ; ces mises à jour se font ensuite depuis la console.',
+  sshMajor:'version majeure : migration sans retour', sshExistingTitle:'PlugArr est déjà installé sur ce serveur', sshExistingResume:'Reprendre sa configuration : applications, VPN et mots de passe', sshExistingFresh:'Repartir de zéro : réglages par défaut, rien n’est réutilisé', sshUpgrade:'Passer aux versions testées par cette version de PlugArr', sshUpgradeHelp:'Sans cette case, chaque application garde sa version actuelle.',
+  resumeSkipped:'Réglages repris : les étapes Dossiers, VPN, Qualité et Accès ont été passées. Utilisez Retour pour les modifier.',
+  sshConsolePassword:'Générer un nouveau mot de passe pour la console d’administration', consoleKept:'inchangé (défini lors d’une installation précédente)', consoleKeptHelp:'Mot de passe de la console inchangé. Pour en définir un nouveau : relancez l’assistant en cochant « Générer un nouveau mot de passe », ou lancez « plugarr admin-password » dans le conteneur plugarr-console.',
+  accessHelpIntro:'Les adresses {host} ne sont joignables que depuis le réseau du serveur. Depuis ce poste :', accessHelpSsh:'1. ouvrez un proxy SSH, et gardez ce terminal ouvert :', accessHelpBrowser:'2. ouvrez un navigateur configuré sur ce proxy SOCKS :', accessHelpTailscale:'L’accès Tailscale de PlugArr est l’autre voie.',
+  sshReady:'Connexion SSH prête.', sshExisting:'Pile PlugArr trouvée sur le serveur : ses réglages sont repris.', sshPrivateHost:'L’adresse SSH n’appartient pas au serveur (IP publique traduite) : adresse de la machine réglée sur {host}.',
+  sshRemoteBadge:'SSH DISTANT', qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée', consoleShort:'Console en conteneur',
   services:'Applications', folders:'Dossiers', vpn:'VPN', quality:'Qualité', review:'Vérification', installation:'Installation', arr:'Automatisation', download:'Téléchargements', media:'Médiathèques', ui:'Interfaces', selected:'applications sélectionnées', dependencies:'dépendances', plannedLinks:'liens à configurer', defaultProfile:'Défaut PlugArr', profile:'Profil',
   checking:'Vérification de la configuration…', install:'Confirmer et installer', simulate:'Lancer la simulation', blocked:'Résolvez les contrôles bloquants avant de continuer.', demoCheck:'Les contrôles sont simulés. La disponibilité de Docker n’a pas été vérifiée.', ready:'Prêt pour confirmation', running:'Installation en cours…', done:'Installation terminée', partial:'Installation terminée avec des erreurs de câblage', error:'Installation interrompue', demoDone:'Simulation terminée — rien n’a été installé.', idle:'En attente de lancement',
   checkingTemplates:'Chargement des profils disponibles…', noTemplates:'Impossible de charger les profils. Conservez les profils par défaut ou réessayez.', templatesReady:'Profils disponibles chargés.', bundledProfiles:'Catalogue complet embarqué dans cette démo.', saving:'Enregistrement du choix…', sessionMissing:'Session absente. Ouvrez le lien complet affiché dans le terminal.', networkError:'Connexion perdue. Gardez le terminal PlugArr ouvert, puis réessayez.', noSelection:'Choisissez au moins une application.', dockerRequired:'Docker doit être disponible avant l’installation.', switched:'Retournez au terminal : le TUI s’ouvre. Les saisies web non enregistrées ne sont pas transférées.', retryWarning:'Relisez les réglages et relancez les vérifications avant de réessayer.', unavailable:'Indisponible', vpnOn:'Activé', vpnOff:'Désactivé', simulation:'SIMULATION', localBadge:'LOCAL', profile:'Profil', notInstalled:'La console de démonstration s’ouvre dans un nouvel onglet. Aucun service n’a été installé.', progressError:'Progression momentanément indisponible. Reconnexion…', optional:'facultatif', qualityInherited:'Profil existant', sizeEstimate:'Taille indicative', movie2h:'film de 2 h', episode45:'épisode de 45 min',
@@ -67,6 +82,8 @@ let selectionMeta = {};
 let plan = null;
 let busy = false;
 let startupReady = false;
+let remoteProbe = null;
+let remoteExisting = null;
 let installed = false;
 let lastProgress = null;
 let polling = null;
@@ -93,6 +110,7 @@ const tr = key => (lang === 'en' ? EN : FR)[key] || FR[key] || key;
 Object.assign(EN, globalThis.PlugArrRemote?.english || {});
 FR.remote = 'Accès à distance'; EN.remote = 'Remote access';
 Object.assign(FR, {
+  consoleAdministration:'Administration PlugArr',
   backupChooseFile:'Choisissez d’abord un fichier de sauvegarde.', backupUploading:'Lecture de la sauvegarde…',
   backupNone:'Aucun indexeur dans cette sauvegarde.', backupFound:'indexeur(s) trouvé(s)', backupImportable:'à importer',
   backupStatusConfigured:'déjà configuré', backupStatusUnknown:'définition absente de ce Prowlarr', backupStatusImportable:'importable',
@@ -101,6 +119,7 @@ Object.assign(FR, {
   backupImporting:'Import', backupSelectNone:'Cochez au moins un indexeur.', backupDone:'Import terminé',
 });
 Object.assign(EN, {
+  consoleAdministration:'PlugArr administration',
   backupImportTitle:'Import indexers from a backup', backupImportHelp:'Prowlarr backup (.zip) or PlugArr archive. Only indexers are imported: the links to qBittorrent, Sonarr and Radarr stay those of this installation.',
   backupFile:'Backup file', backupInspect:'Inspect', backupImport:'Import selection',
   backupChooseFile:'Choose a backup file first.', backupUploading:'Reading backup…',
@@ -110,6 +129,8 @@ Object.assign(EN, {
   backupIgnoredapplications:'applications', backupIgnoreddownload_clients:'download clients', backupIgnoredproxies:'proxies', backupIgnorednotifications:'notifications',
   backupImporting:'Importing', backupSelectNone:'Tick at least one indexer.', backupDone:'Import finished',
 });
+// Textes rendus par le serveur : il les envoie dans chaque langue, la page prend la sienne.
+const pick = (variants, fallback) => (variants && typeof variants === 'object' ? variants[lang] ?? variants.fr : undefined) ?? fallback;
 let token = new URLSearchParams(location.hash.slice(1)).get('token');
 try {
   if (token) sessionStorage.setItem('plugarr-wizard-token', token);
@@ -178,7 +199,9 @@ function scheduleGraph() {
 
 function setBusy(value) {
   busy = value;
-  $('next').disabled = value || (step === 0 && !startupReady) || (step === 5 && (!plan?.plan_id || !$('confirm').checked));
+  const remoteReady = remoteProbe?.ready && $('ssh-confirm').checked;
+  const destinationReady = form?.install_target === 'ssh' ? remoteReady : startupReady;
+  $('next').disabled = value || (step === 0 && !destinationReady) || (step === 5 && (!plan?.plan_id || !$('confirm').checked));
   $('back').disabled = value;
   $('recheck').disabled = value;
 }
@@ -187,7 +210,7 @@ function translate() {
   document.documentElement.lang = lang;
   document.querySelectorAll('[data-i18n]').forEach(element => { element.textContent = tr(element.dataset.i18n); });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(element => { element.placeholder = tr(element.dataset.i18nPlaceholder); });
-  $('mode').textContent = tr(bootstrap?.demo ? 'simulation' : 'localBadge');
+  $('mode').textContent = tr(bootstrap?.demo ? 'simulation' : form?.install_target === 'ssh' ? 'sshRemoteBadge' : 'localBadge');
   if (graphSnapshot) displayGraph(graphSnapshot);
   if (bootstrap) {
     renderSteps();
@@ -298,8 +321,8 @@ function renderServices() {
         updateConditional();
         scheduleGraph();
       });
-      label.append(input, E('p', service.notes));
-      if (service.experimental) label.append(E('p', service.experimental, 'experimental'));
+      label.append(input, E('p', pick(service.notes_i18n, service.notes)));
+      if (service.experimental) label.append(E('p', pick(service.experimental_i18n, service.experimental), 'experimental'));
       grid.append(label);
     }
     target.append(grid);
@@ -343,6 +366,18 @@ function readVpnFields() {
 }
 
 function readFields() {
+  form.install_target = document.querySelector('input[name="install-target"]:checked')?.value || 'local';
+  if (form.install_target === 'ssh') {
+    form.remote_connection_id = remoteProbe?.connection_id || '';
+    form.remote_fingerprint = remoteProbe?.fingerprint || '';
+    form.remote_project_dir = $('project-dir').textContent;
+    form.remote_replace = $('remote-replace').checked;
+  } else {
+    form.remote_connection_id = '';
+    form.remote_fingerprint = '';
+    form.remote_project_dir = '';
+    form.remote_replace = false;
+  }
   form.remote_access = globalThis.PlugArrRemote?.read(effective) || {mode:'local',domain:'',services:[]};
   for (const id of ['platform','project_name','data_root','config_root','username','host','timezone','language']) form[id] = $(id).value;
   form.ui_language = lang;
@@ -368,16 +403,30 @@ function readFields() {
     }
   }
   const resume = document.querySelector('input[name="resume"]:checked');
-  if (bootstrap.existing && resume) form.reprendre = resume.value === 'yes';
+  if (form.install_target !== 'ssh' && bootstrap.existing && resume) form.reprendre = resume.value === 'yes';
   const reset = document.querySelector('input[name="reset"]:checked');
   form.reset_config = Boolean(reset && reset.value === 'delete');
+  // La reprise de l'installation du poste local n'a aucun sens en SSH : on
+  // reprend celle du serveur, lue pendant le test de connexion.
+  // Le nettoyage distant, lui, exige une pile reconnue et une confirmation.
+  if (form.install_target === 'ssh') {
+    const choix = document.querySelector('input[name="ssh-existing"]:checked');
+    form.reprendre = Boolean(remoteExisting) && (choix ? choix.value === 'resume' : true);
+    form.upgrade_images = form.reprendre && Boolean($('ssh-upgrade')?.checked);
+    form.new_console_password = form.reprendre && Boolean($('ssh-console-password')?.checked);
+  }
 }
 
 function updatePlatformInfo() {
   const profile = bootstrap.profiles[$('platform').value];
   if (!profile) return;
-  $('ids-summary').textContent = `${profile.puid}:${profile.pgid}`;
-  $('ids-detail').textContent = profile.ids_source + (profile.ids_certain ? '' : ' · ' + tr('unavailable'));
+  if (form.install_target === 'ssh' && remoteProbe) {
+    $('ids-summary').textContent = `${remoteProbe.uid}:${remoteProbe.gid}`;
+    $('ids-detail').textContent = tr('sshReady');
+  } else {
+    $('ids-summary').textContent = `${profile.puid}:${profile.pgid}`;
+    $('ids-detail').textContent = profile.ids_source + (profile.ids_certain ? '' : ' · ' + tr('unavailable'));
+  }
   // La note du profil : ce qu'aucun defaut ne peut porter, comme le fait qu'un
   // profil soit experimental. Elle disparait pour les profils qui n'en ont pas.
   const note = $('platform-note');
@@ -386,6 +435,8 @@ function updatePlatformInfo() {
 }
 
 function fillFields() {
+  const target = document.querySelector(`input[name="install-target"][value="${form.install_target || 'local'}"]`);
+  if (target) target.checked = true;
   for (const id of ['platform','project_name','data_root','config_root','username','host','timezone','language']) $(id).value = form[id];
   $('vpn-provider').replaceChildren(...Object.entries(bootstrap.providers).map(([provider, details]) => new Option(details.port_forward ? `${provider} · ${tr('portForward')}` : provider, provider)));
   if (![...$('vpn-provider').options].some(option => option.value === form.vpn.provider)) form.vpn.provider = Object.keys(bootstrap.providers)[0] || '';
@@ -421,6 +472,185 @@ function fillFields() {
   updatePlatformInfo();
   updatePlaces();
   renderResumeControls();
+  updateInstallTarget();
+}
+
+// Second passage reel du 25/09/2026 sur un VPS : sans reprise, l'assistant
+// repartait des defauts, regenerait les mots de passe et perdait le VPN.
+function applyRemoteExisting(existing, reprendre = true) {
+  for (const key of ['services','project_name','username','timezone','language','recyclarr_templates','client_prefere','qbittorrent_ui','veille_enabled','veille_port','veille_socket','console_enabled','console_port','remote_access']) {
+    form[key] = structuredClone(existing[key]);
+  }
+  form.vpn = {...structuredClone(bootstrap.form.vpn), ...structuredClone(existing.vpn)};
+  form.reprendre = reprendre;
+  for (const id of ['project_name','username','timezone','language']) $(id).value = form[id];
+  $('vpn-enabled').checked = form.vpn.enabled;
+  if ([...$('vpn-provider').options].some(option => option.value === form.vpn.provider)) $('vpn-provider').value = form.vpn.provider;
+  $('vpn-type').value = form.vpn.vpn_type;
+  $('vpn-key').value = '';
+  $('vpn-addresses').value = form.vpn.wireguard_addresses || '';
+  const sabRoute = document.querySelector(`input[name="sab-route"][value="${form.vpn.protect_sabnzbd ? 'vpn' : 'direct'}"]`);
+  if (sabRoute) sabRoute.checked = true;
+  const qbUi = document.querySelector(`input[name="qbittorrent-ui"][value="${form.qbittorrent_ui || ''}"]`);
+  if (qbUi) qbUi.checked = true;
+  $('veille-enabled').checked = !!form.veille_enabled;
+  $('veille-port').value = form.veille_port || 7374;
+  $('veille-docker').checked = !!form.veille_socket;
+  $('console-enabled').checked = !!form.console_enabled;
+  $('console-port').value = form.console_port || 7373;
+  $('vpn-preserved').hidden = !(reprendre && form.vpn.enabled);
+  globalThis.PlugArrRemote?.load?.(form.remote_access);
+  for (const service of ['sonarr','radarr']) {
+    const select = $('quality-' + service);
+    const wanted = form.recyclarr_templates[service];
+    if (!select) continue;
+    if (!wanted) { select.value = ''; continue; }
+    if (![...select.options].some(option => option.value === wanted)) select.append(profileOption(service, wanted));
+    select.value = wanted;
+  }
+  renderServices();
+  // Liste videe d'abord : deja affichee, elle se relisait elle-meme (aucune
+  // case cochee) au lieu du reglage repris. Validation reelle du 26/09/2026 :
+  // « France » perdu, le VPN sortait par les Etats-Unis.
+  $('vpn-places').replaceChildren();
+  updatePlaces();
+  renderResumeControls();
+  refreshSelection().catch(failure => error(failure.message));
+}
+
+function renderExistingChoice(result) {
+  $('ssh-existing-box').hidden = !remoteExisting;
+  if (!remoteExisting) return;
+  document.querySelector('input[name="ssh-existing"][value="resume"]').checked = true;
+  const changes = result.version_changes || [];
+  $('ssh-upgrade').checked = false;
+  $('ssh-upgrade-box').hidden = !changes.length;
+  $('ssh-console-password').checked = false;
+  $('ssh-console-password-box').hidden = !remoteExisting.console_enabled;
+  $('ssh-upgrade-list').replaceChildren(...changes.map(item =>
+    E('li', `${item.name} : ${item.installed} → ${item.tested}${item.major ? ` (${tr('sshMajor')})` : ''}`)));
+}
+
+function chooseExisting(value) {
+  if (!remoteExisting) return;
+  if (value === 'resume') applyRemoteExisting(remoteExisting, true);
+  else applyRemoteExisting(remoteProbe?.fresh_form || bootstrap.form, false);
+  $('ssh-upgrade-box').hidden = value !== 'resume' || !(remoteProbe?.version_changes || []).length;
+  if (value !== 'resume') $('ssh-upgrade').checked = false;
+  $('ssh-console-password-box').hidden = value !== 'resume' || !remoteExisting.console_enabled;
+  if (value !== 'resume') $('ssh-console-password').checked = false;
+}
+
+// Demande du 26/09/2026 : en reprise, les pages Dossiers, VPN, Qualite et
+// Acces ne font que redemander ce qui est deja connu. « Continuer » mene
+// directement a la verification ; Retour permet toujours d'y revenir.
+function repriseDirecte() {
+  if (form.install_target === 'ssh') {
+    return Boolean(remoteExisting) && document.querySelector('input[name="ssh-existing"]:checked')?.value !== 'fresh';
+  }
+  return Boolean(bootstrap.existing) && form.reprendre !== false;
+}
+
+function resetRemoteProbe() {
+  remoteProbe = null;
+  remoteExisting = null;
+  $('ssh-existing-box').hidden = true;
+  form.remote_connection_id = '';
+  form.remote_fingerprint = '';
+  form.remote_project_dir = '';
+  form.remote_replace = false;
+  $('remote-replace').checked = false;
+  $('ssh-confirm').checked = false;
+  $('ssh-confirm-box').hidden = true;
+  $('ssh-status').textContent = '';
+  updateButtons();
+}
+
+function updateInstallTarget() {
+  const remote = document.querySelector('input[name="install-target"]:checked')?.value === 'ssh';
+  form.install_target = remote ? 'ssh' : 'local';
+  $('ssh-install-box').hidden = !remote;
+  $('startup-card').hidden = remote;
+  $('local-tools').hidden = remote;
+  $('path-check').hidden = remote;
+  $('path-status').hidden = remote;
+  $('existing-banner').hidden = remote || !bootstrap.existing;
+  if (!remote) {
+    $('project-dir').textContent = bootstrap.project_dir;
+    form.remote_replace = false;
+    $('remote-replace').checked = false;
+  } else {
+    form.reprendre = false;
+  }
+  renderResumeControls();
+  $('mode').textContent = tr(bootstrap.demo ? 'simulation' : remote ? 'sshRemoteBadge' : 'localBadge');
+  updateButtons();
+}
+
+function updateSshAuth() {
+  const key = $('ssh-auth').value === 'key';
+  $('ssh-password-label').hidden = key;
+  $('ssh-key-label').hidden = !key;
+  $('ssh-passphrase-label').hidden = !key;
+  resetRemoteProbe();
+}
+
+async function testRemoteConnection() {
+  for (const input of [$('ssh-host'), $('ssh-port'), $('ssh-user')]) {
+    if (!input.reportValidity()) return;
+  }
+  let privateKey = '';
+  if ($('ssh-auth').value === 'key') {
+    const file = $('ssh-key').files[0];
+    if (!file) { $('ssh-status').textContent = '× ' + tr('sshKeyFile'); return; }
+    if (file.size > 32768) { $('ssh-status').textContent = '× 32 KiB maximum'; return; }
+    privateKey = await file.text();
+  }
+  $('ssh-test').disabled = true;
+  $('ssh-status').textContent = tr('sshTesting');
+  $('ssh-confirm-box').hidden = true;
+  try {
+    const result = await api('/api/remote-install/probe', {
+      host:$('ssh-host').value.trim(), port:Number($('ssh-port').value), username:$('ssh-user').value.trim(),
+      password:$('ssh-auth').value === 'password' ? $('ssh-password').value : '',
+      private_key:privateKey, passphrase:$('ssh-auth').value === 'key' ? $('ssh-passphrase').value : '',
+      sudo_password:$('ssh-sudo').value,
+    });
+    if (!result.ready) throw new Error(tr('dockerRequired'));
+    remoteProbe = result;
+    form.remote_connection_id = result.connection_id;
+    form.remote_fingerprint = result.fingerprint;
+    form.remote_project_dir = result.project_dir;
+    remoteExisting = result.existing ? result.existing_form : null;
+    if (remoteExisting) applyRemoteExisting(remoteExisting);
+    renderExistingChoice(result);
+    $('ssh-fingerprint').textContent = result.fingerprint;
+    $('ssh-system').textContent = `${result.system} ${result.machine} · Docker ${result.docker_version} · UID:GID ${result.uid}:${result.gid}`;
+    $('ssh-confirm').checked = false;
+    $('ssh-confirm-box').hidden = false;
+    $('ssh-status').textContent = `✓ ${tr('sshReady')}`;
+    if (['windows','macos'].includes($('platform').value)) $('platform').value = 'generic-linux';
+    $('config_root').value = result.config_root;
+    $('data_root').value = result.data_root;
+    const sshHost = $('ssh-host').value.trim();
+    $('host').value = result.suggested_host || sshHost;
+    if ($('host').value !== sshHost) $('ssh-status').textContent += ' ' + tr('sshPrivateHost').replace('{host}', $('host').value);
+    if (remoteExisting) $('ssh-status').textContent += ' ' + tr('sshExisting');
+    $('project-dir').textContent = result.project_dir;
+    $('ids-summary').textContent = `${result.uid}:${result.gid}`;
+    $('ids-detail').textContent = tr('sshReady');
+    $('ssh-password').value = '';
+    $('ssh-passphrase').value = '';
+    $('ssh-sudo').value = '';
+    $('ssh-key').value = '';
+    updatePlatformInfo();
+  } catch (failure) {
+    remoteProbe = null;
+    $('ssh-status').textContent = '× ' + failure.message;
+  } finally {
+    $('ssh-test').disabled = false;
+    updateButtons();
+  }
 }
 
 function updatePlaceSummary() {
@@ -506,8 +736,10 @@ function updateConditional() {
 }
 
 function renderResumeControls() {
-  $('resume-box').hidden = !bootstrap.existing;
-  if (!bootstrap.existing) return;
+  // En SSH, la question est posee juste apres la connexion (ssh-existing-box).
+  const available = form.install_target !== 'ssh' && bootstrap.existing;
+  $('resume-box').hidden = !available;
+  if (!available) return;
   $('resume-origin').textContent = `${tr('resumeOrigin')} : ${bootstrap.existing_project_dir}`;
   const choice = document.querySelector(`input[name="resume"][value="${form.reprendre ? 'yes' : 'no'}"]`);
   if (choice) choice.checked = true;
@@ -564,6 +796,10 @@ function renderReview() {
     const reset = document.querySelector(`input[name="reset"][value="${form.reset_config ? 'delete' : 'keep'}"]`);
     if (reset) reset.checked = true;
   }
+  $('remote-replace-box').hidden = !plan.remote_replace_required;
+  $('remote-replace-detail').textContent = tr(form.reset_config ? 'remoteReplaceResetHelp' : 'remoteReplaceHelp');
+  $('remote-replace-confirm').hidden = !plan.remote_replace_managed;
+  $('remote-replace').checked = Boolean(form.remote_replace && plan.remote_replace_managed);
   $('confirm-label').hidden = plan.blocked;
 }
 
@@ -611,7 +847,7 @@ async function checkPaths() {
   $('path-status').textContent = tr('checkingAction');
   try {
     const result = await api('/api/path-check', {platform:$('platform').value, data_root:$('data_root').value});
-    $('path-status').textContent = `${result.ok ? '✓' : '!'} ${tr(result.ok ? 'pathOk' : 'pathFailed')} ${result.detail}${result.warning ? ' · ' + result.warning : ''}`;
+    $('path-status').textContent = `${result.ok ? '✓' : '!'} ${tr(result.ok ? 'pathOk' : 'pathFailed')} ${pick(result.detail_i18n, result.detail)}${result.warning ? ' · ' + result.warning : ''}`;
     $('ids-summary').textContent = `${result.puid}:${result.pgid}`;
     $('ids-detail').textContent = result.ids_source + (result.ids_certain ? '' : ' · ' + tr('unavailable'));
   } catch (failure) { $('path-status').textContent = '× ' + failure.message; }
@@ -678,7 +914,11 @@ async function testVpn() {
   $('vpn-test').disabled = true;
   $('vpn-test-status').textContent = tr('tunnelWorking');
   try {
-    const result = await api('/api/vpn-test', {vpn:readVpnFields()});
+    const result = await api('/api/vpn-test', {
+      vpn:readVpnFields(), install_target:form.install_target,
+      remote_connection_id:remoteProbe?.connection_id || '',
+      remote_fingerprint:remoteProbe?.fingerprint || '',
+    });
     $('vpn-test-status').textContent = `${result.ok ? '✓' : '×'} ${tr(result.ok ? 'tunnelSuccess' : 'tunnelFailure')} ${result.detail}`;
   } catch (failure) { $('vpn-test-status').textContent = '× ' + failure.message; }
   finally { $('vpn-test').disabled = false; }
@@ -686,6 +926,7 @@ async function testVpn() {
 
 function renderReport(report) {
   reportData = report;
+  $('admin').hidden = Boolean(report.remote_install && !report.console_url);
   globalThis.PlugArrRemote?.report(report);
   const rows = report.services.map(service => {
     const row = E('tr');
@@ -697,9 +938,63 @@ function renderReport(report) {
     for (const value of [service.username, service.password, service.api_key]) { const cell = E('td'); cell.append(E('code', value)); row.append(cell); }
     return row;
   });
+  if (report.console_url && report.console_password_kept) {
+    const row = E('tr');
+    row.append(E('th', tr('consoleAdministration')));
+    const urlCell = E('td');
+    const link = E('a', report.console_url);
+    link.href = report.console_url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    urlCell.append(link);
+    row.append(urlCell, E('td', '—'), E('td', tr('consoleKept')), E('td', '—'));
+    rows.push(row);
+  }
+  if (report.console_url && report.console_password) {
+    const row = E('tr');
+    row.append(E('th', tr('consoleAdministration')));
+    const urlCell = E('td');
+    const link = E('a', report.console_url);
+    link.href = report.console_url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    urlCell.append(link);
+    row.append(urlCell, E('td', '—'), E('td', undefined), E('td', '—'));
+    row.children[3].append(E('code', report.console_password));
+    rows.push(row);
+  }
   $('report-services').replaceChildren(...rows);
   $('env-path').textContent = `${tr('envFile')} : ${report.env_path}`;
-  $('next-steps').replaceChildren(...report.next_steps.map(item => E('li', item)));
+  const etapes = [...pick(report.next_steps_i18n, report.next_steps), ...(report.console_url && report.console_password_kept ? [tr('consoleKeptHelp')] : [])];
+  const items = etapes.map(item => E('li', item));
+  // Validation reelle du 26/09/2026 : liens vers l'adresse privee du VPS,
+  // injoignables depuis ce poste, sans explication.
+  if (report.access_help) {
+    const aide = E('li');
+    const commande = texte => { const code = E('code', texte); code.className = 'copyable'; return code; };
+    aide.append(
+      E('p', tr('accessHelpIntro').replace('{host}', report.access_help.host)),
+      E('p', tr('accessHelpSsh')), commande(report.access_help.ssh),
+      E('p', tr('accessHelpBrowser')), commande(`chrome --proxy-server="${report.access_help.proxy}" --user-data-dir=chrome-plugarr`),
+      E('p', tr('accessHelpTailscale')),
+    );
+    items.unshift(aide);
+  }
+  $('next-steps').replaceChildren(...items);
+}
+
+function renderUpdates(data) {
+  const zone = $('report-updates');
+  const items = data.updates.map(item => E('li', `${item.name} : ${item.current} → ${item.latest}`));
+  const parts = [];
+  if (items.length) { const list = E('ul', undefined, 'next-steps'); list.append(...items); parts.push(list, E('p', tr('updatesKept'))); }
+  else if (!data.demo) parts.push(E('p', tr('updatesNone')));
+  if (data.unchecked?.length) parts.push(E('p', `${tr('updatesUnchecked')} : ${data.unchecked.join(', ')}`));
+  zone.replaceChildren(...parts);
+}
+
+async function loadUpdates() {
+  $('report-updates').textContent = tr('updatesLoading');
+  try { renderUpdates(await api('/api/updates')); }
+  catch (failure) { $('report-updates').textContent = failure.message; }
 }
 
 function renderConfigured(names) {
@@ -740,7 +1035,7 @@ function indexerCard(result) {
     const values = Object.fromEntries([...fields.querySelectorAll('[data-field]')].map(input => [input.dataset.field, input.value]));
     try {
       const response = await api('/api/indexers/add', {key:result.key, values});
-      $('indexer-status').textContent = `${response.ok ? '✓' : '×'} ${response.message || tr(response.ok ? 'indexerAdded' : 'unavailable')}`;
+      $('indexer-status').textContent = `${response.ok ? '✓' : '×'} ${pick(response.message_i18n, response.message) || tr(response.ok ? 'indexerAdded' : 'unavailable')}`;
       renderConfigured(response.configured || []);
     } catch (failure) { $('indexer-status').textContent = '× ' + failure.message; }
     finally { add.disabled = false; }
@@ -825,12 +1120,18 @@ async function importIndexerBackup() {
 async function loadPostInstall() {
   $('post-install').hidden = false;
   $('env-path').textContent = tr('reportLoading');
-  const [report, overview] = await Promise.all([api('/api/report'), api('/api/indexers')]);
+  const report = await api('/api/report');
   renderReport(report);
-  renderIndexerOverview(overview);
+  loadUpdates();
   $('access-page').hidden = false;
   $('download-access').hidden = false;
   $('finish').hidden = false;
+  try {
+    renderIndexerOverview(await api('/api/indexers'));
+  } catch (failure) {
+    $('indexer-panel').hidden = !report.can_indexers;
+    $('indexer-overview').textContent = failure.message;
+  }
 }
 
 function renderProgress(data) {
@@ -845,10 +1146,11 @@ function renderProgress(data) {
   const recent = data.events.slice(-10);
   $('event-list').replaceChildren(...recent.map(event => {
     const item = E('li'); item.append(E('b', event.started ? '…' : event.ok ? '✓' : '×', event.started ? 'pending' : event.ok ? 'ok' : 'fail'));
-    const text = E('div'); text.append(E('span', event.phase), E('small', event.message)); item.append(text); return item;
+    const text = E('div'); text.append(E('span', pick(event.phase_i18n, event.phase)), E('small', pick(event.message_i18n, event.message))); item.append(text); return item;
   }));
-  $('logs').textContent = data.events.map(event => `${event.started ? 'EN COURS' : event.ok ? 'OK' : 'ERREUR'} · ${event.phase} · ${event.message}`).join('\n');
-  $('admin').hidden = !['done','partial'].includes(data.status);
+  $('logs').textContent = data.events.map(event => `${event.started ? 'EN COURS' : event.ok ? 'OK' : 'ERREUR'} · ${pick(event.phase_i18n, event.phase)} · ${pick(event.message_i18n, event.message)}`).join('\n');
+  const remoteAdminPending = typeof form !== 'undefined' && form?.install_target === 'ssh' && !reportData?.console_url;
+  $('admin').hidden = !['done','partial'].includes(data.status) || remoteAdminPending;
   $('retry').hidden = data.status !== 'error';
   $('tui').hidden = true;
   if (['done','partial'].includes(data.status) && !postInstallLoaded) {
@@ -916,7 +1218,9 @@ async function openAdmin() {
   try {
     page = window.open('about:blank', '_blank');
     if (page) { page.opener = null; page.document.title = 'PlugArr — Administration'; page.document.body.textContent = tr('adminWaiting'); }
-    adminUrl = adminUrl || (await api('/api/admin', {})).url;
+    adminUrl = adminUrl || (reportData?.remote_install
+      ? reportData.console_url : (await api('/api/admin', {})).url);
+    if (!adminUrl) throw new Error(tr('adminBlocked'));
     $('admin-link').href = adminUrl; $('admin-link').hidden = false;
     if (page && !page.closed) { page.location.replace(adminUrl); $('admin-notice').textContent = tr('adminOpened'); }
     else $('admin-notice').textContent = tr('adminBlocked');
@@ -930,11 +1234,9 @@ async function openAccessPage() {
   const page = window.open('about:blank', '_blank');
   if (page) { page.opener = null; page.document.title = 'PlugArr — Accès'; page.document.body.textContent = tr('accessOpening'); }
   try {
-    const html = await apiText('/api/access');
-    const url = URL.createObjectURL(new Blob([html], {type:'text/html'}));
-    if (!page || page.closed) { URL.revokeObjectURL(url); throw new Error(tr('popupBlocked')); }
-    page.location.replace(url);
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    const preview = await api('/api/access-preview', {});
+    if (!page || page.closed) throw new Error(tr('popupBlocked'));
+    page.location.replace(window.location.origin + preview.url);
   } catch (failure) {
     if (page && !page.closed) page.close();
     error(failure.message);
@@ -978,7 +1280,9 @@ $('wizard').addEventListener('submit', async event => {
   error('');
   try {
     if (step === 0) {
-      if (!startupReady) throw new Error(tr('dockerRequired'));
+      if (form.install_target === 'ssh') {
+        if (!remoteProbe?.ready || !$('ssh-confirm').checked) throw new Error(tr('sshConfirmRequired'));
+      } else if (!startupReady) throw new Error(tr('dockerRequired'));
       if (!form.services.length) throw new Error(tr('noSelection'));
       setBusy(true); await refreshSelection(); setBusy(false);
     }
@@ -987,7 +1291,11 @@ $('wizard').addEventListener('submit', async event => {
     }
     if (step < 5) {
       if (step === 4 && globalThis.PlugArrRemote && !globalThis.PlugArrRemote.valid()) return;
-      readFields(); showStep(step + 1); if (step === 5) await validate(); return;
+      const direct = step === 0 && repriseDirecte();
+      readFields(); showStep(direct ? 5 : step + 1);
+      $('resume-skipped').hidden = !direct;
+      if (step === 5) await validate();
+      return;
     }
     if (step === 5 && plan?.plan_id && $('confirm').checked) {
       setBusy(true);
@@ -999,13 +1307,17 @@ $('wizard').addEventListener('submit', async event => {
   finally { setBusy(false); }
 });
 
-$('back').addEventListener('click', () => { if (!busy) { readFields(); plan = null; showStep(Math.max(0, step - 1)); } });
+$('back').addEventListener('click', () => { if (!busy) { readFields(); plan = null; $('resume-skipped').hidden = true; showStep(Math.max(0, step - 1)); } });
 $('recheck').addEventListener('click', validate);
 $('confirm').addEventListener('change', () => setBusy(busy));
+$('remote-replace').addEventListener('change', async event => {
+  form.remote_replace = event.target.checked;
+  await validate();
+});
 $('language').addEventListener('change', scheduleGraph);
 $('vpn-enabled').addEventListener('change', scheduleGraph);
 $('platform').addEventListener('change', () => {
-  if (!bootstrap.existing || !form.reprendre) {
+  if (form.install_target !== 'ssh' && (!bootstrap.existing || !form.reprendre)) {
     const defaults = bootstrap.profiles[$('platform').value];
     $('data_root').value = defaults.data_root; $('config_root').value = defaults.config_root;
   }
@@ -1032,6 +1344,11 @@ $('ui-language').addEventListener('change', () => { lang = $('ui-language').valu
 $('load-templates').addEventListener('click', loadTemplates);
 $('startup-refresh').addEventListener('click', checkStartup);
 $('path-check').addEventListener('click', checkPaths);
+$('ssh-test').addEventListener('click', testRemoteConnection);
+$('ssh-auth').addEventListener('change', updateSshAuth);
+$('ssh-confirm').addEventListener('change', updateButtons);
+for (const choice of document.querySelectorAll('input[name="install-target"]')) choice.addEventListener('change', updateInstallTarget);
+for (const id of ['ssh-host','ssh-port','ssh-user','ssh-password','ssh-passphrase','ssh-sudo','ssh-key']) $(id).addEventListener('input', resetRemoteProbe);
 $('backup-run').addEventListener('click', createBackup);
 $('restore-inspect').addEventListener('click', inspectRestore);
 $('restore-run').addEventListener('click', restoreBackup);
@@ -1049,6 +1366,7 @@ $('finish').addEventListener('click', closeWizard);
 $('close-wizard').addEventListener('click', closeWizard);
 $('retry').addEventListener('click', async () => { try { await api('/api/reload', {}); installed = false; location.reload(); } catch (failure) { error(failure.message); } });
 $('tui').addEventListener('click', async () => { try { await api('/api/tui', {}); $('wizard').hidden = true; $('loading').hidden = false; $('loading').textContent = tr('switched'); $('tui').hidden = true; } catch (failure) { error(failure.message); } });
+for (const choice of document.querySelectorAll('input[name="ssh-existing"]')) choice.addEventListener('change', event => chooseExisting(event.target.value));
 for (const choice of document.querySelectorAll('input[name="resume"]')) choice.addEventListener('change', async event => { form.reprendre = event.target.value === 'yes'; form.reset_config = false; await validate(); });
 for (const choice of document.querySelectorAll('input[name="reset"]')) choice.addEventListener('change', async event => { form.reset_config = event.target.value === 'delete'; await validate(); });
 window.addEventListener('beforeunload', event => { if (installed && lastProgress?.status === 'running') { event.preventDefault(); event.returnValue = ''; } });

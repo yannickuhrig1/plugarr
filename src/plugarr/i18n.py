@@ -96,7 +96,18 @@ def t(texte: str, /, **valeurs: object) -> str:
     Le formatage se fait APRES la traduction, sans quoi la cle de recherche
     contiendrait deja les valeurs et ne correspondrait jamais au catalogue.
     """
-    traduit = _CATALOGUES.get(_langue, {}).get(texte, texte)
+    return traduire(texte, _langue, **valeurs)
+
+
+def traduire(texte: str, code: str, /, **valeurs: object) -> str:
+    """Comme `t`, dans une langue donnee, sans toucher a la langue courante.
+
+    L'assistant web en a besoin : la langue y est choisie DANS la page, et
+    peut changer a tout moment, pendant qu'une installation tourne dans un
+    autre fil. Basculer la langue du processus pour traduire une phrase
+    changerait celle de tout ce que ce fil ecrit au meme instant.
+    """
+    traduit = _CATALOGUES.get(code, {}).get(texte, texte)
     if not valeurs:
         return traduit
     try:
@@ -105,3 +116,19 @@ def t(texte: str, /, **valeurs: object) -> str:
         # Une traduction dont les champs ne correspondent pas ne doit pas
         # faire tomber l'assistant : on rend le francais, qui lui est bon.
         return texte.format(**valeurs)
+
+
+def bilingue(texte: str, /, **valeurs: object) -> dict[str, str]:
+    """La meme phrase dans chaque langue de PlugArr, pour qu'une page choisisse."""
+    return {code: traduire(texte, code, **valeurs) for code, _ in DISPONIBLES}
+
+
+def phrase(texte: str, /) -> str:
+    """Marque une phrase a traduire plus tard, sans la traduire maintenant.
+
+    Rend le texte tel quel. Son seul role est d'etre vu par
+    `scripts/audit_traductions.py` : une phrase qui ne passe par `t` qu'au
+    moment de l'affichage, dans une autre fonction, echapperait sinon au
+    controle et resterait francaise en anglais.
+    """
+    return texte

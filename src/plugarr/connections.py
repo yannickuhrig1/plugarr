@@ -23,6 +23,8 @@ ROLES = {
     'sabnzbd': (2, 'Usenet'), 'jellyfin': (3, 'Serveur multimédia'),
     'audiobookshelf': (3, 'Livres audio et podcasts'), 'silo': (3, 'Serveur multimédia'),
     'silo-postgres': (3, 'Base de Silo'), 'silo-redis': (3, 'Cache de Silo'),
+    'shelfarr': (1, 'Livres et livres audio'),
+    'shelfarr-libation': (3, 'Sauvegarde Audible interne'),
 }
 
 
@@ -73,6 +75,12 @@ def topology(cfg, saved=None):
     add('droppedneedle', 'sabnzbd', 'music', 'Musique Usenet', 'Envoie les téléchargements à la catégorie musique de SABnzbd.')
     if cfg.enabled('jellyfin') and cfg.services['jellyfin'].api_key:
         add('droppedneedle', 'jellyfin', 'library', 'Bibliothèque', 'Déclare Jellyfin avec la clé disponible dans la configuration.')
+    add('shelfarr', 'prowlarr', 'indexers', 'Indexeurs', 'Shelfarr interroge Prowlarr après la configuration du premier compte administrateur.')
+    shelfarr_client = next((sid for sid in ('qbittorrent', 'transmission', 'sabnzbd') if cfg.enabled(sid)), None)
+    if shelfarr_client:
+        add('shelfarr', shelfarr_client, 'download', 'Téléchargements', 'Shelfarr envoie les livres à ce client après sa configuration dans l’interface.')
+    add('shelfarr', 'audiobookshelf', 'library', 'Bibliothèque', 'Shelfarr range les livres dans les dossiers lus par Audiobookshelf.')
+    add('shelfarr', 'shelfarr-libation', 'dependency', 'Sauvegarde Audible', 'Compagnon officiel interne, sans port hôte et inactif tant que la fonction bêta reste désactivée.', 'Configuration Compose')
     for sid in catalog.STARTUP_ORDER:
         if not cfg.enabled(sid) or cfg.services[sid].adopted:
             continue

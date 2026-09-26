@@ -262,7 +262,10 @@ class Wirer:
                 "defaultQualityProfileId": client.profile_id("qualityprofile", "Standard"),
                 "defaultMetadataProfileId": client.profile_id("metadataprofile", "Standard"),
             }
-        _folder, created = client.ensure_root_folder(path, extra)
+        try:
+            _folder, created = client.ensure_root_folder(path, extra)
+        except WiringError as exc:
+            raise self._dossier_refuse(arr_id, path, exc) from exc
         present = any(
             f.get("path", "").rstrip("/") == path.rstrip("/")
             for f in client.get("rootfolder") or []
@@ -273,6 +276,56 @@ class Wirer:
             detail=t("cree") if created else t("deja present"),
             created=created,
         )
+
+    def _dossier_refuse(self, arr_id: str, chemin: str, exc: WiringError) -> WiringError:
+        """Traduit le refus d'un dossier racine en quelque chose d'actionnable.
+
+        Sonarr et Radarr repondent HTTP 400 avec « Folder '/data/media/tv' is
+        not writable by user 'abc' ». Le message generique de l'appelant —
+        « le gabarit renvoye par /schema a peut-etre change de forme » —
+        envoyait alors chercher une incompatibilite de version, la ou le
+        probleme tient a un `chown` : le dossier existait deja cote hote, avec
+        un proprietaire qui n'est pas le PUID/PGID de la pile. Constate sur
+        UGOS le 2026-09-21, sur les trois dossiers racines a la fois.
+
+        `abc` est l'utilisateur interne des images LinuxServer ; il PORTE le
+        PUID/PGID donne au conteneur. Le nommer sans le traduire ne dit rien a
+        personne, d'ou la reformulation cote hote.
+        """
+        if "FolderWritableValidator" not in exc.why and "not writable" not in exc.why:
+            return exc
+        hote = self._chemin_hote(chemin)
+        return WiringError(
+            t(
+                "{service} ne peut pas ecrire dans {dossier}",
+                service=arr_id,
+                dossier=chemin,
+            ),
+            exc.why,
+            t(
+                "cote hote, ce dossier est {hote} : il existe deja et n'appartient "
+                "pas a {puid}:{pgid}, les identifiants sous lesquels tournent vos "
+                "conteneurs. Rendez-le lui avec `sudo chown {puid}:{pgid} {hote}` "
+                "— le contenu peut rester tel quel — puis relancez l'installation.",
+                hote=hote,
+                puid=self.cfg.puid,
+                pgid=self.cfg.pgid,
+            ),
+        )
+
+    def _chemin_hote(self, chemin_conteneur: str) -> str:
+        """Le dossier de l'HOTE derriere un chemin vu par un conteneur.
+
+        Tout ce que les images LinuxServer voient sous `/data` vit sous
+        `DATA_ROOT` : le montage est unique, c'est le point critique du projet.
+        Un chemin qui n'en vient pas est rendu tel quel, faute de mieux.
+        """
+        from pathlib import Path
+
+        prefixe = "/data/"
+        if not chemin_conteneur.startswith(prefixe):
+            return chemin_conteneur
+        return str(Path(self.cfg.data_root) / chemin_conteneur[len(prefixe) :])
 
     def _conseil_config_existante(self, sid: str) -> str:
         """Explication a joindre quand un service refuse nos identifiants.
@@ -432,6 +485,11 @@ class Wirer:
             # reste en place et son test echoue, sans que rien ne l'explique. On
             # realigne les seuls champs d'identification.
             identifiants = {nom: values[nom] for nom in ("username", "password") if nom in values}
+            if not dl.adopted:
+                # Second passage reel du 25/09/2026 : le VPN retire, les *arr
+                # visaient encore gluetun:9091 et chaque test echouait. L'adresse
+                # d'un client gere par PlugArr suit son trajet reseau actuel.
+                identifiants.update({nom: values[nom] for nom in ("host", "port") if nom in values})
             try:
                 modifies = client.sync_fields("downloadclient", obj, identifiants)
             except WiringError:
@@ -681,6 +739,8 @@ class Wirer:
             # de passe. Prowlarr passe par une etape distincte, il avait donc
             # ete oublie — 13 liens sur 14 au lieu de 14.
             identifiants = {"username": dl.username or "", "password": dl.password or ""}
+            if not dl.adopted:
+                identifiants.update({"host": hote, "port": port})
             try:
                 modifies = prowlarr.sync_fields("downloadclient", obj, identifiants)
             except WiringError:
@@ -739,10 +799,21 @@ class Wirer:
             },
         )
         warnings = [f"champs ignores: {', '.join(skipped)}"] if skipped else []
+        etat = t("cree") if created else t("deja present")
+        if not created:
+            # Essai reel du 26/09/2026 : Jellyfin reinitialise, donc une cle
+            # neuve, et les *arr repris gardaient l'ancienne dans leur
+            # notification. « deja present », puis un test en echec. Meme
+            # realignement que pour les Applications de Prowlarr.
+            modifies = client.sync_fields(
+                "notification", obj, {nom: values[nom] for nom in ("host", "port", "apiKey")}
+            )
+            if modifies:
+                etat = t("realigne ({champs})", champs=", ".join(modifies))
         result = StepResult(
             f"{arr_id} -> jellyfin (rafraichissement de bibliotheque)",
             ok=client.find_by_name("notification", "Jellyfin") is not None,
-            detail=(t("cree") if created else t("deja present")) + f" (id={obj.get('id', '?')})",
+            detail=etat + f" (id={obj.get('id', '?')})",
             created=created,
             warnings=warnings,
         )
@@ -1045,9 +1116,17 @@ class Wirer:
                 faits.append("Jellyfin")
 
             sab = self.cfg.services["sabnzbd"]
+            # `password` est la valeur qui a reellement ete pre-semee dans
+            # sabnzbd.ini et que les *arr viennent de tester. `api_key` en est
+            # normalement la copie, mais une reprise peut laisser les deux
+            # champs divergents. Le choisir en premier faisait alors echouer
+            # uniquement DroppedNeedle avec « API Key Incorrect » tandis que
+            # Sonarr, Radarr, Lidarr et Prowlarr validaient tous SABnzbd.
+            sab_key = sab.password or sab.api_key or ""
+            sab.api_key = sab_key
             if dn.ensure_sabnzbd(
                 url=self.internal_url("sabnzbd"),
-                api_key=sab.api_key or sab.password or "",
+                api_key=sab_key,
                 # La categorie que l'etape SABnzbd vient de creer, avec son
                 # repertoire : sans elle, tout atterrirait a la racine.
                 categorie="music",
@@ -1095,7 +1174,14 @@ class Wirer:
             # cette connexion, l'appel suivant repond « HTTP 401 Unauthorized »
             # et le message d'aide envoie chercher un accueil deja fait qui
             # n'existe pas. Constate au premier essai reel.
-            abs_client.login(identifiant, inst.password or "")
+            # Son mot de passe n'existe lui aussi que hache : reinstallation
+            # reelle du 25/09/2026, HTTP 401 alors que le bon etait dans un
+            # stack.yml precedent. Meme rattrapage que Jellyfin, autobrr et qui.
+            self._connexion_rattrapee(
+                "audiobookshelf",
+                inst,
+                lambda mot: abs_client.login(identifiant, mot),
+            )
 
             faites = [
                 nom
@@ -1651,9 +1737,12 @@ class Wirer:
     def execute(
         self, *, on_step: Callable[[StepResult], None] | None = None,
         on_start: Callable[[str], None] | None = None,
+        selected_steps: set[str] | None = None,
     ) -> list[StepResult]:
         results: list[StepResult] = []
         for step in self.build_plan():
+            if selected_steps is not None and step.name not in selected_steps:
+                continue
             if on_start:
                 on_start(step.name)
             try:
@@ -1665,8 +1754,11 @@ class Wirer:
                 # installation precedente. Le dire ici evite d'envoyer l'
                 # utilisateur chercher une panne reseau.
                 service = step.name.split("/")[0]
+                # Pas « echoue » : il accompagne aussi un 404 d'API. Installation
+                # reelle du 26/09/2026 : « ajout de Sonarr a echoue, HTTP 404 »
+                # recevait ce conseil sur les mots de passe, sans rapport.
                 if service in _HASHED_ONLY and any(
-                    mot in str(exc).lower() for mot in ("401", "refus", "echoue", "unauthorized")
+                    mot in str(exc).lower() for mot in ("401", "refus", "unauthorized")
                 ):
                     conseil = self._conseil_config_existante(service)
                     if conseil:

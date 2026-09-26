@@ -7,7 +7,11 @@ le wizard et la ligne de commande ne divergeront jamais.
 
 from __future__ import annotations
 
+import os
 import shutil
+import socket
+import sys
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +19,13 @@ from pathlib import Path
 from . import catalog, compose, dashboard, gluetun_auth, seed, veille_config, vpncheck
 from .clients.arr import ArrClient
 from .i18n import t
-from .layout import CONTAINER_PATHS, PROFILE_DEFAULTS, create_tree, resolve_ids
+from .layout import (
+    CONTAINER_PATHS,
+    PROFILE_DEFAULTS,
+    create_tree,
+    ouvrir_donnees,
+    resolve_ids,
+)
 from .models import PlatformProfile, ServiceInstance, StackConfig
 from .runner import (
     Check,
@@ -307,6 +317,98 @@ def check_port_doublons(cfg: StackConfig) -> list[Check]:
     ]
 
 
+def _donnees_en_lecture_seule_voulue(data_root: str) -> bool:
+    """Diagnostic lance DEPUIS la console en conteneur ?
+
+    Elle monte DATA_ROOT en lecture seule, par conception : elle surveille, elle
+    n'ecrit pas les medias. Essai reel du 26/09/2026 : le diagnostic y annoncait
+    alors « racine des donnees » en ECHEC BLOQUANT sur une pile saine. Sur une
+    machine hote, des donnees en lecture seule restent une vraie panne.
+    """
+    if not Path("/.dockerenv").exists() or not hasattr(os, "statvfs"):
+        return False
+    try:
+        return bool(os.statvfs(data_root).f_flag & os.ST_RDONLY)
+    except OSError:
+        return False
+
+
+def diagnostic(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
+    """Les controles de `preflight`, lus pour une installation EXISTANTE."""
+    controles = preflight(cfg, project_dir)
+    if not _donnees_en_lecture_seule_voulue(cfg.data_root):
+        return controles
+    non_applicables = {t("racine des donnees"), "hardlinks /data"}
+    return [
+        Check(
+            c.name,
+            True,
+            t("montee en lecture seule dans la console : controlee a l'installation"),
+            blocking=False,
+        )
+        if c.name in non_applicables
+        else c
+        for c in controles
+    ]
+
+
+def controles_hote(cfg: StackConfig) -> list[Check]:
+    r"""Ce qu'une installation LOCALE ne peut pas faire sur cette machine. BLOQUANT.
+
+    Essai reel du 26/09/2026 sous Windows, pile en `generic-linux` :
+
+    - `/opt/plugarr/config` : PlugArr l'ecrivait dans `C:\opt\plugarr\config`,
+      Docker Desktop montait un AUTRE dossier, dans sa machine virtuelle. Sonarr
+      ne voyait pas le config.xml pre-seme, se donnait une cle a lui, et
+      l'installation mourait cinq minutes plus tard sur un 401 ;
+    - la console en conteneur se monte a son chemin de l'hote, et Docker
+      Desktop refuse un chemin `C:\...` comme cible (« too many colons »).
+      `docker compose up` echouait pour toute la pile.
+
+    Vide hors de Windows : une installation distante tourne sous Linux, dans
+    le conteneur d'installation, et ces controles n'y ont pas de sens.
+    """
+    if sys.platform != "win32":
+        return []
+    controles = []
+    for libelle, chemin in (
+        (t("racine des configurations"), cfg.config_root),
+        (t("racine des donnees"), cfg.data_root),
+    ):
+        texte = str(chemin).strip()
+        # `//serveur/partage` n'est pas un chemin Linux : on ne juge que `/x`.
+        if texte.startswith("/") and not texte.startswith("//"):
+            controles.append(
+                Check(
+                    libelle,
+                    False,
+                    t(
+                        "« {chemin} » est un chemin Linux. Sous Windows, PlugArr "
+                        "l'ecrirait dans {resolu}, mais Docker Desktop monterait un "
+                        "autre dossier, dans sa machine virtuelle : les services ne "
+                        "verraient pas leur configuration. Choisissez le profil "
+                        "windows ou un chemin C:\\...",
+                        chemin=texte,
+                        resolu=Path(texte).resolve(),
+                    ),
+                )
+            )
+    if cfg.console_enabled:
+        controles.append(
+            Check(
+                t("console en conteneur"),
+                False,
+                t(
+                    "impossible sous Windows : Docker Desktop ne monte pas un dossier "
+                    "C:\\... au meme chemin dans un conteneur Linux. Decochez-la ; "
+                    "la console s'ouvre sur ce PC avec {lanceur}.",
+                    lanceur=dashboard.LAUNCHER_NAME,
+                ),
+            )
+        )
+    return controles
+
+
 def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
     checks = check_docker()
     nos_ports = our_published_ports(cfg, project_dir)
@@ -336,6 +438,7 @@ def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
     # Un conflit INTERNE ne fait ecouter personne : les lignes ci-dessus le
     # declarent libre. Il se voit en comparant le plan a lui-meme.
     checks.extend(check_port_doublons(cfg))
+    checks.extend(controles_hote(cfg))
     # AVANT l'espace disque et les hardlinks, et surtout avant toute ecriture :
     # les deux racines doivent etre inscriptibles. C'est le controle qui
     # manquait. Sans lui, un chemin impossible ne se signalait qu'en
@@ -452,7 +555,7 @@ def check_existing_config(cfg: StackConfig) -> Check:
 #: mot de passe, le volume garde l'ancien, et Silo redemarre en boucle sur
 #: « password authentication failed for user "silo" » sans que rien n'explique
 #: pourquoi. Constate en vrai, sur une seconde installation.
-_HASHED_PASSWORDS = ("qbittorrent", "transmission", "jellyfin", "autobrr", "qui")
+_HASHED_PASSWORDS = ("qbittorrent", "transmission", "jellyfin", "autobrr", "qui", "audiobookshelf")
 
 #: Services illisibles pour une autre raison que le hachage : leur etat vit
 #: dans un volume Docker, dont le contenu ne se relit pas.
@@ -490,7 +593,12 @@ def emplacement_etat(cfg: StackConfig, service_id: str) -> str:
     return cfg.config_path(service_id)
 
 
-def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
+def reset_configs(
+    cfg: StackConfig,
+    services: list[str],
+    *,
+    permission_fallback: Callable[[Path], None] | None = None,
+) -> list[Path]:
     """Supprime la configuration des services indiques. Renvoie ce qui a ete efface.
 
     Fonction destructrice, donc bornee de trois facons, et il faut que ces trois
@@ -523,7 +631,8 @@ def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
                         )
                     efface.append(Path(f"volume docker {nom}"))
             continue
-        dossier = Path(cfg.config_path(sid)).resolve()
+        raw_dossier = Path(cfg.config_path(sid))
+        dossier = raw_dossier.resolve()
         if not dossier.is_dir():
             continue
         if racine not in dossier.parents:
@@ -534,13 +643,35 @@ def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
                     racine=racine,
                 )
             )
-        shutil.rmtree(dossier)
+        # Un lien dans la portion propre au service pourrait faire supprimer
+        # l'etat d'un autre service, meme si sa cible reste sous config_root.
+        parent = raw_dossier
+        while parent != Path(cfg.config_root) and parent != parent.parent:
+            if parent.is_symlink():
+                raise ValueError(
+                    t("{chemin} est un lien symbolique : suppression refusee", chemin=parent)
+                )
+            parent = parent.parent
+        try:
+            shutil.rmtree(dossier)
+        except PermissionError:
+            if permission_fallback is None:
+                raise
+            permission_fallback(dossier)
+            if dossier.exists():
+                raise OSError(
+                    t("{chemin} existe encore apres le nettoyage", chemin=dossier)
+                )
         efface.append(dossier)
     return efface
 
 
 def reset_installation_configs(
-    cfg: StackConfig, project_dir: Path, services: list[str]
+    cfg: StackConfig,
+    project_dir: Path,
+    services: list[str],
+    *,
+    permission_fallback: Callable[[Path], None] | None = None,
 ) -> list[Path]:
     """Retire une ancienne pile avant d'en effacer l'etat demande.
 
@@ -557,10 +688,21 @@ def reset_installation_configs(
                 detail=detail or t("cause inconnue"),
             )
         )
-    return reset_configs(cfg, services)
+    if permission_fallback is None:
+        return reset_configs(cfg, services)
+    return reset_configs(cfg, services, permission_fallback=permission_fallback)
 
 
-def prochaine_etape(cfg: StackConfig) -> list[str]:
+def _traducteur(langue: str | None) -> Callable[..., str]:
+    """`t`, ou sa version figee dans une langue sans toucher a celle du processus."""
+    if langue is None:
+        return t
+    from .i18n import traduire
+
+    return lambda texte, /, **valeurs: traduire(texte, langue, **valeurs)
+
+
+def prochaine_etape(cfg: StackConfig, langue: str | None = None) -> list[str]:
     """Ce qu'il reste a faire A LA MAIN, selon ce qui est reellement installe.
 
     plugarr disait « ajoutez vos indexeurs dans Prowlarr. Ils descendront
@@ -570,7 +712,10 @@ def prochaine_etape(cfg: StackConfig) -> list[str]:
     envoie chercher un ecran qui n'est nulle part.
 
     Renvoie des lignes de texte brut : chaque interface les met en forme.
+    `langue` fixe celle du texte rendu : l'assistant web la choisit dans la
+    page, et peut demander les deux.
     """
+    t = _traducteur(langue)
     arrs = [sid for sid in ("sonarr", "radarr", "lidarr") if cfg.enabled(sid)]
     if cfg.enabled("prowlarr"):
         lignes = [t("Prochaine etape : ajoutez vos indexeurs dans Prowlarr.")]
@@ -808,6 +953,75 @@ def _lift_qbittorrent_ban(cfg: StackConfig) -> bool:
     return True
 
 
+def check_host_reachable(
+    cfg: StackConfig,
+    *,
+    connect: Callable[..., socket.socket] = socket.create_connection,
+    sleep: Callable[[float], None] = time.sleep,
+    attempts: int = 3,
+) -> None:
+    """Verifie en quelques secondes que l'hote des URL joint un port publie.
+
+    Un port publie accepte la connexion des que son conteneur tourne, meme si
+    l'application demarre encore. Essai reel du 25/09/2026 sur un VPS Oracle :
+    sans cette verification, l'attente de Sonarr expirait apres 300 s sur un
+    message trompeur, alors que la cause etait l'adresse (IP publique traduite)
+    ou le pare-feu de la machine (conteneurs rejetes).
+    """
+    target = next(
+        (
+            (catalog.get(sid).display_name, cfg.services[sid].host_port)
+            for sid in catalog.STARTUP_ORDER
+            if cfg.enabled(sid)
+            and catalog.get(sid).api_family == "arr"
+            and cfg.services[sid].host_port
+        ),
+        None,
+    )
+    if target is None:
+        return
+    name, port = target
+    last: OSError | None = None
+    for attempt in range(attempts):
+        if attempt:
+            sleep(2)
+        try:
+            connect((cfg.host, port), timeout=5).close()
+            return
+        except OSError as exc:
+            last = exc
+    if isinstance(last, ConnectionRefusedError):
+        # Rien n'ecoute ENCORE : un conteneur recree demarre a peine. Validation
+        # reelle du 26/09/2026 : apres une remise a zero, Sonarr refusait
+        # pendant quelques secondes, et l'installation s'arretait a tort sur un
+        # diagnostic de pare-feu. L'attente de son API, juste apres, s'en charge.
+        # Le pare-feu d'Oracle, lui, repond « No route to host ».
+        return
+    if isinstance(last, TimeoutError):
+        raise InstallAborted(
+            t(
+                "{host}:{port} ({service}) ne repond pas depuis la machine elle-meme. "
+                "Sur un VPS, l'IP publique est souvent traduite par le fournisseur et "
+                "n'appartient pas a la machine : indiquez son adresse privee comme "
+                "adresse de la machine.",
+                host=cfg.host,
+                port=port,
+                service=name,
+            )
+        )
+    raise InstallAborted(
+        t(
+            "{host}:{port} ({service}) refuse les connexions venant des conteneurs. "
+            "Le pare-feu de la machine les bloque probablement : autorisez les "
+            "interfaces docker0 et br-* (cause : {cause}).",
+            host=cfg.host,
+            port=port,
+            service=name,
+            cause=last,
+        )
+    )
+
+
 def wait_for_arrs(cfg: StackConfig, on_progress: ProgressFn = _noop) -> None:
     """Attend que chaque *arr reponde AVEC NOTRE CLE, pas juste qu'il ecoute."""
     for sid in catalog.STARTUP_ORDER:
@@ -836,6 +1050,20 @@ def wait_for_arrs(cfg: StackConfig, on_progress: ProgressFn = _noop) -> None:
 # -------------------------------------------------------------------- pipeline
 
 
+def _liste_courte(chemins: list[Path], maximum: int = 5) -> str:
+    """Une enumeration de chemins qui tient sur une ligne de journal.
+
+    Une arborescence entiere laissee a root, c'est vingt-huit dossiers : les
+    citer tous noie la consigne qui suit dans un mur de texte, alors que les
+    premiers suffisent a reconnaitre de quoi on parle.
+    """
+    noms = [str(c) for c in chemins[:maximum]]
+    reste = len(chemins) - len(noms)
+    if not reste:
+        return ", ".join(noms)
+    return ", ".join(noms) + t(" (+{reste} autres)", reste=reste)
+
+
 def install(
     cfg: StackConfig,
     project_dir: Path,
@@ -848,11 +1076,56 @@ def install(
 
     Leve InstallAborted avec un message actionnable en cas d'echec bloquant.
     """
+    # Avant toute ecriture : le TUI ne passe pas par le preflight, et une
+    # reprise peut apporter des reglages d'une autre machine.
+    refus = [c for c in controles_hote(cfg) if not c.ok]
+    if refus:
+        raise InstallAborted("\n".join(f"{c.name} : {c.detail}" for c in refus))
     cfg.project_dir = project_dir
     created = create_tree(
         cfg.data_root, cfg.config_root, list(cfg.services), owner=(cfg.puid, cfg.pgid)
     )
     on_progress(Progress("arborescence", f"{len(created)} dossiers crees"))
+
+    # Les dossiers DEJA presents ne passent pas par `create_tree`, qui ne
+    # redistribue que ce qu'il cree. Une seconde installation heritait donc des
+    # droits de la premiere : sur UGOS, le 2026-09-21, une arborescence creee en
+    # root faisait refuser leurs dossiers racines a Sonarr et Radarr — « Folder
+    # '/data/media/tv' is not writable by user 'abc' » — alors que tout le reste
+    # du cablage passait. On le regle ici, avant le premier demarrage, plutot
+    # que de le laisser eclater vingt etapes plus loin.
+    repares, restants = ouvrir_donnees(cfg.data_root, (cfg.puid, cfg.pgid))
+    if repares:
+        on_progress(
+            Progress(
+                "droits",
+                t(
+                    "{nombre} dossier(s) de donnees rendu(s) a {puid}:{pgid} : {dossiers}",
+                    nombre=len(repares),
+                    puid=cfg.puid,
+                    pgid=cfg.pgid,
+                    dossiers=_liste_courte(repares),
+                ),
+            )
+        )
+    if restants:
+        on_progress(
+            Progress(
+                "droits",
+                t(
+                    "{nombre} dossier(s) de donnees restent fermes a {puid}:{pgid} : "
+                    "{dossiers}. Les applications refuseront d'y ranger quoi que ce "
+                    "soit. Corrigez-les avec `sudo chown {puid}:{pgid} {premier}`, "
+                    "puis relancez l'installation.",
+                    nombre=len(restants),
+                    puid=cfg.puid,
+                    pgid=cfg.pgid,
+                    dossiers=_liste_courte(restants),
+                    premier=restants[0],
+                ),
+                ok=False,
+            )
+        )
 
     written = compose.write_artifacts(cfg, project_dir)
     on_progress(Progress("artefacts", ", ".join(p.name for p in written)))
@@ -929,6 +1202,7 @@ def install(
     # ne repondra jamais, et l'attente expirerait sur un diagnostic trompeur.
     _reparer_piles_orphelines(cfg, runner, on_progress)
 
+    check_host_reachable(cfg)
     wait_for_arrs(cfg, on_progress)
     wait_for_download_clients(cfg, on_progress)
 
@@ -951,12 +1225,30 @@ def install(
     # jour, ni boutons. Tout cela vient de `plugarr serve` — encore faut-il
     # pouvoir le lancer. Un utilisateur qui a double-clique un executable n'a pas
     # `plugarr` dans son PATH : on lui depose donc un lanceur cliquable.
-    lanceur = dashboard.write_admin_launcher(project_dir)
+    lanceur = dashboard.write_admin_launcher(project_dir, cfg)
     on_progress(Progress("page d'acces", f"{page} (+ {lanceur.name})"))
 
     _verdict_vpn(cfg, on_progress)
 
-    on_progress(Progress("cablage", "termine", ok=all(r.ok for r in results), done=True))
+    # « ERROR cablage termine » ne disait pas ce qui avait echoue : il fallait
+    # remonter le journal etape par etape pour retrouver les trois lignes en
+    # cause. La derniere ligne est celle qu'on lit en premier quand on vient
+    # chercher une panne ; elle doit porter le compte et les noms.
+    echouees = [r.name for r in results if not r.ok]
+    if echouees:
+        verdict = t(
+            "termine : {reussies}/{total} etapes, en echec : {liste}",
+            reussies=len(results) - len(echouees),
+            total=len(results),
+            liste=", ".join(echouees),
+        )
+    else:
+        verdict = t(
+            "termine : {reussies}/{total} etapes",
+            reussies=len(results),
+            total=len(results),
+        )
+    on_progress(Progress("cablage", verdict, ok=not echouees, done=True))
     return results
 
 

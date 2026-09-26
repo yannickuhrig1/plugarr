@@ -162,6 +162,26 @@ Checkbox.service.-on > .toggle--button {
     padding: 1 2;
 }
 
+/* Import d'une sauvegarde Prowlarr : parite avec l'assistant web. */
+#indexer-backup {
+    height: auto;
+    padding: 1 2 0 2;
+}
+
+#backup-path {
+    width: 1fr;
+}
+
+#backup-list {
+    height: auto;
+    max-height: 12;
+    margin: 0 2;
+}
+
+#backup-import {
+    margin: 0 2;
+}
+
 .indexers-pane {
     width: 1fr;
     padding: 0 1;
@@ -211,4 +231,22 @@ Checkbox.service.-on > .toggle--button {
 
 .hidden {
     display: none;
+}
+
+/* -- configurer mon telephone (parite avec l'assistant web) --------------- */
+
+#phone {
+    padding: 1 2;
+}
+
+.ph-row {
+    height: auto;
+}
+
+.ph-row Select {
+    width: 1fr;
+}
+
+#ph-fields, #ph-notice, #ph-qr {
+    margin: 1 0 0 0;
 }

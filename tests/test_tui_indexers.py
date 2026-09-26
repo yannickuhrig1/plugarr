@@ -29,6 +29,14 @@ DEFINITION = IndexerDefinition(
 )
 
 
+@pytest.fixture(autouse=True)
+def _sans_registres(monkeypatch):
+    """Le rapport cherche les mises a jour dans les registres : jamais en test."""
+    from plugarr import updates
+
+    monkeypatch.setattr(updates, "disponibles", lambda _cfg: {"updates": [], "unchecked": []})
+
+
 @pytest.fixture
 def screen_app(tmp_path, monkeypatch):
     monkeypatch.setattr(IndexersScreen, "load_definitions", lambda self: None)
@@ -309,3 +317,54 @@ async def test_une_erreur_d_affichage_ne_remonte_pas_dans_le_worker(screen_app, 
         screen.submit.__wrapped__(screen, JUMELLE_A, {})
 
         assert pilot.app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_une_sauvegarde_prowlarr_se_reprend_dans_le_tui(screen_app, monkeypatch, attendre, tmp_path):
+    """Parite avec l'assistant web : reprendre les indexeurs d'une sauvegarde
+    Prowlarr au lieu de tout ressaisir. Seuls les importables sont coches."""
+    from textual.widgets import SelectionList
+
+    from plugarr import import_prowlarr
+
+    class Entree:
+        def __init__(self, name):
+            self.name = name
+
+    a_importer, deja = Entree("Tracker A"), Entree("Tracker B")
+    sauvegarde = object()
+    monkeypatch.setattr(import_prowlarr, "lire", lambda chemin: sauvegarde)
+    monkeypatch.setattr(
+        import_prowlarr,
+        "examiner",
+        lambda s, idx: [(a_importer, import_prowlarr.IMPORTABLE), (deja, import_prowlarr.CONFIGURE)],
+    )
+    importes = []
+    monkeypatch.setattr(
+        import_prowlarr,
+        "importer",
+        lambda entree, idx: importes.append(entree.name) or (True, "ajoute", []),
+    )
+    fichier = tmp_path / "prowlarr_backup.zip"
+    fichier.write_bytes(b"x")
+
+    async with screen_app.run_test() as pilot:
+        await pilot.app.push_screen(IndexersScreen())
+        await pilot.pause()
+        ecran = pilot.app.screen
+        ecran._indexers = object()
+        ecran.query_one("#backup-path", Input).value = str(fichier)
+        ecran.query_one("#backup-inspect", Button).press()
+        liste = ecran.query_one("#backup-list", SelectionList)
+        assert await attendre(pilot, lambda: liste.option_count == 2)
+
+        assert liste.selected == ["i0"]
+        ecran.query_one("#backup-import", Button).press()
+        statut = ecran.query_one("#indexer-status", Static)
+        # Le compte rendu survit au nouvel examen qui suit l'import.
+        assert await attendre(
+            pilot,
+            lambda: "Tracker A" in str(statut.render()) and "a importer sur" in str(statut.render()),
+        )
+
+    assert importes == ["Tracker A"]

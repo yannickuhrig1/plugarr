@@ -190,6 +190,22 @@ def freeze_environment() -> None:
 
     tui_app.reprise.trouver = lambda project_dir, config_root: None  # type: ignore[assignment]
 
+    # Le profil de depart de l'application suit la machine, comme celui de
+    # l'ecran des chemins juste au-dessus : meme raison, meme remede.
+    tui_app.default_profile = lambda: PlatformProfile.GENERIC_LINUX  # type: ignore[assignment]
+
+    # Le rapport interroge les registres d'images, dans un fil : la capture
+    # montrait « recherche... » ou un resultat selon le reseau et l'instant.
+    # On montre le cas nominal, rendu tout de suite.
+    screens.ReportScreen.chercher_mises_a_jour = (  # type: ignore[method-assign]
+        lambda self: self.query_one("#report-updates", Static).update(
+            t(
+                "[b]Mises a jour disponibles[/b]  toutes les applications sont "
+                "dans leur derniere version."
+            )
+        )
+    )
+
 
 def fake_steps() -> list[StepResult]:
     """Resultats fictifs pour illustrer le rapport sans rien demarrer.

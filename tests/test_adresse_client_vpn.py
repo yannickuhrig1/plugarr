@@ -87,3 +87,64 @@ def test_prowlarr_et_les_arr_visent_la_meme_adresse():
         source = inspect.getsource(etape)
         assert "adresse_client" in source, f"{etape.__name__} resout l'adresse dans son coin"
         assert "host=dl_spec.id" not in source, f"{etape.__name__} pose encore le nom en dur"
+
+
+@pytest.mark.parametrize("vpn_avant, attendu", [(True, "transmission"), (False, "gluetun")])
+def test_une_entree_existante_suit_le_trajet_reseau_actuel(monkeypatch, vpn_avant, attendu):
+    """Second passage reel du 25/09/2026, VPN retire : les *arr visaient encore
+    gluetun:9091 et chaque test echouait. Le sens inverse casse de la meme facon."""
+    wirer = _wirer(vpn=not vpn_avant)
+    ancien = "gluetun" if vpn_avant else "transmission"
+    alignes = []
+
+    class Arr:
+        def ensure_resource(self, resource, *, name, implementation, values, extra):
+            return {"id": 1, "name": name, "fields": [{"name": "host", "value": ancien}]}, False, []
+
+        def sync_fields(self, resource, existing, values):
+            alignes.append(values)
+            return [k for k in values if k == "host"]
+
+        def find_by_name(self, resource, name):
+            return {"id": 1, "name": name}
+
+        def get(self, resource):
+            return []
+
+    faux = Arr()
+    monkeypatch.setattr(wirer, "arr", lambda _sid: faux)
+    monkeypatch.setattr(wirer, "prowlarr", lambda: faux, raising=False)
+    monkeypatch.setattr(wirer, "_verify", lambda *a, **k: a[3])
+
+    wirer.step_download_client("sonarr", "transmission")
+
+    assert alignes[0]["host"] == attendu
+    assert alignes[0]["port"] == 9091
+
+
+def test_une_entree_adoptee_garde_son_adresse(monkeypatch):
+    """Un client adopte appartient a l'utilisateur : son adresse n'est pas la notre."""
+    wirer = _wirer(adopte=True)
+    alignes = []
+
+    class Arr:
+        def ensure_resource(self, resource, *, name, implementation, values, extra):
+            return {"id": 1, "name": name, "fields": []}, False, []
+
+        def sync_fields(self, resource, existing, values):
+            alignes.append(values)
+            return []
+
+        def find_by_name(self, resource, name):
+            return {"id": 1, "name": name}
+
+        def get(self, resource):
+            return []
+
+    faux = Arr()
+    monkeypatch.setattr(wirer, "arr", lambda _sid: faux)
+    monkeypatch.setattr(wirer, "_verify", lambda *a, **k: a[3])
+
+    wirer.step_download_client("sonarr", "qbittorrent")
+
+    assert "host" not in alignes[0]

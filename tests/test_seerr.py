@@ -273,6 +273,7 @@ def test_lance_en_root_plugarr_lui_donne_son_dossier(tmp_path, monkeypatch):
 
     donnes = []
     monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_reparer_dossier_donnees", lambda *_args: None)
     monkeypatch.setattr(os, "chown", lambda p, u, g, **kw: donnes.append((Path(p).name, u, g)), raising=False)
     config = tmp_path / "config"
     (config / "seerr" / "logs").mkdir(parents=True)

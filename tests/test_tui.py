@@ -15,6 +15,14 @@ from plugarr.tui.app import PlugArrApp
 from plugarr.tui.screens import PathsScreen, ServicesScreen, SummaryScreen
 
 
+@pytest.fixture(autouse=True)
+def _sans_registres(monkeypatch):
+    """Le rapport cherche les mises a jour dans les registres : jamais en test."""
+    from plugarr import updates
+
+    monkeypatch.setattr(updates, "disponibles", lambda _cfg: {"updates": [], "unchecked": []})
+
+
 @pytest.fixture
 def app(tmp_path):
     return PlugArrApp(project_dir=tmp_path)
@@ -73,7 +81,7 @@ async def test_summary_counts_the_links_that_will_be_wired(app):
 
 
 @pytest.mark.asyncio
-async def test_checking_flood_pulls_in_a_download_client(app):
+async def test_checking_flood_pulls_in_a_download_client(app, attendre):
     """La dependance est resolue et ANNONCEE, pas silencieuse.
 
     Flood pilote qBittorrent OU Transmission : seul le premier est ajoute."""
@@ -81,8 +89,10 @@ async def test_checking_flood_pulls_in_a_download_client(app):
         screen = await _goto_services(pilot)
         for box in screen.query(Checkbox):
             box.value = box.id == "svc-flood"
-        await pilot.pause()
-        text = str(screen.query_one("#selection-summary", Static).content)
+        resume = screen.query_one("#selection-summary", Static)
+        # Une seule pause ne suffisait pas sous charge : seize cases a traiter.
+        assert await attendre(pilot, lambda: "prerequis" in str(resume.content))
+        text = str(resume.content)
         assert "qBittorrent" in text
         assert "Transmission" not in text
         assert "prerequis" in text

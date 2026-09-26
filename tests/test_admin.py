@@ -252,6 +252,26 @@ def test_the_served_page_carries_the_controls(server):
     assert "rafraichir" in body
 
 
+def test_a_dashboard_render_failure_returns_a_real_http_response(server, monkeypatch):
+    """Une exception de rendu ne doit jamais devenir ERR_EMPTY_RESPONSE."""
+    base, _ = server
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("panne de rendu simulee")
+
+    monkeypatch.setattr(admin.dashboard, "render", fail)
+
+    status, body, headers = call(base + "/")
+
+    assert status == 500
+    assert "n'a pas pu etre generee" in body
+    assert "docker logs --tail 200 plugarr-console" in body
+    assert "panne de rendu simulee" not in body
+    assert "HttpOnly" in headers.get("Set-Cookie", "")
+    # Le serveur reste vivant et ses routes JSON restent utilisables.
+    assert call(base + "/api/status")[0] == 200
+
+
 def test_compose_control_refuses_an_action_outside_the_list(tmp_path):
     """Deuxieme barriere, cote runner : meme appele directement, `control` ne
     laisse pas passer autre chose que start/stop/restart."""

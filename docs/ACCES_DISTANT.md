@@ -5,13 +5,18 @@ et avant Vérification. Ce n'est plus la maquette HTML séparée.
 
 ## Parcours
 
-1. Choisir les applications et les dossiers comme auparavant.
-2. À l'étape 5 sur 7, choisir **Chez moi**, **Tailscale** ou **Mon domaine**.
-3. Confirmer l'installation de la stack.
-4. Pour un accès distant, confirmer puis cliquer sur **Activer l'accès distant**.
-5. Consulter **Configurer mon téléphone** : nzb360 ou qbRemote, application,
+1. Choisir **Sur cet ordinateur** ou **Sur un serveur ou un NAS**. En SSH,
+   tester la connexion puis confirmer l'empreinte présentée.
+2. Choisir les applications et les dossiers comme auparavant. Les chemins SSH
+   sont ceux du serveur, jamais ceux du PC qui affiche l'assistant.
+3. À l'étape 5 sur 7, choisir **Chez moi**, **Tailscale** ou **Mon domaine**.
+4. Confirmer l'installation de la stack.
+5. Pour une installation locale, activer ensuite l'accès distant. Pour une
+   installation SSH, PlugArr tente l'activation sur le serveur après la stack ;
+   son échec ne remet pas en cause l'installation des applications.
+6. Consulter **Configurer mon téléphone** : nzb360 ou qbRemote, application,
    connexion locale ou distante. Copier URL, port et clé API ou identifiants.
-6. Télécharger le fichier d'accès. Les fiches restent utilisables hors ligne.
+7. Télécharger le fichier d'accès. Les fiches restent utilisables hors ligne.
 
 L'activation distante est séparée : un problème de DNS ou de Tailscale ne transforme
 pas une installation locale réussie en échec. Une passerelle Docker déjà créée par
@@ -63,16 +68,24 @@ ne constituent pas une confirmation de connexion.
 - L'arrêt de la passerelle Docker ne déconnecte pas un client Tailscale natif.
 - Le choix distant est enregistré dans `stack.yml`. Après un redémarrage du parcours,
   l'état de connexion doit être vérifié à nouveau.
+- Les identifiants SSH et sudo restent uniquement en mémoire dans l'assistant.
+  Ils ne sont pas copiés dans la pile, les journaux ou le rapport final.
+- La cible SSH V1 est Linux ou NAS avec Docker déjà installé et accessible au
+  compte fourni. Aucun Python ni PlugArr préalable n'est requis sur la cible.
+- L'empreinte affichée lors du diagnostic doit être confirmée et elle est
+  revérifiée à chaque opération distante.
 - Le mode `web --demo` simule l'installation et l'activation, sans Docker ni modification réseau.
 - Aucun déploiement réel Caddy/Tailscale ni test sur téléphone n'a été effectué pour
   cette livraison. Ce sont les prochains essais d'intégration à faire sur un serveur de test.
-- Cette étape configure l'accès aux applications. Elle n'ajoute pas de formulaire
-  SSH permettant à l'EXE d'installer la stack sur une autre machine : l'assistant
-  s'exécute sur la machine qui héberge la stack.
+- La reprise automatique d'une ancienne pile distante n'est pas encore exposée
+  dans cette première version SSH. Si un `stack.yml` différent existe déjà dans
+  le dossier choisi, PlugArr refuse de l'écraser. Une relance du même plan après
+  un échec reste possible car son empreinte est identique.
 
 ## Vérifications reproductibles
 
-- Tests Python : `tests/test_remote_access.py`, tests du webwizard, du dashboard,
+- Tests Python : `tests/test_remote_install.py`, `tests/test_remote_access.py`,
+  tests du webwizard, du dashboard,
   de la reprise et de l'empaquetage.
 - Test navigateur Chromium : `tests/js/wizard_remote.cjs`, avec Playwright disponible.
   Il teste les trois choix, le rejet d'un domaine mal formé, la confirmation

@@ -16,6 +16,9 @@ dependencies = [
     "PyYAML>=6.0",
     "rich>=13.7",
     "textual>=0.80",
+    "paramiko>=4.0,<5",
+    # Chiffrement AES des sauvegardes qbRemote (telephone.py). Meme borne que paramiko.
+    "cryptography>=3.3",
     "tzdata; sys_platform == 'win32'",
 ]
 

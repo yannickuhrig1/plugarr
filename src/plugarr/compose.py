@@ -55,7 +55,9 @@ def _flood_block(cfg: StackConfig) -> dict:
     """Options de Flood, selon le client de telechargement present.
 
     Flood n'est pas une image LinuxServer : ni PUID/PGID, ni UMASK. Il se
-    configure entierement par ligne de commande.
+    configure entierement par ligne de commande. Son image ne repare pas les
+    droits des volumes au demarrage : `user` doit donc correspondre au
+    proprietaire de `/config` et `/data`.
 
     Les options ont ete relevees sur `flood --help` de l'image 4.16.1, pas
     supposees : `--qburl/--qbuser/--qbpass` pour qBittorrent,
@@ -66,6 +68,11 @@ def _flood_block(cfg: StackConfig) -> dict:
     """
     block: dict = {
         "environment": {"HOME": "/config", "TZ": cfg.timezone},
+        # Sans cette ligne, l'image utilise son compte interne `download`. Sur
+        # un NAS installe avec sudo, il ne peut pas creer
+        # `/config/.local/share/flood` et redemarre sans fin avec
+        # « Failed to access runtime directory ».
+        "user": f"{cfg.puid}:{cfg.pgid}",
         "command": ["--port=3000", "--host=0.0.0.0", "--auth=none"],
     }
     for client_id, options in (
@@ -528,6 +535,68 @@ def _service_block(cfg: StackConfig, service_id: str) -> dict:
             "${DATA_ROOT}/media/books:/books:ro",
             "${DATA_ROOT}/media/audiobooks:/audiobooks:ro",
         ]
+    elif service_id == "shelfarr-libation":
+        # Compagnon officiel Shelfarr pour la sauvegarde Audible. Il ne publie
+        # aucun port hote : Shelfarr est son seul client, sur le reseau Compose.
+        # Les trois volumes nommes sont ajoutes plus bas depuis le catalogue.
+        block["environment"] = {
+            "PUID": str(cfg.puid),
+            "PGID": str(cfg.pgid),
+            "CHOWN_ON_START": "auto",
+            "TZ": cfg.timezone,
+            "LIBATION_FILES_DIR": "/config",
+            "LIBATION_BOOKS_DIR": "/data",
+            "LIBATION_IN_PROGRESS_DIR": "/config/in-progress",
+            "COMPANION_STATE_DIR": "/config/shelfarr-companion",
+            "COMPANION_TOKEN_FILE": "/control/token",
+            "COMPANION_MAX_ACTIVE_JOBS": "500",
+            "COMPANION_MAX_TERMINAL_JOBS": "5000",
+            "COMPANION_TERMINAL_JOB_RETENTION_DAYS": "30",
+            "ASPNETCORE_URLS": "http://0.0.0.0:8080",
+        }
+        block["volumes"] = []
+        block["expose"] = ["8080"]
+        block["healthcheck"] = {
+            "test": ["CMD", "/companion/Shelfarr.Libation.Companion", "--healthcheck"],
+            "interval": "30s",
+            "timeout": "10s",
+            "retries": 3,
+            "start_period": "40s",
+        }
+    elif service_id == "shelfarr":
+        # Le compose officiel utilise le meme UID/GID pour Shelfarr et son
+        # compagnon : le jeton partage est volontairement en mode 0600.
+        block["environment"] = {
+            "SOLID_QUEUE_IN_PUMA": "1",
+            "SHELFARR_LIBATION_URL": "http://shelfarr-libation:8080",
+            "SHELFARR_LIBATION_TOKEN_FILE": "/run/shelfarr-libation/token",
+            "SHELFARR_LIBATION_IMPORT_ROOT": "/imports/libation",
+            "PUID": str(cfg.puid),
+            "PGID": str(cfg.pgid),
+            "CHOWN_ON_START": "auto",
+            "TZ": cfg.timezone,
+        }
+        block["volumes"] = [
+            f"${{CONFIG_ROOT}}/{spec.config_dir}:/rails/storage",
+            # Tous les clients PlugArr voient les fichiers sous /data. Shelfarr
+            # recoit le meme chemin, ce qui evite un remappage et conserve les
+            # liens physiques lors du rangement.
+            "${DATA_ROOT}:/data",
+            # Alias du compose amont : les installations ou reglages importes
+            # qui attendent /downloads continuent de fonctionner.
+            "${DATA_ROOT}:/downloads",
+            "${DATA_ROOT}/media/books:/ebooks",
+            "${DATA_ROOT}/media/audiobooks:/audiobooks",
+            "shelfarr-libation-books:/imports/libation:ro",
+            "shelfarr-libation-control:/run/shelfarr-libation:ro",
+        ]
+        block["healthcheck"] = {
+            "test": ["CMD", "curl", "-f", "http://localhost:80/up"],
+            "interval": "30s",
+            "timeout": "10s",
+            "retries": 3,
+            "start_period": "40s",
+        }
     elif service_id == "silo-postgres":
         # `POSTGRES_PASSWORD` vient du .env comme tout secret genere. Le
         # healthcheck n'est pas decoratif : Silo refuse de demarrer si sa base
@@ -702,6 +771,13 @@ def build_compose(cfg: StackConfig) -> dict:
 def render_compose(cfg: StackConfig) -> str:
     return _entete() + yaml.safe_dump(
         build_compose(cfg), sort_keys=False, default_flow_style=False, width=100
+    )
+
+
+def render_stack(cfg: StackConfig) -> str:
+    """Rend la source de verite sans l'ecrire sur la machine courante."""
+    return _entete().replace("docker-compose.yml", "stack.yml") + yaml.safe_dump(
+        cfg.model_dump(mode="json"), sort_keys=False, allow_unicode=True
     )
 
 
@@ -884,11 +960,7 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     # L'historique AVANT l'ecriture : c'est le fichier sur le point d'etre
     # ecrase qu'il faut garder, pas celui qu'on s'apprete a poser.
     _historiser(stack_path)
-    stack_path.write_text(
-        _entete().replace("docker-compose.yml", "stack.yml")
-        + yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False),
-        encoding="utf-8",
-    )
+    stack_path.write_text(render_stack(cfg), encoding="utf-8")
     _restrict(stack_path)
     written.append(stack_path)
 

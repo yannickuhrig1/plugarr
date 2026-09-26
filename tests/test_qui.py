@@ -193,3 +193,86 @@ def test_qui_recoit_bien_des_identifiants(tmp_path):
 
     assert inst.username == "plugarr"
     assert inst.password
+
+
+def test_une_instance_existante_recoit_les_identifiants_actuels():
+    """Essai reel du 25/09/2026 : mot de passe de qBittorrent change, qui gardait
+    l'ancien et ne se connectait plus."""
+    client = FakeClient(
+        {"GET /api/instances": FakeResponse(
+            200, [{"id": 1, "name": "qBittorrent", "host": "http://gluetun:8080"}]
+        )}
+    )
+
+    assert client.ensure_instance(
+        name="qBittorrent", host="http://gluetun:8080", username="u", password="nouveau"
+    ) is False
+
+    mise_a_jour = [c for c in client.calls if c[0] == "PUT"]
+    assert mise_a_jour == [(
+        "PUT",
+        "/api/instances/1",
+        {"name": "qBittorrent", "host": "http://gluetun:8080", "username": "u", "password": "nouveau"},
+    )]
+    assert not [c for c in client.calls if c[0] == "POST"]
+
+
+def test_un_changement_d_adresse_realigne_au_lieu_de_dupliquer():
+    """VPN retire puis remis : qui avait fini avec deux instances, aucune connectee."""
+    client = FakeClient(
+        {"GET /api/instances": FakeResponse(
+            200, [{"id": 1, "name": "qBittorrent", "host": "http://gluetun:8080"}]
+        )}
+    )
+
+    client.ensure_instance(
+        name="qBittorrent", host="http://qbittorrent:8080", username="u", password="p"
+    )
+
+    assert not [c for c in client.calls if c[0] == "POST"]
+    assert [c[2]["host"] for c in client.calls if c[0] == "PUT"] == ["http://qbittorrent:8080"]
+
+
+def test_une_instance_d_un_autre_nom_et_d_une_autre_adresse_n_est_pas_touchee():
+    client = FakeClient(
+        {
+            "GET /api/instances": FakeResponse(
+                200, [{"id": 7, "name": "Seedbox", "host": "http://seedbox:8080"}]
+            ),
+            "POST /api/instances": FakeResponse(201, {"id": 8}),
+        }
+    )
+
+    assert client.ensure_instance(
+        name="qBittorrent", host="http://qbittorrent:8080", username="u", password="p"
+    )
+    assert not [c for c in client.calls if c[0] == "PUT"]
+
+
+def test_une_instance_en_attente_est_testee_explicitement():
+    """Essai reel du 25/09/2026 : qui en backoff apres des echecs gardait
+    `connected: false` alors que son test explicite repondait connecte."""
+    client = FakeClient(
+        {
+            "GET /api/instances": FakeResponse(
+                200, [{"id": 1, "host": "http://gluetun:8080", "connected": False}]
+            ),
+            "POST /api/instances/1/test": FakeResponse(
+                200, {"connected": True, "message": "Connection successful"}
+            ),
+        }
+    )
+
+    linked, detail = client.connected("http://gluetun:8080", timeout=1)
+
+    assert linked
+    assert "test explicite" in detail
+
+
+def test_chaque_requete_porte_l_en_tete_anti_csrf_de_qui_1_30():
+    """qui v1.30.0 : « Missing X-Requested-With header » sur les ecritures."""
+    client = QuiClient("http://qui:7476")
+    try:
+        assert client._http.headers["X-Requested-With"] == "XMLHttpRequest"
+    finally:
+        client.close()

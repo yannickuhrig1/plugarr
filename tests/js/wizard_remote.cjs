@@ -37,6 +37,11 @@ async function scenario(browser, mode, root) {
     assert.deepEqual((await page.locator('.service-card input:checked').evaluateAll(nodes=>nodes.map(n=>n.value))).sort(),['prowlarr','qbittorrent','radarr','seerr','sonarr']);
     const next=()=>page.locator('#next').click();
     await next(); await expect(page.locator('[data-step="1"]')).toBeVisible();
+    for (const [id,value] of [['veille-port','7474'],['console-port','7473']]) {
+      const field=page.locator(`#${id}`), box=await field.boundingBox();
+      assert.ok(box && box.width>200 && box.height>40,`${id} est encore replie`);
+      await field.fill(value);await expect(field).toHaveValue(value);
+    }
     await next(); await expect(page.locator('[data-step="2"]')).toBeVisible();
     await page.locator('#vpn-enabled').uncheck();
     await next(); await expect(page.locator('[data-step="3"]')).toBeVisible();

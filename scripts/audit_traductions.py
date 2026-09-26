@@ -69,7 +69,10 @@ def phrases() -> dict[str, list[str]]:
             fonction = noeud.func
             nom = getattr(fonction, "id", None) or getattr(fonction, "attr", None)
             premier = noeud.args[0]
-            interessant = nom == "t" or nom in WIDGETS_TRADUISANTS or (
+            # `phrase` marque une phrase traduite plus loin, `traduire` et
+            # `bilingue` la traduisent dans une langue donnee : l'assistant web
+            # choisit la langue dans la page, pas dans le processus.
+            interessant = nom in ("t", "phrase", "traduire", "bilingue") or nom in WIDGETS_TRADUISANTS or (
                 isinstance(fonction, ast.Attribute) and nom in METHODES_TRADUISANTES
             )
             if not interessant:

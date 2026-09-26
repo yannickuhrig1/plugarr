@@ -88,3 +88,11 @@ def test_le_fichier_des_pays_est_lisible_depuis_le_paquet():
 
     assert vpnservers.DATA.is_file(), vpnservers.DATA
     assert vpnservers.choices("mullvad"), "le fichier est la mais ne dit rien"
+
+
+def test_le_build_refuse_de_partir_sans_paramiko():
+    """`collect_all` ignore un paquet absent : EXE reel du 25/09/2026 sans SSH."""
+    spec = SPEC.read_text(encoding="utf-8")
+
+    garde = spec.index('find_spec("paramiko") is None')
+    assert garde < spec.index('collect_all("paramiko")')

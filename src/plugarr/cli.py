@@ -19,7 +19,9 @@ from . import (
     autoupdate,
     catalog,
     compose,
+    connections,
     dashboard,
+    diagnostics,
     discovery,
     i18n,
     indexers_cli,
@@ -795,6 +797,9 @@ def adopt(
     pick: list[str] = typer.Option(
         [], "--pick", help=t("Lever une ambiguite : service=conteneur. Repetable.")
     ),
+    only: list[str] = typer.Option(
+        [], "--only", help=t("Appliquer uniquement cette etape de cablage. Repetable.")
+    ),
     host: str | None = typer.Option(
         None, help=t("Adresse de cette machine, joignable DEPUIS les conteneurs.")
     ),
@@ -867,26 +872,59 @@ def adopt(
             cfg.services[sid].password = dl_pass or ""
     for note in adopt_mod.missing_for_wiring(cfg):
         console.print(f"[yellow]{note}[/yellow]")
+    for note in adopt_mod.compatibility_notes(plan, data_root):
+        console.print(f"[yellow]{note}[/yellow]")
+
+    wirer = Wirer(cfg)
+    try:
+        planned_steps = [step.name for step in wirer.build_plan()]
+    finally:
+        wirer.close()
+    unknown = set(only) - set(planned_steps)
+    if unknown:
+        raise typer.BadParameter(t("etape(s) inconnue(s) : {etapes}", etapes=", ".join(sorted(unknown))))
+    selected_steps = set(only) if only else None
 
     console.print()
-    report.print_summary(cfg)
+    report.print_summary(cfg, adopted_sources=plan.chosen)
+    console.print(t("Inventaire des conteneurs retenus :"))
+    for sid, entry in plan.chosen.items():
+        mounts = ", ".join(f"{target}={source}" for target, source in sorted(entry.data_mounts.items())) or t("montages media non identifies")
+        console.print(t("  {service} : {conteneur}, image {image}, port {port}, {montages}", service=sid, conteneur=entry.container, image=entry.image, port=entry.host_port, montages=mounts))
+    console.print(t("Operations proposees :"))
+    for step in planned_steps:
+        if selected_steps is None or step in selected_steps:
+            console.print(f"  {step}")
     console.print(
         t(
-            "[cyan]{nombre} lien(s) seraient poses sur ces conteneurs "
+            "[cyan]{nombre} operation(s) seraient appliquees sur ces conteneurs "
             "existants. Aucun ne sera recree.[/cyan]",
-            nombre=orchestrator.planned_links(cfg),
+            nombre=len(selected_steps) if selected_steps is not None else len(planned_steps),
         )
     )
 
+    if not dry_run and (project_dir / "stack.yml").exists():
+        console.print(t("[red]Ce dossier contient deja stack.yml. Choisissez un autre dossier pour adopter cette pile, ou utilisez doctor pour l'installation existante.[/red]"))
+        raise typer.Exit(1)
+    api_results = adopt_mod.api_inventory(cfg)
+    console.print(t("Versions et acces API verifies avant adoption :"))
+    for item in api_results:
+        if item["ok"]:
+            console.print(f"  [green]OK[/green] {item['service']} {item['version']}")
+        else:
+            console.print(t("  [red]ECHEC[/red] {service} : API injoignable, cle refusee ou version absente.", service=item["service"]))
+    if any(not item["ok"] for item in api_results):
+        console.print(t("[red]Adoption interrompue : corrigez les API avant le cablage. Aucun fichier n'a ete ecrit.[/red]"))
+        raise typer.Exit(1)
     if dry_run:
         raise typer.Exit(0)
-    if not yes and not typer.confirm(t("Cabler ces services ?"), default=True):
+    if not yes and not typer.confirm(t("Appliquer les operations affichees ?"), default=False):
         raise typer.Exit(0)
 
     adopt_mod.write_stack(cfg, project_dir)
     wirer = Wirer(cfg)
     try:
-        results = wirer.execute(on_step=report.print_step)
+        results = wirer.execute(on_step=report.print_step, selected_steps=selected_steps)
     finally:
         wirer.close()
     adopt_mod.write_stack(cfg, project_dir)
@@ -1423,12 +1461,24 @@ def restore(
 
 
 @app.command(help=t("Diagnostique une installation existante."))
-def doctor(project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack.yml."))) -> None:
+def doctor(
+    project_dir: Path = typer.Option(Path("."), help=t("Repertoire du stack.yml.")),
+    repair: bool = typer.Option(False, "--repair", help=t("Proposer les correctifs un par un.")),
+    deep_hardlinks: bool = typer.Option(False, "--deep-hardlinks", help=t("Examiner en lecture seule un echantillon de hardlinks existants.")),
+) -> None:
     """Diagnostique une installation existante."""
     cfg = _load_config(project_dir)
     _annoncer_nouvelle_version()
-    if not report.print_checks(orchestrator.preflight(cfg, project_dir)):
+    if not report.print_checks(orchestrator.diagnostic(cfg, project_dir)):
         console.print("[red]Des controles bloquants ont echoue.[/red]")
+    if deep_hardlinks:
+        audit = diagnostics.existing_hardlinks(cfg.data_root)
+        if not audit["available"]:
+            console.print(t("Hardlinks existants : dossiers torrents/ ou media/ absents ; controle impossible."))
+        else:
+            console.print(t("Hardlinks existants : {nombre} correspondance(s) confirmees sur {examines} fichiers examines ; {portee}.", nombre=audit["matched"], examines=audit["checked"], portee=t("echantillon partiel") if audit["partial"] else t("dossiers parcourus entierement")))
+            if not audit["matched"]:
+                console.print(t("Aucun lien commun trouve : resultat indetermine, pas une preuve que les imports sont casses."))
 
     # La protection du trafic torrent AVANT l'etat des conteneurs : c'est la
     # reponse la plus attendue de ce diagnostic.
@@ -1437,17 +1487,13 @@ def doctor(project_dir: Path = typer.Option(Path("."), help=t("Repertoire du sta
         console.print("\nProtection VPN du trafic torrent :")
         report.print_checks(fuites)
 
-        # Un diagnostic qui constate un port desynchronise et s'arrete la laisse
-        # l'utilisateur avec le probleme ET sans le remede — alors que le remede
-        # tient en une commande qu'on sait deja lancer. On la lance, et on le
-        # DIT : un diagnostic qui repare en silence serait pire.
-        #
-        # Seulement quand un controle de port a echoue : sans cette condition,
-        # chaque `doctor` relirait les ports une seconde fois pour rien.
         if any(c for c in fuites if not c.ok and c.name.startswith(vpncheck.PREFIXE_PORT)):
-            remise = vpncheck.reparer_port(cfg)
-            if remise is not None:
-                report.print_checks([remise])
+            console.print(t("[yellow]Port entrant desynchronise : le partage peut etre limite.[/yellow]"))
+            console.print(t("Correctif propose : rejouer la synchronisation du port Gluetun."))
+            if repair and typer.confirm(t("Appliquer ce correctif ?"), default=False):
+                remise = vpncheck.reparer_port(cfg)
+                if remise is not None:
+                    report.print_checks([remise])
 
     console.print("\nEtat des conteneurs :")
     console.print(Compose(project_dir, cfg.project_name).ps())
@@ -1464,6 +1510,34 @@ def doctor(project_dir: Path = typer.Option(Path("."), help=t("Repertoire du sta
                 console.print(f"  [green]OK[/green] {sid} {client.version}")
         except Exception as exc:  # noqa: BLE001
             console.print(f"  [red]ECHEC[/red] {sid} : {exc}")
+
+    console.print(t("\nLiaisons inter-services :"))
+    edges = {edge["id"]: edge for edge in connections.entries(cfg)}
+    for check in diagnostics.connection_checks(cfg):
+        label = "[green]OK[/green]" if check["ok"] else "[red]ECHEC[/red]"
+        console.print(f"  {label} {check['name']} : {check['detail']}")
+        if check["ok"]:
+            continue
+        console.print(f"    {check['next_step']}")
+        edge = edges[check["edge_id"]]
+        if repair and not cfg.services[edge["source"]].adopted and typer.confirm(
+            t("Reappliquer uniquement {liaison} ?", liaison=edge["id"]), default=False
+        ):
+            try:
+                ok = connections.repair(cfg, edge)
+                result = connections.test(cfg, edge) if ok else None
+            except Exception:  # noqa: BLE001 - un correctif echoue ne doit pas interrompre le diagnostic
+                ok, result = False, None
+            if result is not None:
+                console.print(t("    Liaison retestee : {etat}", etat=result["state"]))
+            else:
+                console.print(t("    Reparation echouee ; aucune autre liaison n'a ete rejouee."))
+
+    drift = diagnostics.compose_drift(cfg, project_dir)
+    if drift is not None:
+        console.print(t("\nConfiguration Compose : ") + drift["detail"])
+        if not drift["ok"]:
+            console.print("  " + drift["next_step"])
 
 
 @app.command(help=t("Arrete la stack. Ne touche JAMAIS a DATA_ROOT."))

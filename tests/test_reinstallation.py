@@ -236,6 +236,33 @@ def test_seuls_les_services_demandes_sont_supprimes(tmp_path):
     assert Path(cfg.config_path("sonarr")).exists()
 
 
+def test_remise_a_zero_distante_recourt_au_nettoyage_cible_sur_permission(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path, ["jellyfin"])
+    dossier = Path(cfg.config_path("jellyfin"))
+    dossier.mkdir(parents=True)
+    (dossier / "db.sqlite").write_text("ancien", encoding="utf-8")
+    media = Path(cfg.data_root) / "media" / "film.mkv"
+    media.parent.mkdir(parents=True)
+    media.write_text("a garder", encoding="utf-8")
+
+    def denied(_path):
+        raise PermissionError(13, "Permission denied", str(dossier / "db.sqlite"))
+
+    monkeypatch.setattr(orchestrator.shutil, "rmtree", denied)
+    cleaned = []
+
+    def fallback(path):
+        cleaned.append(path)
+        (path / "db.sqlite").unlink()
+        path.rmdir()
+
+    assert orchestrator.reset_configs(
+        cfg, ["jellyfin"], permission_fallback=fallback
+    ) == [dossier.resolve()]
+    assert cleaned == [dossier.resolve()]
+    assert media.read_text(encoding="utf-8") == "a garder"
+
+
 def test_un_dossier_absent_n_est_pas_une_erreur(tmp_path):
     """Rejouer la suppression doit rester sans effet, pas lever."""
     cfg = _cfg(tmp_path, ["jellyfin"])

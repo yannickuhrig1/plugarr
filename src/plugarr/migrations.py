@@ -176,8 +176,13 @@ def lire(chemin: Path) -> tuple[StackConfig, list[str]]:
     L'ordre compte : migrer APRES validation reviendrait a migrer des valeurs
     par defaut inventees par pydantic plutot que le contenu reel du fichier.
     """
+    return lire_texte(Path(chemin).read_text(encoding="utf-8"), nom=Path(chemin).name)
+
+
+def lire_texte(texte: str, *, nom: str = "stack.yml") -> tuple[StackConfig, list[str]]:
+    """Comme `lire`, pour un contenu deja en memoire (pile distante lue par SSH)."""
     try:
-        donnees = yaml.safe_load(Path(chemin).read_text(encoding="utf-8")) or {}
+        donnees = yaml.safe_load(texte) or {}
     except yaml.YAMLError as exc:
         # `yaml.YAMLError` herite d'`Exception`, PAS de `ValueError` : les
         # appelants qui attrapent `(ValueError, OSError)` la laisseraient
@@ -185,7 +190,7 @@ def lire(chemin: Path) -> tuple[StackConfig, list[str]]:
         # remede : on convertit ICI, une fois, plutot que dans chaque
         # appelant.
         raise ValueError(
-            t("{chemin} est illisible : {erreur}", chemin=Path(chemin).name, erreur=exc)
+            t("{chemin} est illisible : {erreur}", chemin=nom, erreur=exc)
         ) from exc
     donnees, notes = migrer(donnees)
     return StackConfig.model_validate(donnees), notes

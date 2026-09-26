@@ -252,6 +252,56 @@ def test_une_erreur_de_test_ne_leve_pas():
     assert "injoignable" in message
 
 
+def test_le_cablage_utilise_la_cle_reellement_pre_semee_dans_sabnzbd(monkeypatch):
+    """Le champ ``password`` alimente sabnzbd.ini et tous les autres clients.
+
+    Une reprise peut laisser son ancienne copie ``api_key`` en decalage. Dans
+    ce cas DroppedNeedle doit recevoir la valeur que SABnzbd utilise vraiment,
+    puis PlugArr realigne les deux copies avant de repersister la pile.
+    """
+    from plugarr.clients import droppedneedle
+
+    cfg = _cfg("droppedneedle")
+    sab = cfg.services["sabnzbd"]
+    sab.api_key = "ancienne-copie"
+    sab.password = "cle-pre-semee"
+    recu = {}
+
+    class FauxClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return None
+
+        def wait_ready(self):
+            return None
+
+        def setup(self, **_kwargs):
+            return False
+
+        def login(self, *_args):
+            return None
+
+        def ensure_sabnzbd(self, **kwargs):
+            recu.update(kwargs)
+            return True
+
+        def test_sabnzbd(self):
+            return True, "ok"
+
+    monkeypatch.setattr(droppedneedle, "DroppedNeedleClient", FauxClient)
+
+    resultat = Wirer(cfg).step_droppedneedle_setup()
+
+    assert resultat.ok is True
+    assert recu["api_key"] == "cle-pre-semee"
+    assert sab.api_key == "cle-pre-semee"
+
+
 @pytest.mark.parametrize("methode", ["authenticate", "ensure_api_key"])
 def test_les_methodes_du_client_jellyfin_existent(methode):
     """`step_droppedneedle_setup` a d'abord appele `JellyfinClient.login`, qui
@@ -259,3 +309,30 @@ def test_les_methodes_du_client_jellyfin_existent(methode):
     from plugarr.clients.jellyfin import JellyfinClient
 
     assert hasattr(JellyfinClient, methode)
+
+
+def test_une_cle_perimee_est_remplacee_meme_si_le_reste_est_identique():
+    """Installation reelle du 26/09/2026 : « SABnzbd returned HTTP 403: API Key
+    Incorrect ». La cle est masquee a la lecture ; seul le test la juge."""
+
+    class Perimee(_Faux):
+        def _request(self, method, path, **kw):
+            if path.endswith("/test"):
+                self.corps.append((method, kw.get("json")))
+                cle = self._sab.get("api_key")
+                return {"valid": cle == "NOUVELLE", "message": "API Key Incorrect"}
+            return super()._request(method, path, **kw)
+
+    faux = Perimee(sabnzbd={
+        "enabled": True, "client_type": "sabnzbd", "url": "http://sabnzbd:8080",
+        "api_key": "ANCIENNE", "category": "music", "priority": 0,
+        "post_processing": 3, "downloads_mount": "/data/usenet",
+    })
+    from plugarr.clients.droppedneedle import POST_TRAITEMENT_COMPLET
+    faux._sab["post_processing"] = POST_TRAITEMENT_COMPLET
+    args = {"url": "http://sabnzbd:8080", "api_key": "NOUVELLE", "categorie": "music", "montage": "/data/usenet"}
+
+    assert faux.ensure_sabnzbd(**args) is True
+    assert faux._sab["api_key"] == "NOUVELLE"
+    assert faux.ensure_sabnzbd(**args) is False
+

@@ -13,9 +13,10 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.content import Content
-from textual.widgets import ListItem, ListView
+from textual.widgets import ListItem, ListView, SelectionList
+from textual.widgets.selection_list import Selection
 
-from .. import catalog, journal
+from .. import catalog, import_prowlarr, journal
 from ..clients.arr import ArrClient
 from ..clients.prowlarr import IndexerDefinition, ProwlarrIndexers
 from ..i18n import t
@@ -36,6 +37,10 @@ class IndexersScreen(WizardScreen):
         self._client: ArrClient | None = None
         self._matches: list[IndexerDefinition] = []
         self._current: IndexerDefinition | None = None
+        #: Indexeurs importables de la sauvegarde examinee, par cle de selection.
+        self._sauvegarde: dict[str, import_prowlarr.IndexeurSauvegarde] = {}
+        #: Compte rendu du dernier import, garde au-dessus du nouvel examen.
+        self._dernier_import: list[str] = []
 
     def content(self) -> ComposeResult:
         yield Static(
@@ -45,6 +50,16 @@ class IndexersScreen(WizardScreen):
             "c'est Prowlarr qui l'impose, il n'existe pas d'enregistrement hors ligne.[/dim]",
             id="indexers-intro",
         )
+        # Parite avec l'assistant web : reprendre les indexeurs d'une sauvegarde
+        # Prowlarr, au lieu de tout ressaisir.
+        with Horizontal(id="indexer-backup"):
+            yield Input(
+                placeholder="Sauvegarde Prowlarr a reprendre (.zip ou prowlarr.db)",
+                id="backup-path",
+            )
+            yield Button("Examiner la sauvegarde", id="backup-inspect")
+        yield SelectionList(id="backup-list", classes="hidden")
+        yield Button("Importer la selection", id="backup-import", classes="hidden")
         with Horizontal(id="indexers-body"):
             with Vertical(classes="indexers-pane"):
                 yield Input(placeholder="Rechercher un indexeur...", id="indexer-search")
@@ -254,6 +269,103 @@ class IndexersScreen(WizardScreen):
         self.query_one("#skip", Button).label = "Continuer"
 
     # -- sortie --------------------------------------------------------------
+
+    # -- sauvegarde Prowlarr -----------------------------------------------
+
+    @on(Button.Pressed, "#backup-inspect")
+    def _inspect_backup(self) -> None:
+        chemin = self.query_one("#backup-path", Input).value.strip().strip('"')
+        if not chemin:
+            self._set_status(t("[yellow]Indiquez le chemin de la sauvegarde Prowlarr.[/yellow]"))
+            return
+        if self._indexers is None:
+            self._set_status(t("[yellow]Prowlarr n'est pas encore pret.[/yellow]"))
+            return
+        self.query_one("#backup-inspect", Button).disabled = True
+        self.inspect_backup(chemin)
+
+    @work(thread=True)
+    def inspect_backup(self, chemin: str) -> None:
+        from pathlib import Path
+
+        try:
+            sauvegarde = import_prowlarr.lire(Path(chemin))
+            statuts = import_prowlarr.examiner(sauvegarde, self._indexers)
+        except Exception as exc:  # noqa: BLE001 - un fichier illisible se dit, sans planter
+            self.app.call_from_thread(
+                self._set_status, t("[red]Sauvegarde illisible : {erreur}[/red]", erreur=escape(str(exc)))
+            )
+            self.app.call_from_thread(self._inspect_done, [])
+            return
+        self.app.call_from_thread(self._inspect_done, statuts)
+
+    def _inspect_done(self, statuts: list) -> None:
+        self.query_one("#backup-inspect", Button).disabled = False
+        liste = self.query_one("#backup-list", SelectionList)
+        liste.clear_options()
+        self._sauvegarde = {}
+        libelles = {
+            import_prowlarr.IMPORTABLE: t("a importer"),
+            import_prowlarr.CONFIGURE: t("deja configure"),
+            import_prowlarr.INCONNU: t("inconnu de ce Prowlarr"),
+        }
+        for rang, (entree, statut) in enumerate(statuts):
+            cle = f"i{rang}"
+            importable = statut == import_prowlarr.IMPORTABLE
+            if importable:
+                self._sauvegarde[cle] = entree
+            liste.add_option(
+                Selection(
+                    f"{escape(entree.name)}  [dim]{escape(libelles.get(statut, statut))}[/dim]",
+                    cle,
+                    importable,
+                    disabled=not importable,
+                )
+            )
+        liste.set_class(not statuts, "hidden")
+        self.query_one("#backup-import", Button).set_class(not self._sauvegarde, "hidden")
+        if statuts:
+            decompte = t(
+                "[dim]{importables} indexeur(s) a importer sur {total} dans la sauvegarde.[/dim]",
+                importables=len(self._sauvegarde),
+                total=len(statuts),
+            )
+            # Le compte rendu d'un import vient d'etre affiche : il reste au-dessus.
+            self._set_status("\n".join([*self._dernier_import, decompte]))
+        self._dernier_import = []
+
+    @on(Button.Pressed, "#backup-import")
+    def _import_backup(self) -> None:
+        choisis = [
+            self._sauvegarde[cle]
+            for cle in self.query_one("#backup-list", SelectionList).selected
+            if cle in self._sauvegarde
+        ]
+        if not choisis or self._indexers is None:
+            return
+        self.query_one("#backup-import", Button).disabled = True
+        self.import_backup(choisis)
+
+    @work(thread=True)
+    def import_backup(self, choisis: list) -> None:
+        lignes = []
+        for entree in choisis:
+            try:
+                ok, message, avertissements = import_prowlarr.importer(entree, self._indexers)
+            except Exception as exc:  # noqa: BLE001 - un indexeur en echec n'arrete pas les suivants
+                ok, message, avertissements = False, str(exc), []
+            marque = "[green]OK[/green]" if ok else "[red]ECHEC[/red]"
+            lignes.append(f"{marque} {escape(entree.name)} : {escape(message)}")
+            lignes.extend(f"   [yellow]{escape(a)}[/yellow]" for a in avertissements)
+        self.app.call_from_thread(self._import_done, lignes)
+
+    def _import_done(self, lignes: list[str]) -> None:
+        self._set_status("\n".join(lignes))
+        self._dernier_import = lignes
+        self.query_one("#backup-import", Button).disabled = False
+        self.query_one("#skip", Button).label = "Continuer"
+        # La liste reflete ce qui reste : on reexamine.
+        self._inspect_backup()
 
     @on(Button.Pressed, "#skip")
     def _skip(self) -> None:

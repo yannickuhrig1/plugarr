@@ -14,7 +14,13 @@ from textual.widgets import Button, Input, RadioButton, Select, SelectionList, S
 from plugarr import vpnservers
 from plugarr.models import VPN_PROVIDERS, VpnConfig
 from plugarr.tui.app import PlugArrApp
-from plugarr.tui.screens import PathsScreen, SummaryScreen, TemplatesScreen, VpnScreen
+from plugarr.tui.screens import (
+    PathsScreen,
+    RemoteAccessScreen,
+    SummaryScreen,
+    TemplatesScreen,
+    VpnScreen,
+)
 
 
 @pytest.fixture
@@ -48,8 +54,10 @@ async def test_il_est_saute_sans_client_de_telechargement(app, appuyer):
         pilot.app.selection = ["sonarr", "jellyfin"]
         await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
+        # L'ecran suivant est l'acces distant (Sonarr est choisi), puis le
+        # recapitulatif : l'essentiel est que cet ecran-ci soit saute.
         assert await appuyer(
-            pilot, "#next", lambda: isinstance(pilot.app.screen, SummaryScreen)
+            pilot, "#next", lambda: isinstance(pilot.app.screen, RemoteAccessScreen)
         )
 
 
@@ -188,6 +196,28 @@ async def test_une_configuration_wireguard_complete_passe(app):
         vpn = pilot.app.vpn
         assert vpn.enabled and vpn.provider == "mullvad"
         assert vpn.wireguard_private_key == "cle-privee-wireguard"
+
+
+@pytest.mark.asyncio
+async def test_l_adresse_wireguard_du_fournisseur_atteint_la_configuration(app):
+    """Sur UGOS, le TUI est le parcours normal car les tunnels SSH sont bloques.
+
+    Surfshark fournit une adresse WireGuard avec la cle. Le web savait la lire,
+    mais le terminal ne proposait aucun champ et obligeait a repasser en OpenVPN.
+    """
+    async with app.run_test() as pilot:
+        screen = await _vpn(pilot)
+        screen.query_one("#vpn-oui", RadioButton).value = True
+        await pilot.pause()
+        screen.query_one("#vpn-provider", Select).value = "surfshark"
+        screen.query_one("#vpn-key", Input).value = "cle-privee-wireguard"
+        screen.query_one("#vpn-addresses", Input).value = "10.14.0.2/16"
+        await pilot.pause()
+
+        vpn = screen.config()
+
+        assert vpn.provider == "surfshark"
+        assert vpn.wireguard_addresses == "10.14.0.2/16"
 
 
 @pytest.mark.asyncio

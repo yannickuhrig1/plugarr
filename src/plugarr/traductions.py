@@ -795,6 +795,7 @@ EN: dict[str, str] = {
     '{service} pret': '{service} ready',
     "{service} n'a pas repondu en {secondes:.0f}s. Dernier retour : {dernier}": '{service} did not answer within {secondes:.0f}s. Last result: {dernier}',
     "{service} n'est jamais devenu disponible": '{service} never became available',
+    "Ces adresses ({hote}) ne sont joignables que depuis le reseau du serveur. Depuis ce poste, ouvrez un proxy SSH avec {commande}, puis un navigateur configure sur le proxy SOCKS {proxy}. L'acces Tailscale de PlugArr est l'autre voie.": "These addresses ({hote}) can only be reached from the server's network. From this computer, open an SSH proxy with {commande}, then a browser set to the SOCKS proxy {proxy}. PlugArr's Tailscale access is the other way.",
     "montee en lecture seule dans la console : controlee a l'installation": 'mounted read-only in the console: checked at install time',
     "test des hardlinks impossible : {source} n'accepte pas d'ecriture ici ({erreur}).": "hardlink test impossible: {source} is not writable here ({erreur}).",
     "{host}:{port} ({service}) ne repond pas depuis la machine elle-meme. Sur un VPS, l'IP publique est souvent traduite par le fournisseur et n'appartient pas a la machine : indiquez son adresse privee comme adresse de la machine.": "{host}:{port} ({service}) does not answer from the machine itself. On a VPS, the public IP is often translated by the provider and does not belong to the machine: enter its private address as the machine address.",

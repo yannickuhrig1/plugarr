@@ -344,7 +344,7 @@ def _paths(cfg: StackConfig) -> str:
     return rows
 
 
-def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_report=None, demo=False, console_password: str = "") -> str:
+def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_report=None, demo=False, console_password: str = "", aide_acces: dict | None = None) -> str:
     """Rend la page.
 
     `live=False` produit le fichier statique ecrit apres l'installation.
@@ -369,6 +369,22 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_repo
         )
     if host_note:
         banner += f'<div class="banner info">{html.escape(host_note)}</div>'
+    if aide_acces:
+        # Installation distante sur une adresse privee : sans cela, des liens
+        # injoignables depuis le poste, et aucune explication.
+        banner += (
+            '<div class="banner info">'
+            + t(
+                "Ces adresses ({hote}) ne sont joignables que depuis le reseau du "
+                "serveur. Depuis ce poste, ouvrez un proxy SSH avec {commande}, puis "
+                "un navigateur configure sur le proxy SOCKS {proxy}. L'acces Tailscale "
+                "de PlugArr est l'autre voie.",
+                hote=html.escape(aide_acces["host"]),
+                commande=f"<code>{html.escape(aide_acces['ssh'])}</code>",
+                proxy=f"<code>{html.escape(aide_acces['proxy'])}</code>",
+            )
+            + "</div>"
+        )
     if not cfg.vpn_enabled and _has_torrent_client(cfg):
         banner += (
             '<div class="banner warn"><strong>'

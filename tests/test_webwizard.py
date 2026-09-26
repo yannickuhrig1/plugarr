@@ -1465,3 +1465,33 @@ def test_la_reprise_garde_ou_remplace_le_mot_de_passe_de_la_console(server, monk
     if nouveau:
         assert adminauth.verify_password(rapport["console_password"], pile["admin_password_hash"])
 
+
+def test_le_rapport_explique_comment_joindre_une_adresse_privee(server, monkeypatch):
+    """Validation reelle du 26/09/2026 : liens vers 10.0.0.30, injoignables depuis
+    le poste, sans aucune explication."""
+    srv, client = server
+    srv.state.demo = False
+    _pile_distante_ancienne(monkeypatch)
+    resultat = client.post(
+        "/api/remote-install/probe",
+        json={"host": "203.0.113.10", "port": 2222, "username": "ubuntu", "private_key": "cle"},
+    ).json()
+    _deployer(srv, client, monkeypatch, resultat, reprendre=True)
+
+    aide = client.get("/api/report").json()["access_help"]
+
+    assert aide == {
+        "host": "10.0.0.30",
+        "ssh": "ssh -N -D 1080 ubuntu@203.0.113.10 -p 2222",
+        "proxy": "socks5://127.0.0.1:1080",
+    }
+    page = client.get("/api/access").text
+    assert "ssh -N -D 1080 ubuntu@203.0.113.10 -p 2222" in page
+
+
+def test_une_installation_locale_n_a_pas_besoin_de_proxy(server):
+    srv, client = server
+    _installation_terminee(srv, client)
+
+    assert client.get("/api/report").json()["access_help"] is None
+

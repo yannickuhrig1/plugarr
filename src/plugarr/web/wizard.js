@@ -35,6 +35,7 @@ const EN = {
   sshMajor:'major version: one-way migration', sshExistingTitle:'PlugArr is already installed on this server', sshExistingResume:'Resume its configuration: applications, VPN and passwords', sshExistingFresh:'Start from scratch: default settings, nothing is reused', sshUpgrade:'Move to the versions tested by this PlugArr release', sshUpgradeHelp:'Without this box, each application keeps its current version.',
   resumeSkipped:'Settings resumed: the Folders, VPN, Quality and Access steps were skipped. Use Back to change them.',
   sshConsolePassword:'Generate a new password for the administration console', consoleKept:'unchanged (set by a previous installation)', consoleKeptHelp:'Console password unchanged. To set a new one: run the wizard again with “Generate a new password” ticked, or run “plugarr admin-password” in the plugarr-console container.',
+  accessHelpIntro:'The {host} addresses can only be reached from the server network. From this computer:', accessHelpSsh:'1. open an SSH proxy and keep that terminal open:', accessHelpBrowser:'2. open a browser set to this SOCKS proxy:', accessHelpTailscale:'PlugArr’s Tailscale access is the other way.',
   sshReady:'SSH connection ready.', sshExisting:'PlugArr stack found on the server: its settings are resumed.', sshPrivateHost:'The SSH address does not belong to the server (translated public IP): machine address set to {host}.',
   resumeOrigin:'Previous installation', resumedSettings:'Settings resumed', resumedServices:'Credentials resumed', freshInstall:'Fresh configuration selected.', resetCandidates:'Existing settings concerned', resetEnabled:'These settings will be removed immediately before installation.', resetDisabled:'These settings will be kept.',
   puid:'PUID', pgid:'PGID', umask:'UMASK', address:'Address', projectPath:'Project path', envFile:'.env file',
@@ -47,6 +48,7 @@ const FR = {
   sshMajor:'version majeure : migration sans retour', sshExistingTitle:'PlugArr est déjà installé sur ce serveur', sshExistingResume:'Reprendre sa configuration : applications, VPN et mots de passe', sshExistingFresh:'Repartir de zéro : réglages par défaut, rien n’est réutilisé', sshUpgrade:'Passer aux versions testées par cette version de PlugArr', sshUpgradeHelp:'Sans cette case, chaque application garde sa version actuelle.',
   resumeSkipped:'Réglages repris : les étapes Dossiers, VPN, Qualité et Accès ont été passées. Utilisez Retour pour les modifier.',
   sshConsolePassword:'Générer un nouveau mot de passe pour la console d’administration', consoleKept:'inchangé (défini lors d’une installation précédente)', consoleKeptHelp:'Mot de passe de la console inchangé. Pour en définir un nouveau : relancez l’assistant en cochant « Générer un nouveau mot de passe », ou lancez « plugarr admin-password » dans le conteneur plugarr-console.',
+  accessHelpIntro:'Les adresses {host} ne sont joignables que depuis le réseau du serveur. Depuis ce poste :', accessHelpSsh:'1. ouvrez un proxy SSH, et gardez ce terminal ouvert :', accessHelpBrowser:'2. ouvrez un navigateur configuré sur ce proxy SOCKS :', accessHelpTailscale:'L’accès Tailscale de PlugArr est l’autre voie.',
   sshReady:'Connexion SSH prête.', sshExisting:'Pile PlugArr trouvée sur le serveur : ses réglages sont repris.', sshPrivateHost:'L’adresse SSH n’appartient pas au serveur (IP publique traduite) : adresse de la machine réglée sur {host}.',
   sshRemoteBadge:'SSH DISTANT', qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée', consoleShort:'Console en conteneur',
   services:'Applications', folders:'Dossiers', vpn:'VPN', quality:'Qualité', review:'Vérification', installation:'Installation', arr:'Automatisation', download:'Téléchargements', media:'Médiathèques', ui:'Interfaces', selected:'applications sélectionnées', dependencies:'dépendances', plannedLinks:'liens à configurer', defaultProfile:'Défaut PlugArr', profile:'Profil',
@@ -960,7 +962,21 @@ function renderReport(report) {
   $('report-services').replaceChildren(...rows);
   $('env-path').textContent = `${tr('envFile')} : ${report.env_path}`;
   const etapes = [...report.next_steps, ...(report.console_url && report.console_password_kept ? [tr('consoleKeptHelp')] : [])];
-  $('next-steps').replaceChildren(...etapes.map(item => E('li', item)));
+  const items = etapes.map(item => E('li', item));
+  // Validation reelle du 26/09/2026 : liens vers l'adresse privee du VPS,
+  // injoignables depuis ce poste, sans explication.
+  if (report.access_help) {
+    const aide = E('li');
+    const commande = texte => { const code = E('code', texte); code.className = 'copyable'; return code; };
+    aide.append(
+      E('p', tr('accessHelpIntro').replace('{host}', report.access_help.host)),
+      E('p', tr('accessHelpSsh')), commande(report.access_help.ssh),
+      E('p', tr('accessHelpBrowser')), commande(`chrome --proxy-server="${report.access_help.proxy}" --user-data-dir=chrome-plugarr`),
+      E('p', tr('accessHelpTailscale')),
+    );
+    items.unshift(aide);
+  }
+  $('next-steps').replaceChildren(...items);
 }
 
 function renderUpdates(data) {

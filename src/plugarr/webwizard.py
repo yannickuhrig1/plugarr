@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import ntpath
 import posixpath
@@ -432,6 +433,8 @@ class WizardState:
         self.install_target = "ssh"
         self.remote_connection_id = form.remote_connection_id
         self.remote_project_dir = project
+        cible = connection["target"]
+        self.remote_ssh = (cible.username, cible.host, cible.port)
         return connection
 
     def build_config(self, payload):
@@ -1224,6 +1227,7 @@ class WizardState:
                 and self.cfg.console_enabled
                 and not self.console_password
             ),
+            "access_help": self.acces_depuis_ce_poste(),
             "can_indexers": self.cfg.enabled("prowlarr") and self.install_target != "ssh",
             "demo": self.demo,
             "remote": self.remote_result or remote_access.summary(self.cfg, demo=self.demo),
@@ -1324,6 +1328,26 @@ class WizardState:
             self.remote_worker.start()
         return {"status": "running"}
 
+    def acces_depuis_ce_poste(self) -> dict | None:
+        """Comment joindre les applications depuis ce poste, quand elles n'y sont pas.
+
+        Validation reelle du 26/09/2026 : sur un VPS ou seul SSH est ouvert, les
+        liens pointaient vers l'adresse privee du serveur (10.0.0.30), que le
+        poste ne peut pas joindre, et rien ne disait comment faire. Un proxy
+        SOCKS par SSH les rend joignables tels quels, sans rien ouvrir.
+        """
+        if self.install_target != "ssh" or self.cfg is None or not getattr(self, "remote_ssh", None):
+            return None
+        try:
+            adresse = ipaddress.ip_address(self.cfg.host)
+        except ValueError:
+            return None
+        utilisateur, hote, port = self.remote_ssh
+        if not adresse.is_private or hote == self.cfg.host:
+            return None
+        commande = f"ssh -N -D 1080 {utilisateur}@{hote}" + (f" -p {port}" if port != 22 else "")
+        return {"host": self.cfg.host, "ssh": commande, "proxy": "socks5://127.0.0.1:1080"}
+
     def access_page(self):
         self._require_completed()
         cfg = self.cfg.model_copy(deep=True)
@@ -1335,6 +1359,7 @@ class WizardState:
             remote_report=self.remote_result,
             demo=self.demo,
             console_password=self.console_password if self.install_target == "ssh" else "",
+            aide_acces=self.acces_depuis_ce_poste(),
         ).encode("utf-8")
 
     def close_resources(self):

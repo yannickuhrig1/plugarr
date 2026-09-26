@@ -206,13 +206,15 @@ def test_l_option_de_relance_est_celle_que_lit_le_script():
 
 
 def test_l_installateur_ferme_le_gestionnaire_par_la_commande_qui_existe():
-    from typer.testing import CliRunner
+    """On lit la definition de la commande, pas son aide : sur la CI, Rich
+    colore l'aide et ses codes coupent `--quitter` en morceaux."""
+    import typer.main
 
     from plugarr.cli import app
 
     assert "'manager --quitter'" in ISS
-    resultat = CliRunner().invoke(app, ["manager", "--help"])
-    assert "--quitter" in resultat.output
+    commande = typer.main.get_command(app).commands["manager"]
+    assert "--quitter" in {option for parametre in commande.params for option in parametre.opts}
 
 
 def test_l_installation_se_fait_sans_droits_administrateur():

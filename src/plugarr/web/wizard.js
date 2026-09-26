@@ -33,6 +33,7 @@ const EN = {
   portForward:'port forwarding', portForwardReady:'Port forwarding locations only', noPortForward:'No port forwarding advertised', locations:'locations', placesSelected:'locations selected', noLocation:'No location selected', tunnelWorking:'Starting a disposable tunnel…', tunnelSuccess:'VPN tunnel test succeeded.', tunnelFailure:'VPN tunnel test failed.',
   updatesTitle:'Available updates', updatesLoading:'Looking for newer versions…', updatesNone:'Every application is on its latest version.', updatesUnchecked:'Not checked', updatesKept:'PlugArr installs the versions it has tested; these updates are then applied from the console.',
   sshMajor:'major version: one-way migration', sshExistingTitle:'PlugArr is already installed on this server', sshExistingResume:'Resume its configuration: applications, VPN and passwords', sshExistingFresh:'Start from scratch: default settings, nothing is reused', sshUpgrade:'Move to the versions tested by this PlugArr release', sshUpgradeHelp:'Without this box, each application keeps its current version.',
+  resumeSkipped:'Settings resumed: the Folders, VPN, Quality and Access steps were skipped. Use Back to change them.',
   sshReady:'SSH connection ready.', sshExisting:'PlugArr stack found on the server: its settings are resumed.', sshPrivateHost:'The SSH address does not belong to the server (translated public IP): machine address set to {host}.',
   resumeOrigin:'Previous installation', resumedSettings:'Settings resumed', resumedServices:'Credentials resumed', freshInstall:'Fresh configuration selected.', resetCandidates:'Existing settings concerned', resetEnabled:'These settings will be removed immediately before installation.', resetDisabled:'These settings will be kept.',
   puid:'PUID', pgid:'PGID', umask:'UMASK', address:'Address', projectPath:'Project path', envFile:'.env file',
@@ -43,6 +44,7 @@ const FR = {
   remoteReplaceResetHelp:'La pile sera remplacée. Les anciennes configurations sélectionnées seront supprimées ; les médias seront conservés.',
   updatesTitle:'Mises à jour disponibles', updatesLoading:'Recherche des versions plus récentes…', updatesNone:'Toutes les applications sont dans leur dernière version.', updatesUnchecked:'Non vérifiées', updatesKept:'PlugArr installe les versions qu’il a testées ; ces mises à jour se font ensuite depuis la console.',
   sshMajor:'version majeure : migration sans retour', sshExistingTitle:'PlugArr est déjà installé sur ce serveur', sshExistingResume:'Reprendre sa configuration : applications, VPN et mots de passe', sshExistingFresh:'Repartir de zéro : réglages par défaut, rien n’est réutilisé', sshUpgrade:'Passer aux versions testées par cette version de PlugArr', sshUpgradeHelp:'Sans cette case, chaque application garde sa version actuelle.',
+  resumeSkipped:'Réglages repris : les étapes Dossiers, VPN, Qualité et Accès ont été passées. Utilisez Retour pour les modifier.',
   sshReady:'Connexion SSH prête.', sshExisting:'Pile PlugArr trouvée sur le serveur : ses réglages sont repris.', sshPrivateHost:'L’adresse SSH n’appartient pas au serveur (IP publique traduite) : adresse de la machine réglée sur {host}.',
   sshRemoteBadge:'SSH DISTANT', qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée', consoleShort:'Console en conteneur',
   services:'Applications', folders:'Dossiers', vpn:'VPN', quality:'Qualité', review:'Vérification', installation:'Installation', arr:'Automatisation', download:'Téléchargements', media:'Médiathèques', ui:'Interfaces', selected:'applications sélectionnées', dependencies:'dépendances', plannedLinks:'liens à configurer', defaultProfile:'Défaut PlugArr', profile:'Profil',
@@ -490,6 +492,7 @@ function applyRemoteExisting(existing, reprendre = true) {
   $('console-enabled').checked = !!form.console_enabled;
   $('console-port').value = form.console_port || 7373;
   $('vpn-preserved').hidden = !(reprendre && form.vpn.enabled);
+  globalThis.PlugArrRemote?.load?.(form.remote_access);
   for (const service of ['sonarr','radarr']) {
     const select = $('quality-' + service);
     const wanted = form.recyclarr_templates[service];
@@ -499,6 +502,10 @@ function applyRemoteExisting(existing, reprendre = true) {
     select.value = wanted;
   }
   renderServices();
+  // Liste videe d'abord : deja affichee, elle se relisait elle-meme (aucune
+  // case cochee) au lieu du reglage repris. Validation reelle du 26/09/2026 :
+  // « France » perdu, le VPN sortait par les Etats-Unis.
+  $('vpn-places').replaceChildren();
   updatePlaces();
   renderResumeControls();
   refreshSelection().catch(failure => error(failure.message));
@@ -521,6 +528,16 @@ function chooseExisting(value) {
   else applyRemoteExisting(remoteProbe?.fresh_form || bootstrap.form, false);
   $('ssh-upgrade-box').hidden = value !== 'resume' || !(remoteProbe?.version_changes || []).length;
   if (value !== 'resume') $('ssh-upgrade').checked = false;
+}
+
+// Demande du 26/09/2026 : en reprise, les pages Dossiers, VPN, Qualite et
+// Acces ne font que redemander ce qui est deja connu. « Continuer » mene
+// directement a la verification ; Retour permet toujours d'y revenir.
+function repriseDirecte() {
+  if (form.install_target === 'ssh') {
+    return Boolean(remoteExisting) && document.querySelector('input[name="ssh-existing"]:checked')?.value !== 'fresh';
+  }
+  return Boolean(bootstrap.existing) && form.reprendre !== false;
 }
 
 function resetRemoteProbe() {
@@ -1238,7 +1255,11 @@ $('wizard').addEventListener('submit', async event => {
     }
     if (step < 5) {
       if (step === 4 && globalThis.PlugArrRemote && !globalThis.PlugArrRemote.valid()) return;
-      readFields(); showStep(step + 1); if (step === 5) await validate(); return;
+      const direct = step === 0 && repriseDirecte();
+      readFields(); showStep(direct ? 5 : step + 1);
+      $('resume-skipped').hidden = !direct;
+      if (step === 5) await validate();
+      return;
     }
     if (step === 5 && plan?.plan_id && $('confirm').checked) {
       setBusy(true);
@@ -1250,7 +1271,7 @@ $('wizard').addEventListener('submit', async event => {
   finally { setBusy(false); }
 });
 
-$('back').addEventListener('click', () => { if (!busy) { readFields(); plan = null; showStep(Math.max(0, step - 1)); } });
+$('back').addEventListener('click', () => { if (!busy) { readFields(); plan = null; $('resume-skipped').hidden = true; showStep(Math.max(0, step - 1)); } });
 $('recheck').addEventListener('click', validate);
 $('confirm').addEventListener('change', () => setBusy(busy));
 $('remote-replace').addEventListener('change', async event => {

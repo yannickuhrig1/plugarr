@@ -47,6 +47,13 @@ globalThis.PlugArrRemote = (() => {
     }
     $('remote-step-summary').textContent=mode()==='local'?text('Vous pourrez configurer un accès distant lors d’une prochaine installation.','You can configure remote access during a later installation.'):text('Les adresses et fiches mobiles seront disponibles à la fin. L’activation distante est une opération séparée.','Addresses and mobile forms will appear after installation. Remote activation is a separate operation.');
   }
+  // Reprise d'une pile distante : sans cela la page Acces gardait « local » et
+  // l'enregistrait, meme si le serveur etait en HTTPS ou Tailscale.
+  function load(remote){
+    remote=remote||{mode:'local',domain:'',services:[]};selected=[...(remote.services||[])];
+    document.querySelectorAll('input[name="remote-mode"]').forEach(n=>{n.checked=n.value===remote.mode;});
+    $('remote-domain').value=remote.domain||'';refresh();
+  }
   function read(services=effective){return {mode:mode(),domain:mode()==='https'?$('remote-domain').value.trim():'',services:mode()==='https'?selected.filter(s=>services.includes(s)):[]};}
   function valid(){
     $('remote-domain').setCustomValidity('');
@@ -947,6 +954,6 @@ globalThis.PlugArrRemote = (() => {
     rows.forEach(([label,value,secret])=>$('mobile-fields').append(field(label,value||'',secret)));
     $('mobile-copy-status').textContent='';
   }
-  return {english,init,refresh,read,valid,report,mountMobile,buildArrControlExport,buildNzb360Export,buildQbRemoteServer,buildQbRemoteExport,
+  return {english,init,load,refresh,read,valid,report,mountMobile,buildArrControlExport,buildNzb360Export,buildQbRemoteServer,buildQbRemoteExport,
     javaPreferences,readJavaPreferences,zipStored,zipAes,readZipFiles,inspectNzb360Backup,mergeNzb360,mergeQbRemote,ZipPasswordError,qrMatrix,mergeNzb360Profile};
 })();

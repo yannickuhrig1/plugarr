@@ -131,3 +131,34 @@ for (const cle of ['sshReady', 'sshPrivateHost']) {
 assert.ok(source.includes("result.suggested_host || sshHost"),
   "l'adresse de la machine doit reprendre celle proposee par le test SSH");
 console.log('Retry visible after failure, SSH status translated, suggested host used: OK');
+
+// Demande du 26/09/2026 : en reprise, « Continuer » saute les pages deja connues.
+{
+  const debut = source.indexOf('function repriseDirecte(');
+  const fonction = source.slice(debut, source.indexOf('\n}\n', debut) + 3);
+  const cas = (install_target, existante, choix, existingLocal = false, reprendre = true) => {
+    const ctx = {
+      form: {install_target, reprendre}, remoteExisting: existante, bootstrap: {existing: existingLocal},
+      document: {querySelector: sel => sel.includes('ssh-existing') && choix ? {value: choix} : null},
+    };
+    vm.createContext(ctx); vm.runInContext(fonction, ctx);
+    return vm.runInContext('repriseDirecte()', ctx);
+  };
+  assert.equal(cas('ssh', {services: []}, 'resume'), true, 'reprise SSH : pages sautees');
+  assert.equal(cas('ssh', {services: []}, 'fresh'), false, 'repartir de zero : toutes les pages');
+  assert.equal(cas('ssh', null, null), false, 'serveur neuf : toutes les pages');
+  assert.equal(cas('local', null, null, true), true, 'reprise locale : pages sautees');
+  assert.equal(cas('local', null, null, false), false, 'installation locale neuve : toutes les pages');
+  assert.ok(source.includes('showStep(direct ? 5 : step + 1)'), 'le raccourci doit mener a la verification');
+  console.log('Resume skips known pages, fresh install does not: OK');
+}
+
+// Validation reelle du 26/09/2026 : la reprise perdait les pays du VPN.
+{
+  const debut = source.indexOf('function applyRemoteExisting(');
+  const corps = source.slice(debut, source.indexOf('\n}\n', debut));
+  const vide = corps.indexOf("$('vpn-places').replaceChildren()");
+  assert.ok(vide > 0 && vide < corps.indexOf('updatePlaces()'),
+    'la liste des pays doit etre videe avant d etre reconstruite depuis le reglage repris');
+  console.log('Resumed VPN countries rebuilt from the resumed setting: OK');
+}

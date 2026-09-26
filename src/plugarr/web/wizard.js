@@ -34,6 +34,7 @@ const EN = {
   updatesTitle:'Available updates', updatesLoading:'Looking for newer versions…', updatesNone:'Every application is on its latest version.', updatesUnchecked:'Not checked', updatesKept:'PlugArr installs the versions it has tested; these updates are then applied from the console.',
   sshMajor:'major version: one-way migration', sshExistingTitle:'PlugArr is already installed on this server', sshExistingResume:'Resume its configuration: applications, VPN and passwords', sshExistingFresh:'Start from scratch: default settings, nothing is reused', sshUpgrade:'Move to the versions tested by this PlugArr release', sshUpgradeHelp:'Without this box, each application keeps its current version.',
   resumeSkipped:'Settings resumed: the Folders, VPN, Quality and Access steps were skipped. Use Back to change them.',
+  sshConsolePassword:'Generate a new password for the administration console', consoleKept:'unchanged (set by a previous installation)', consoleKeptHelp:'Console password unchanged. To set a new one: run the wizard again with “Generate a new password” ticked, or run “plugarr admin-password” in the plugarr-console container.',
   sshReady:'SSH connection ready.', sshExisting:'PlugArr stack found on the server: its settings are resumed.', sshPrivateHost:'The SSH address does not belong to the server (translated public IP): machine address set to {host}.',
   resumeOrigin:'Previous installation', resumedSettings:'Settings resumed', resumedServices:'Credentials resumed', freshInstall:'Fresh configuration selected.', resetCandidates:'Existing settings concerned', resetEnabled:'These settings will be removed immediately before installation.', resetDisabled:'These settings will be kept.',
   puid:'PUID', pgid:'PGID', umask:'UMASK', address:'Address', projectPath:'Project path', envFile:'.env file',
@@ -45,6 +46,7 @@ const FR = {
   updatesTitle:'Mises à jour disponibles', updatesLoading:'Recherche des versions plus récentes…', updatesNone:'Toutes les applications sont dans leur dernière version.', updatesUnchecked:'Non vérifiées', updatesKept:'PlugArr installe les versions qu’il a testées ; ces mises à jour se font ensuite depuis la console.',
   sshMajor:'version majeure : migration sans retour', sshExistingTitle:'PlugArr est déjà installé sur ce serveur', sshExistingResume:'Reprendre sa configuration : applications, VPN et mots de passe', sshExistingFresh:'Repartir de zéro : réglages par défaut, rien n’est réutilisé', sshUpgrade:'Passer aux versions testées par cette version de PlugArr', sshUpgradeHelp:'Sans cette case, chaque application garde sa version actuelle.',
   resumeSkipped:'Réglages repris : les étapes Dossiers, VPN, Qualité et Accès ont été passées. Utilisez Retour pour les modifier.',
+  sshConsolePassword:'Générer un nouveau mot de passe pour la console d’administration', consoleKept:'inchangé (défini lors d’une installation précédente)', consoleKeptHelp:'Mot de passe de la console inchangé. Pour en définir un nouveau : relancez l’assistant en cochant « Générer un nouveau mot de passe », ou lancez « plugarr admin-password » dans le conteneur plugarr-console.',
   sshReady:'Connexion SSH prête.', sshExisting:'Pile PlugArr trouvée sur le serveur : ses réglages sont repris.', sshPrivateHost:'L’adresse SSH n’appartient pas au serveur (IP publique traduite) : adresse de la machine réglée sur {host}.',
   sshRemoteBadge:'SSH DISTANT', qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée', consoleShort:'Console en conteneur',
   services:'Applications', folders:'Dossiers', vpn:'VPN', quality:'Qualité', review:'Vérification', installation:'Installation', arr:'Automatisation', download:'Téléchargements', media:'Médiathèques', ui:'Interfaces', selected:'applications sélectionnées', dependencies:'dépendances', plannedLinks:'liens à configurer', defaultProfile:'Défaut PlugArr', profile:'Profil',
@@ -407,6 +409,7 @@ function readFields() {
     const choix = document.querySelector('input[name="ssh-existing"]:checked');
     form.reprendre = Boolean(remoteExisting) && (choix ? choix.value === 'resume' : true);
     form.upgrade_images = form.reprendre && Boolean($('ssh-upgrade')?.checked);
+    form.new_console_password = form.reprendre && Boolean($('ssh-console-password')?.checked);
   }
 }
 
@@ -518,6 +521,8 @@ function renderExistingChoice(result) {
   const changes = result.version_changes || [];
   $('ssh-upgrade').checked = false;
   $('ssh-upgrade-box').hidden = !changes.length;
+  $('ssh-console-password').checked = false;
+  $('ssh-console-password-box').hidden = !remoteExisting.console_enabled;
   $('ssh-upgrade-list').replaceChildren(...changes.map(item =>
     E('li', `${item.name} : ${item.installed} → ${item.tested}${item.major ? ` (${tr('sshMajor')})` : ''}`)));
 }
@@ -528,6 +533,8 @@ function chooseExisting(value) {
   else applyRemoteExisting(remoteProbe?.fresh_form || bootstrap.form, false);
   $('ssh-upgrade-box').hidden = value !== 'resume' || !(remoteProbe?.version_changes || []).length;
   if (value !== 'resume') $('ssh-upgrade').checked = false;
+  $('ssh-console-password-box').hidden = value !== 'resume' || !remoteExisting.console_enabled;
+  if (value !== 'resume') $('ssh-console-password').checked = false;
 }
 
 // Demande du 26/09/2026 : en reprise, les pages Dossiers, VPN, Qualite et
@@ -927,6 +934,16 @@ function renderReport(report) {
     for (const value of [service.username, service.password, service.api_key]) { const cell = E('td'); cell.append(E('code', value)); row.append(cell); }
     return row;
   });
+  if (report.console_url && report.console_password_kept) {
+    const row = E('tr');
+    row.append(E('th', tr('consoleAdministration')));
+    const urlCell = E('td');
+    const link = E('a', report.console_url);
+    link.href = report.console_url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    urlCell.append(link);
+    row.append(urlCell, E('td', '—'), E('td', tr('consoleKept')), E('td', '—'));
+    rows.push(row);
+  }
   if (report.console_url && report.console_password) {
     const row = E('tr');
     row.append(E('th', tr('consoleAdministration')));
@@ -942,7 +959,8 @@ function renderReport(report) {
   }
   $('report-services').replaceChildren(...rows);
   $('env-path').textContent = `${tr('envFile')} : ${report.env_path}`;
-  $('next-steps').replaceChildren(...report.next_steps.map(item => E('li', item)));
+  const etapes = [...report.next_steps, ...(report.console_url && report.console_password_kept ? [tr('consoleKeptHelp')] : [])];
+  $('next-steps').replaceChildren(...etapes.map(item => E('li', item)));
 }
 
 function renderUpdates(data) {

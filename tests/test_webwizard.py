@@ -1423,3 +1423,45 @@ def test_la_reprise_ne_change_de_version_que_sur_demande(server, monkeypatch, mo
         else {"sonarr": "lscr.io/linuxserver/sonarr:4.0.19", "jellyfin": "lscr.io/linuxserver/jellyfin:10.11.11"}
     )
     assert {sid: pile["services"][sid]["image"] for sid in attendu} == attendu
+
+
+@pytest.mark.parametrize("nouveau", [False, True])
+def test_la_reprise_garde_ou_remplace_le_mot_de_passe_de_la_console(server, monkeypatch, nouveau):
+    """Validation reelle du 26/09/2026 : en reprise, l'ancien mot de passe etait
+    garde en silence et le rapport n'en disait rien ; la console restait fermee."""
+    srv, client = server
+    srv.state.demo = False
+    ancienne = orchestrator.build_config(
+        services=["sonarr"], config_root="/home/ubuntu/plugarr/config",
+        data_root="/home/ubuntu/data", host="10.0.0.30",
+    )
+    ancienne.console_enabled = True
+    ancienne.admin_password_hash = adminauth.hash_password("ancien-mot-de-passe")
+    monkeypatch.setattr(
+        remote_install, "probe",
+        lambda *_a, **_k: remote_install.RemoteProbe(
+            fingerprint="SHA256:vps", system="Linux", machine="aarch64",
+            uid=1001, gid=1001, home="/home/ubuntu", docker_version="29.1.3",
+        ),
+    )
+    monkeypatch.setattr(
+        remote_install, "inspect_project",
+        lambda *_a, **_k: remote_install.RemoteProjectState(
+            exists=True, managed=True, stack_sha="x", stack_yaml=compose.render_stack(ancienne)
+        ),
+    )
+    resultat = client.post(
+        "/api/remote-install/probe",
+        json={"host": "203.0.113.10", "port": 22, "username": "ubuntu", "private_key": "cle"},
+    ).json()
+
+    pile = _deployer(srv, client, monkeypatch, resultat, reprendre=True, new_console_password=nouveau)
+    rapport = client.get("/api/report").json()
+
+    garde = adminauth.verify_password("ancien-mot-de-passe", pile["admin_password_hash"])
+    assert garde is (not nouveau)
+    assert rapport["console_password_kept"] is (not nouveau)
+    assert bool(rapport["console_password"]) is nouveau
+    if nouveau:
+        assert adminauth.verify_password(rapport["console_password"], pile["admin_password_hash"])
+

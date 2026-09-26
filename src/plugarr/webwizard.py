@@ -114,6 +114,9 @@ class WizardInput(BaseModel):
     #: est plus recente que celle installee. Sans cela, chaque application garde
     #: la sienne, ce qui reste le comportement par defaut.
     upgrade_images: bool = False
+    #: Reprise seulement : remplacer le mot de passe de la console, qui n'est
+    #: affiche qu'une fois, dans le rapport de l'installation qui l'a cree.
+    new_console_password: bool = False
 
 
 class RemoteSSHInput(BaseModel):
@@ -1216,6 +1219,11 @@ class WizardState:
                 else ""
             ),
             "console_password": self.console_password if self.install_target == "ssh" else "",
+            "console_password_kept": bool(
+                self.install_target == "ssh"
+                and self.cfg.console_enabled
+                and not self.console_password
+            ),
             "can_indexers": self.cfg.enabled("prowlarr") and self.install_target != "ssh",
             "demo": self.demo,
             "remote": self.remote_result or remote_access.summary(self.cfg, demo=self.demo),
@@ -1436,7 +1444,14 @@ class WizardState:
             form = WizardInput.model_validate(payload)
             cfg = self.build_config(form)
             self.console_password = ""
-            if self.install_target == "ssh" and cfg.console_enabled and not cfg.admin_password_hash:
+            # Validation reelle du 26/09/2026 : en reprise, l'ancien mot de passe
+            # etait garde en silence ; perdu avec le rapport qui l'avait montre,
+            # la console restait fermee. Il se remplace desormais sur demande.
+            if (
+                self.install_target == "ssh"
+                and cfg.console_enabled
+                and (not cfg.admin_password_hash or form.new_console_password)
+            ):
                 self.console_password = secrets.token_urlsafe(24)
                 cfg.admin_password_hash = adminauth.hash_password(self.console_password)
             remote_connection = (

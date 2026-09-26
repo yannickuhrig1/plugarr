@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from plugarr import dashboard, orchestrator
+from plugarr import console_ui, dashboard, orchestrator
 from plugarr.models import PlatformProfile
 
 
@@ -29,6 +29,17 @@ def test_every_installed_service_gets_a_link():
         assert f":{inst.host_port}" in page, sid
 
 
+def test_remote_console_access_page_shows_generated_password():
+    cfg = make()
+    cfg.console_enabled = True
+    cfg.host = "nas.local"
+    password = "test-admin-password"
+    page = dashboard.render(cfg, console_password=password)
+    assert "http://nas.local:7373/" in page
+    assert password in page
+    assert "Administration PlugArr" in page
+
+
 def test_service_cards_use_their_embedded_application_logos():
     page = dashboard.render(make(services=("transmission", "sonarr", "jellyfin")), live=True)
 
@@ -36,6 +47,21 @@ def test_service_cards_use_their_embedded_application_logos():
     assert page.count('src="data:image/svg+xml;base64,') >= 3
     assert '<span class="badge">T</span>' not in page
     assert '<span class="badge">S</span>' not in page
+
+
+def test_live_dashboard_falls_back_when_advanced_skin_cannot_load(monkeypatch):
+    """Les controles essentiels restent accessibles sans l'habillage avance."""
+
+    def fail(_page):
+        raise FileNotFoundError("ressource de console absente")
+
+    monkeypatch.setattr(console_ui, "enhance", fail)
+
+    page = dashboard.render(make(services=("sonarr",)), live=True)
+
+    assert "Votre stack media" in page
+    assert 'data-action="restart"' in page
+    assert "console-nav" not in page
 
 
 def test_services_that_were_not_installed_are_absent():

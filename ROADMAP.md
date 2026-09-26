@@ -9,6 +9,27 @@ séance de travail.
 
 ---
 
+## Diagnostic et reprise d'une pile existante (travail local du 25 septembre)
+
+- [x] `doctor` vérifie les API *arr*, les liaisons testables, le VPN, la capacité
+  de créer un hardlink, l'espace libre et la dérive de `docker-compose.yml`/`.env`.
+- [x] `doctor --repair` explique les corrections de liaison et de port entrant,
+  puis demande confirmation pour chacune. Le diagnostic simple n'applique rien.
+- [x] `adopt --dry-run` expose conteneurs, images, ports, montages et opérations.
+  `--only` limite l'application à des étapes choisies après confirmation.
+- [x] `doctor --deep-hardlinks` confirme les hardlinks déjà présents par inode,
+  sur un échantillon borné, sans confondre absence de preuve et lien cassé.
+- [x] Avant le câblage, `adopt` lit la version des API *arr* et bloque si elles
+  ne répondent pas ou si leurs clés sont refusées.
+- [x] Découverte du port qBittorrent quand sa WebUI est publiée par Gluetun,
+  vérifiée sur l'inventaire en lecture seule d'un hôte Unraid réel.
+- [ ] Vérifier les chemins effectivement vus depuis chaque conteneur et la
+  compatibilité fine des schémas API, au-delà des montages et de `system/status`.
+- [ ] Éprouver ce parcours sur de vrais hôtes Unraid, Synology et UGREEN, puis
+  proposer les réparations assistées dans la page web pour les piles adoptées.
+
+---
+
 ## Ce qui marche aujourd'hui
 
 Seize services installés et **câblés** en une passe, vérifiés contre des
@@ -82,13 +103,13 @@ l'installation initiale**.
 
 Vérifiées contre les registres le 4 septembre 2026, prêtes à être épinglées. Ce
 n'est pas le travail, c'en est la condition préalable : un service n'entre au
-catalogue que **câblé et vérifié** contre une instance réelle. Trois des cinq
-empreintes relevées ce jour-là sont désormais au catalogue : Seerr,
-Audiobookshelf et DroppedNeedle.
+catalogue officiel que **câblé et vérifié** contre une instance réelle. Quatre
+des cinq services étudiés sont désormais présents : Seerr, Audiobookshelf,
+DroppedNeedle et Shelfarr. Shelfarr reste marqué comme intégration de test
+jusqu'à sa validation sur une vraie installation.
 
 | | image épinglée |
 |---|---|
-| Shelfarr | `ghcr.io/pedro-revez-silva/shelfarr:2026.08.31.1@sha256:08e06f5b…` |
 | Shelfmark | `ghcr.io/calibrain/shelfmark:v1.3.15@sha256:96022903…` |
 
 ---
@@ -107,8 +128,10 @@ d'écrire une ligne :
   l'assistant. theme.park est écarté pour la 0.10.0 : mesuré, il ne survit pas
   à un redémarrage sans Internet. Voir « Personnalisation des interfaces ».
 
-**Shelfarr et Shelfmark** suivent : leurs empreintes sont déjà relevées, et
-Audiobookshelf les débloque, puisqu'ils livrent dans ses bibliothèques.
+**Shelfarr est intégré en version de test.** Son Compose, son compagnon
+Libation, ses volumes et ses dépendances sont générés. Il reste à valider le
+démarrage sur une vraie installation et à automatiser ses réglages seulement
+si une API d'accueil publique et stable peut être vérifiée. Shelfmark suit.
 
 ### Ce que la mise à jour du pack a réglé — livré en 0.6.0
 
@@ -191,7 +214,6 @@ une instance réelle. L'ordre ci-dessous est celui de l'étude.
 | **Tautulli** | Suivi et statistiques **Plex**. Ne peut pas précéder Plex. |
 | **Jellystat** | Statistiques Jellyfin. Exige une base **PostgreSQL** dans un second conteneur, là où tout le catalogue tient en un seul. |
 | **Tracearr** | Suivi des lectures et détection de partage de comptes. L'image `latest` réclame une base et un Redis externes ; le tag `supervised` réunit le tout en un conteneur. |
-| **Shelfarr** | `ghcr.io/pedro-revez-silva/shelfarr`, **2026.08.31.1**. Demandes de livres pour l'écosystème *arr — un Seerr des livres. Cherche dans Prowlarr, télécharge par qBittorrent, livre à Audiobookshelf. Comble le trou laissé par Readarr, archivé depuis le 27 juin 2025. |
 | **Shelfmark** | `ghcr.io/calibrain/shelfmark`, **v1.3.15**, 60 versions. Interface de recherche et de demande de livres, sources et clients apportés par vous. |
 | **Whisparr v2 et v3** | Demandé par un utilisateur, en opt-in explicite. **Deux applications distinctes sous un même nom**, pas deux versions : la v2 dérive de Sonarr (un site est une série, une scène un épisode, métadonnées ThePornDB), la v3 « Eros » de Radarr (une scène est un film, métadonnées StashDB). La v3 ne reprend pas une bibliothèque rangée par la v2, d'où l'intérêt d'offrir les deux. Images relevées chez hotio : `ghcr.io/hotio/whisparr`, tags `v2` (2.2.0) et `v3` (3.5.0), **toutes deux sur le port 6969** : il faut en décaler un pour qu'ils cohabitent. Leurs API diffèrent comme celles de Sonarr et Radarr : deux câblages, pas un. À vérifier contre une instance réelle avant d'y croire : que Prowlarr câble les deux (son connecteur vise `/api/v3`, qui est la version de l'API et non celle de Whisparr), que le type `WHISPARR` d'autobrr accepte la v3, et que le pré-semis de `config.xml` tient pour l'une et l'autre. |
 | **Deluge** | Demandé à l'usage. Troisième client BitTorrent, à côté de Transmission et de qBittorrent. Image relevée chez linuxserver : `lscr.io/linuxserver/deluge`, tag `2.2.0` (24/08/2026), avec une **seconde ligne `libtorrentv1`** (`libtorrentv1-2.2.0-ls62`, 07/09/2026) : deux bibliothèques libtorrent pour la même version de Deluge, il faudra choisir laquelle on épingle et écrire pourquoi. Interface web sur **8112**, mot de passe par défaut `deluge` — aucun heurt de port avec les clients déjà au catalogue. Le piège est ailleurs : les *arr exigent que **les greffons WebUI ET Label soient actifs**, et sans Label il n'y a aucune catégorie, donc aucun suivi des téléchargements. C'est le même angle mort que les répertoires vides des catégories SABnzbd, et il se traite au pré-semis, pas dans une note de README. À vérifier contre une instance réelle avant d'y croire : que le connecteur *arr s'authentifie par mot de passe SEUL, sans identifiant, contrairement à Transmission et qBittorrent ; que le greffon Label s'active depuis un fichier de configuration et pas seulement depuis l'interface ; et ce que Deluge fait du port entrant, car `port_sync_clients` ne rend aujourd'hui qu'**un** client (qBittorrent prioritaire) et Deluge devra soit y entrer, soit être explicitement exclu du port entrant plutôt que de l'être par omission. |

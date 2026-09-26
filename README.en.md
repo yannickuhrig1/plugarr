@@ -157,9 +157,28 @@ On launch, PlugArr offers the web wizard, which opens in your browser, or the
 terminal, and can remember that choice. `.\plugarr.exe --interface web` or
 `--interface tui` picks one directly.
 
-Docker Desktop is the only requirement. The executable ships its own interpreter: it runs
-without Python installed, which was verified by launching it with an emptied `PATH`.
-28 MB, roughly three seconds to start.
+For a local installation, Docker Desktop is the only requirement. The
+executable ships its own interpreter: it runs without Python installed, which
+was verified by launching it with an emptied `PATH`.
+
+### Install on a server or NAS from Windows
+
+The first page of the web wizard offers **On this computer** or **On a server
+or NAS**. For a remote target, enter its address, SSH port and user, then use a
+password or a private-key file. PlugArr then:
+
+1. displays the SSH fingerprint for confirmation;
+2. checks Linux, Docker and the remote account UID/GID without installing;
+3. proposes server-side paths;
+4. uploads `stack.yml`, then runs the installation through the PlugArr admin
+   image and the server's Docker socket;
+5. streams progress back into the same web wizard.
+
+Docker must already work for that user on the server. Python, `pip`, `pipx` and
+PlugArr do not need to be installed there. The SSH password and key stay in the
+EXE's memory until the wizard closes; they are written neither to `stack.yml`
+nor to the report. An optional `sudo` password supports NAS folders such as
+root-owned `/volume1` without changing existing directories.
 
 Windows SmartScreen may warn you on first launch: the binary is not signed, and a code
 signing certificate costs several hundred euros a year. "More info", then "Run anyway".
@@ -390,12 +409,32 @@ by hand over the years, PlugArr can **wire them without recreating anything**:
 
 ```bash
 plugarr scan     # what is detected on this machine, without writing anything
-plugarr adopt --data-root /mnt/user/medias --config-root /mnt/user/appdata
+plugarr adopt --data-root /mnt/user/medias --config-root /mnt/user/appdata --dry-run
+plugarr adopt --data-root /mnt/user/medias --config-root /mnt/user/appdata --only prowlarr/application/sonarr
 ```
 
 It reads the API keys from your containers' `config.xml` files, then sets up the same links
 as `install`. **No container is started, stopped or recreated**, and no `docker-compose.yml`
 is generated: those services do not belong to it.
+The report lists images, ports, data mounts, and planned operations. Repeat
+`--only` to choose specific wiring steps; applying them requires confirmation.
+Mounts alone cannot prove that existing files are hardlinked.
+An existing stack may share `/downloads` without mounting `/data`: PlugArr
+reports this but does not claim to have checked the paths actually used by
+applications or the hardlinks. Likewise, sharing a Docker network namespace
+with Gluetun is reported as observed topology, not proof of VPN leak protection
+or the egress IP.
+Before wiring, `adopt` reads the selected *arr* APIs and reports their versions;
+it stops without writing if an API is unreachable or rejects its key. `--dry-run`
+also checks the APIs without writing.
+
+`plugarr doctor` also checks *arr connections and reports divergence between
+`docker-compose.yml` and `stack.yml` without displaying secrets. It explains
+the proposed fixes. `plugarr doctor --repair` offers them one at a time and
+asks before applying each; a plain diagnosis does not change the stack.
+`plugarr doctor --deep-hardlinks` inspects up to 20,000 existing files under
+`torrents/` and `media/` without changing them, confirming links that share an
+inode. No match is inconclusive, not proof of a broken import.
 
 Three principles, learned by testing it against a real stack:
 
@@ -579,7 +618,7 @@ port on qBittorrent or Transmission from inside the tunnel.
 drifted.** Same requirement as for wiring: we do not say "the port has been set",
 we read the value back and compare. The verdict is **separate** from the
 protection one, because a desynchronised port costs sharing and not exposure —
-and it never blocks. `plugarr doctor` no longer merely reports it: it replays the
+and it never blocks. After confirmation, `plugarr doctor --repair` can replay the
 very script Gluetun runs, then **reads back** before concluding. That covers the
 single blind spot of an event-driven mechanism — a client recreated between two
 port attributions gets no call at all.
@@ -690,7 +729,14 @@ business. See [DISCLAIMER.en.md](DISCLAIMER.en.md).
 
 Prowlarr · Sonarr · Radarr · **Lidarr** · Transmission · **qBittorrent** · **SABnzbd**
 · Jellyfin · **Seerr** · **Audiobookshelf** · **DroppedNeedle** · **Silo** *(experimental)*
-· autobrr · Recyclarr · Gluetun *(optional VPN)* · Flood and qui *(optional UIs)*
+· **Shelfarr** *(test integration)* · autobrr · Recyclarr · Gluetun *(optional VPN)*
+· Flood and qui *(optional UIs)*
+
+Shelfarr also installs its official Libation companion, without a public port
+and idle until Audible Backup is enabled. Prowlarr, Audiobookshelf and one
+download client are added automatically. After the first start, the first
+Shelfarr account becomes administrator and finishes these connections in its
+settings. This step remains manual until a public setup API has been verified.
 
 Tested versions: see [docs/COMPATIBILITY.en.md](docs/COMPATIBILITY.en.md).
 
@@ -724,7 +770,7 @@ Services still under consideration:
 | **Tautulli** | **Plex** monitoring and statistics. It therefore cannot come before Plex, which is already above: without a Plex token, it has nothing to watch. |
 | **Jellystat** | Jellyfin statistics. Known obstacle: the service requires a **PostgreSQL** database in a second container, where the entire current catalogue fits in one. `JS_USER` / `JS_PASSWORD` do give hope of pre-seeding the credentials, though. |
 | **Tracearr** | Playback tracking and account sharing detection, for Plex, Jellyfin and Emby. The `latest` image demands an external database and Redis; the `supervised` tag bundles everything into one container, and that is the one to verify. |
-| **Shelfmark**, **Shelfarr** | Books and audiobooks, next to Audiobookshelf which is already in the catalogue. |
+| **Shelfmark** | Books and audiobooks, next to Shelfarr and Audiobookshelf which are already in the catalogue. |
 
 A service only enters the catalogue once it is **wired and verified** against a real
 instance. See [PROMPT.md](PROMPT.md) for the detail.

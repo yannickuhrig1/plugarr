@@ -11,17 +11,17 @@ from .models import Category, ServiceSpec
 
 # Tags epingles. A remonter via une PR dediee + un passage de la CI d'integration.
 _TAGS = {
-    "sonarr": "4.0.19",
-    "radarr": "6.3.0",
-    "prowlarr": "2.5.2",
+    "sonarr": "4.0.20",
+    "radarr": "6.4.4",
+    "prowlarr": "2.6.5",
     "transmission": "4.1.3",
     "qbittorrent": "5.2.3",
     "lidarr": "3.1.0",
-    "jellyfin": "10.11.11",
-    "flood": "4.16.1",
-    "autobrr": "v1.85.0",
-    "qui": "v1.28.0",
-    "recyclarr": "8.7.1",
+    "jellyfin": "12.1ubu2604-ls50",
+    "flood": "4.16.2",
+    "autobrr": "v1.87.0",
+    "qui": "v1.30.0",
+    "recyclarr": "8.7.2",
 }
 
 #: VueTorrent, interface de remplacement de qBittorrent, pose par le chargeur de
@@ -38,16 +38,16 @@ VUETORRENT_MOD = (
 #: les pieds de celui qui la regarde. Le digest est celui de l'INDEX multi
 #: architecture, donc valable pour amd64 comme pour arm64.
 VEILLE_IMAGE = (
-    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.4"
-    "@sha256:063d2344e1b7927348088233a00f0949c31b74aba7fe9d1170241fb27445460c"
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-stack7-preview.2"
+    "@sha256:2c3e0fe967b7fa1ab7476406287d8dac330a8b6f5932df6ff71a3db051230db4"
 )
 
 #: La meme PlugArr, variante `admin` : elle porte le client Docker et le
 #: greffon compose, que la console appelle. Tag DISTINCT, pour qu'elle ne soit
 #: jamais prise pour celle de la veille, qui n'a aucun client Docker.
 CONSOLE_IMAGE = (
-    "ghcr.io/yannickuhrig1/plugarr:0.10.0-veille-preview.4-admin"
-    "@sha256:c656aeb3f5371217965f958423f224dbd256bdea5f17c60309d0b7ccca4be48b"
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-stack7-preview.2-admin"
+    "@sha256:9f447a4a3b64ee1275802106c107850a1e834d8048a1927b36701fa906c62d08"
 )
 
 #: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et
@@ -71,14 +71,14 @@ SOCKET_PROXY_IMAGE = (
 #: contenu. Sans digest, deux installations du meme jour peuvent differer.
 #: DroppedNeedle, anciennement MusicSeerr.
 _DROPPEDNEEDLE = (
-    "ghcr.io/droppedneedle/droppedneedle:v2.9.0"
-    "@sha256:4687b3913ef07645dfa392cc03002ba0a6f4f07d32801065c533ecd08c5f2a82"
+    "ghcr.io/droppedneedle/droppedneedle:v2.15.0"
+    "@sha256:6d58d829cc5aa29e5de95933ba1ce46f249ccf7ef3ed437c643231b771d711c5"
 )
 
 #: SABnzbd. Image LinuxServer : nos conventions exactes.
 _SABNZBD = (
-    "lscr.io/linuxserver/sabnzbd:5.1.2"
-    "@sha256:64c4c2b6ed546237451cbfec33aa8bac1396865c1a266dd247c02b36ffe27c62"
+    "lscr.io/linuxserver/sabnzbd:5.1.3"
+    "@sha256:4f7ee6c53834bc336365bd0a7c35f4fc870156a72d33a334753010258aa077a4"
 )
 
 #: Seerr, successeur commun de Jellyseerr et d'Overseerr.
@@ -89,8 +89,28 @@ _SEERR = (
 
 #: Audiobookshelf. 128 versions publiees : il s'epingle sans exception.
 _AUDIOBOOKSHELF = (
-    "ghcr.io/advplyr/audiobookshelf:2.36.0"
-    "@sha256:180acad33d69c99ed208676465d8edcb268fa46967735579a7810859885b1a8e"
+    "ghcr.io/advplyr/audiobookshelf:2.36.1"
+    "@sha256:3528a93b6442ffe54bd46771bbbab7c97084e1101071586d9dc2254f30bb4358"
+)
+
+#: Shelfarr et son compagnon Libation doivent toujours avancer ensemble. Les
+#: deux condensats sont ceux des INDEX multi-architecture 2026.09.18.1 publies
+#: par le projet, donc valables sur amd64 comme sur arm64.
+_SHELFARR = {
+    "shelfarr": (
+        "ghcr.io/pedro-revez-silva/shelfarr:2026.09.18.1"
+        "@sha256:a7afa12a4c0dd8befb96c83a11a6b7f9f90b95f55f066f6067e7a9d054279864"
+    ),
+    "libation": (
+        "ghcr.io/pedro-revez-silva/shelfarr-libation:2026.09.18.1"
+        "@sha256:f3e7b166f99d89c7c5a3d325652a864816ace7836ac401a2af5c7254400434af"
+    ),
+}
+
+_SHELFARR_AVERTISSEMENT = (
+    "Integration de test fondee sur le Compose officiel 2026.09.18.1. "
+    "La sauvegarde Audible est encore beta chez Shelfarr et reste desactivee "
+    "tant qu'un administrateur ne la configure pas."
 )
 
 _SILO = {
@@ -262,6 +282,45 @@ CATALOG: dict[str, ServiceSpec] = {
         api_family="audiobookshelf",
         notes="Livres et livres audio. Remplit les bibliotheques books et audiobooks.",
     ),
+    "shelfarr-libation": ServiceSpec(
+        id="shelfarr-libation",
+        display_name="Libation (Shelfarr)",
+        category=Category.MEDIA,
+        image=_SHELFARR["libation"],
+        # Le port 8080 reste prive au reseau Compose. Publier le pont de
+        # controle exposerait inutilement son jeton et son interface interne.
+        internal_port=0,
+        default_host_port=0,
+        config_dir=None,
+        named_volumes=(
+            ("shelfarr-libation-config", "/config"),
+            ("shelfarr-libation-books", "/data"),
+            ("shelfarr-libation-control", "/control"),
+        ),
+        internal=True,
+        experimental=_SHELFARR_AVERTISSEMENT,
+        notes="Compagnon interne de sauvegarde Audible. Inactif par defaut.",
+    ),
+    "shelfarr": ServiceSpec(
+        id="shelfarr",
+        display_name="Shelfarr",
+        category=Category.MEDIA,
+        image=_SHELFARR["shelfarr"],
+        internal_port=80,
+        default_host_port=5056,
+        config_dir="shelfarr",
+        # Une selection Shelfarr produit une chaine exploitable, pas une page
+        # vide : indexeurs, bibliotheque, compagnon officiel et au moins un
+        # client. L'utilisateur termine ensuite le premier compte admin dans
+        # Shelfarr, dont aucune API d'accueil publique n'est documentee.
+        requires=("shelfarr-libation", "prowlarr", "audiobookshelf"),
+        requires_one_of=("qbittorrent", "transmission", "sabnzbd"),
+        experimental=_SHELFARR_AVERTISSEMENT,
+        notes=(
+            "Livres et livres audio : recherche, telechargement, rangement et "
+            "bibliotheque Audiobookshelf. Le premier compte cree devient admin."
+        ),
+    ),
     "silo-postgres": ServiceSpec(
         id="silo-postgres",
         display_name="PostgreSQL (Silo)",
@@ -391,6 +450,11 @@ STARTUP_ORDER = (
     # Audiobookshelf ne depend de personne : il lit des dossiers. Sa place ici
     # est celle de l'affichage, a cote des autres serveurs media.
     "audiobookshelf",
+    # Le compagnon officiel reste invisible dans l'assistant mais doit etre
+    # genere avant Shelfarr. Il reste inactif tant que l'admin n'active pas
+    # explicitement la sauvegarde Audible.
+    "shelfarr-libation",
+    "shelfarr",
     # DroppedNeedle apres SABnzbd, qu'il declare.
     "droppedneedle",
     # Seerr APRES Jellyfin et les *arr : son accueil s'authentifie contre le

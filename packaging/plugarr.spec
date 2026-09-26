@@ -19,6 +19,7 @@
 # Verifie sur l'executable produit : la feuille de style chargee, les 16
 # services affiches, et une installation complete de bout en bout.
 
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -29,13 +30,22 @@ ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 
 textual_datas, textual_binaries, textual_hidden = collect_all("textual")
+# `collect_all` rend des listes vides, sans erreur, si le paquet manque. Build
+# reel du 25/09/2026 : compile depuis un venv sans paramiko, l'executable
+# echouait des le premier test SSH de l'assistant. On refuse de compiler.
+if importlib.util.find_spec("paramiko") is None:
+    raise SystemExit(
+        "paramiko absent de l'environnement de build : installez le projet "
+        "(pip install -e .) avant de lancer PyInstaller."
+    )
+paramiko_datas, paramiko_binaries, paramiko_hidden = collect_all("paramiko")
 # Windows n'embarque pas la base IANA necessaire a zoneinfo.
 tz_datas, tz_binaries, tz_hidden = collect_all("tzdata") if sys.platform == "win32" else ([], [], [])
 
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(SRC)],
-    binaries=[*textual_binaries, *tz_binaries],
+    binaries=[*textual_binaries, *paramiko_binaries, *tz_binaries],
     datas=[
         (str(SRC / "plugarr" / "tui" / "app.tcss"), "plugarr/tui"),
         # Les pays, regions et villes acceptes par chaque fournisseur VPN. Sans
@@ -55,10 +65,12 @@ a = Analysis(
         (str(SRC / "plugarr" / "web" / "admin-graph.js"), "plugarr/web"),
         (str(SRC / "plugarr" / "web" / "graph.css"), "plugarr/web"),
         *textual_datas,
+        *paramiko_datas,
         *tz_datas,
     ],
     hiddenimports=[
         *textual_hidden,
+        *paramiko_hidden,
         *tz_hidden,
         # Importes tardivement dans le code : PyInstaller ne peut pas les voir.
         "plugarr.webwizard",
@@ -88,7 +100,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="plugarr",
+    name=os.environ.get("PLUGARR_EXE_NAME", "plugarr"),
     # L'executable n'avait aucune icone : Windows lui collait celle, generique,
     # de tout binaire console. `assets/plugarr.ico` porte sept tailles, de 16 a
     # 256 px — voir scripts/icone.py, qui l'engendre depuis le visuel d'origine.

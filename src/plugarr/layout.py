@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -327,7 +328,12 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
 #: creait le dossier en root et Recyclarr se faisait jeter a l'ecriture. Il
 #: n'avait alors aucune interface pour le dire : seule une synchronisation en
 #: echec, sans cause lisible.
-SANS_PUID = frozenset({"seerr", "recyclarr"})
+#:
+#: Flood ne lit pas davantage PUID/PGID et son image ne demarre pas en root pour
+#: corriger le volume. Le conteneur recoit donc `user:` dans le compose et son
+#: dossier doit appartenir a ce meme compte, y compris quand une installation
+#: anterieure l'a deja cree sous root.
+SANS_PUID = frozenset({"seerr", "recyclarr", "flood"})
 
 
 def create_tree(
@@ -353,21 +359,25 @@ def create_tree(
     appartient a root — donnait une pile qui demarre et qui ne telecharge rien.
     Les images reprennent leur configuration, jamais les donnees.
 
-    Les dossiers DEJA presents ne sont pas repris : un `chown -R` sur une
-    mediatheque de plusieurs tera serait long, et ce n'est pas a une
-    installation de redistribuer ce qu'elle n'a pas cree.
+    Le CONTENU des dossiers deja presents n'est jamais repris : un `chown -R`
+    sur une mediatheque de plusieurs tera serait long, et ce n'est pas a une
+    installation de redistribuer ce qu'elle n'a pas cree. En revanche, chaque
+    dossier attendu qui appartient encore a root est repare individuellement.
+    Cela reprend sans danger une premiere installation `sudo` interrompue sur
+    UGOS, sans parcourir ni modifier les fichiers qu'elle contient.
     """
     created: list[Path] = []
     data_root, config_root = Path(data_root), Path(config_root)
+    data_root.mkdir(parents=True, exist_ok=True)
+    if owner is not None:
+        _reparer_dossier_donnees(data_root, owner)
     for sub in DATA_SUBDIRS:
         p = data_root / sub
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
             created.append(p)
-            if owner is not None:
-                # Tout juste cree, donc vide : le parcours de `_donner` ne coute
-                # rien et n'atteint aucun fichier de l'utilisateur.
-                _donner(p, owner)
+        if owner is not None:
+            _reparer_dossier_donnees(p, owner)
     for sid in service_ids:
         spec = catalog.CATALOG.get(sid)
         # On cree le dossier que le compose MONTE, pas un dossier portant le nom
@@ -391,6 +401,33 @@ def _est_root() -> bool:
     import os
 
     return os.name == "posix" and os.geteuid() == 0
+
+
+def _reparer_dossier_donnees(dossier: Path, owner: tuple[int, int]) -> None:
+    """Reprend un dossier root sans toucher a ce qu'il contient.
+
+    UGOS impose souvent de lancer l'installation avec ``sudo``. Une premiere
+    tentative interrompue peut donc laisser l'arborescence `/data` a root ; la
+    relance la trouvait deja presente et Sonarr/Radarr ne pouvaient pas y creer
+    leurs dossiers racines. On corrige uniquement les repertoires connus de
+    PlugArr, uniquement s'ils appartiennent encore a root, et jamais de facon
+    recursive. Un lien symbolique est ignore pour ne pas changer sa cible.
+    """
+    if not _est_root():
+        return
+    if not stat.S_ISDIR(os.stat(dossier, follow_symlinks=False).st_mode):
+        return
+    options = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    descripteur = os.open(dossier, options)
+    try:
+        informations = os.fstat(descripteur)
+        if not stat.S_ISDIR(informations.st_mode) or informations.st_uid != 0:
+            return
+        os.fchown(descripteur, *owner)
+        droits = stat.S_IMODE(informations.st_mode) | 0o770
+        os.fchmod(descripteur, droits)
+    finally:
+        os.close(descripteur)
 
 
 def _donner(dossier: Path, owner: tuple[int, int]) -> None:
@@ -457,7 +494,17 @@ def hardlink_supported(data_root: str | Path) -> tuple[bool, str]:
                 erreur=exc,
             )
 
-        fd, src = tempfile.mkstemp(dir=src_dir, prefix=".plugarr-hardlink-")
+        try:
+            fd, src = tempfile.mkstemp(dir=src_dir, prefix=".plugarr-hardlink-")
+        except OSError as exc:
+            # Essai reel du 25/09/2026 : la console en conteneur monte DATA_ROOT
+            # en lecture seule, et cette exception faisait planter `doctor` et le
+            # bouton de diagnostic de la console au lieu de rendre un controle.
+            return False, t(
+                "test des hardlinks impossible : {source} n'accepte pas d'ecriture ici ({erreur}).",
+                source=src_dir,
+                erreur=exc,
+            )
         os.close(fd)
         dst = dst_dir / (Path(src).name + ".link")
         try:

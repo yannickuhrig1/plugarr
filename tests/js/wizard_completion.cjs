@@ -30,7 +30,7 @@ const estimates=source.slice(source.indexOf('function profileEstimate('),source.
 const renderer=source.slice(source.indexOf('function renderProgress('),source.indexOf('async function poll('));
 function scenario(demo,status){
   const elements={};let opens=0,loads=0;
-  const context={demoAdminOpened:false,postInstallLoaded:false,displayGraph:()=>{},tr:x=>x,openAdmin:()=>opens++,
+  const context={demoAdminOpened:false,postInstallLoaded:false,reportData:null,displayGraph:()=>{},tr:x=>x,openAdmin:()=>opens++,
     loadPostInstall:()=>{loads++;return Promise.resolve();},error:()=>{},
     $:id=>elements[id]??=( {replaceChildren:()=>{}} ),E:()=>({append:()=>{}})};
   vm.createContext(context);vm.runInContext(renderer,context);
@@ -69,8 +69,34 @@ const reportRenderer=source.slice(source.indexOf('function renderReport('),sourc
   assert.equal(row.children.length,5);
   assert.equal(row.children[1].children[0].href,'http://plugarr.test:8989');
   assert.deepEqual(row.children.slice(2).map(cell=>cell.children[0].textContent),['u','p','k']);
+  context.renderReport({remote_install:true,console_url:'http://plugarr.test:7373/',console_password:'admin-secret',services:[],env_path:'/srv/plugarr/.env',next_steps:[]});
+  const adminRow=elements['report-services'].children[0];
+  assert.equal(adminRow.children.length,5);
+  assert.equal(adminRow.children[1].children[0].href,'http://plugarr.test:7373/');
+  assert.equal(adminRow.children[3].children[0].textContent,'admin-secret');
 }
 console.log('Final access report layout OK');
+
+// A Prowlarr failure must not hide the access file, mobile forms or report.
+const postInstallSource=source.slice(source.indexOf('async function loadPostInstall('),source.indexOf('function renderProgress('));
+{
+  const elements={},report={can_indexers:true};let rendered=false,updates=false;
+  const context={tr:key=>key,renderReport:value=>{rendered=value===report;},
+    // Les mises a jour se chargent APRES le rapport, sans le retarder.
+    loadUpdates:()=>{assert(rendered,'le rapport doit etre affiche avant');updates=true;},
+    renderIndexerOverview:()=>assert.fail('Indexer lookup should have failed'),
+    api:async path=>path==='/api/report'?report:Promise.reject(new Error('HTTP 401')),
+    $:id=>elements[id]??={hidden:true,textContent:''}};
+  vm.createContext(context);vm.runInContext(postInstallSource,context);
+  context.loadPostInstall().then(()=>{
+    assert(rendered);
+    assert(updates,'les mises a jour disponibles doivent etre recherchees');
+    assert.equal(elements['access-page'].hidden,false);
+    assert.equal(elements['download-access'].hidden,false);
+    assert.equal(elements['indexer-panel'].hidden,false);
+    assert.match(elements['indexer-overview'].textContent,/401/);
+  }).catch(error=>{throw error;});
+}
 
 // The real opener preserves the wizard, including popup blocking and retry.
 const opener=source.slice(source.indexOf('async function openAdmin('),source.indexOf('async function openAccessPage('));
@@ -78,7 +104,7 @@ async function openingScenario(blocked=false,failed=false){
   const events=[],elements={};let resolve;
   const pending=new Promise(r=>resolve=r);
   const page={closed:false,document:{body:{}},location:{replace:url=>events.push(['navigate',url])},close:()=>events.push(['close'])};
-  const context={adminOpening:false,adminUrl:null,tr:x=>x,$:id=>elements[id]??={},
+  const context={adminOpening:false,adminUrl:null,reportData:null,tr:x=>x,$:id=>elements[id]??={},
     window:{open:(...args)=>{events.push(['open',...args]);return blocked?null:page;}},
     api:async()=>{events.push(['request']);await pending;if(failed)throw new Error('offline');return {url:'http://127.0.0.1:9999/?t=demo'};},
     error:message=>events.push(['error',message]),location:{assign:()=>assert.fail('Must keep wizard open')}};

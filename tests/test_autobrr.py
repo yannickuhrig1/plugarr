@@ -109,8 +109,8 @@ def test_applications_and_clients_share_one_endpoint(service_id, expected):
     """autobrr ne distingue pas les deux : seul le `type` change."""
     client = FakeClient(
         {
-            "GET /api/download_clients": FakeResponse(200, []),
-            "POST /api/download_clients": FakeResponse(201, {"id": 1}),
+            "GET /api/downloaders": FakeResponse(200, []),
+            "POST /api/downloaders": FakeResponse(201, {"id": 1}),
         }
     )
     added, _ = client.ensure_client(
@@ -123,14 +123,14 @@ def test_applications_and_clients_share_one_endpoint(service_id, expected):
 
 
 def test_an_unknown_service_is_refused_with_the_known_list():
-    client = FakeClient({"GET /api/download_clients": FakeResponse(200, [])})
+    client = FakeClient({"GET /api/downloaders": FakeResponse(200, [])})
     with pytest.raises(WiringError, match="types acceptes"):
         client.ensure_client(name="X", service_id="jellyfin", host="http://x:1")
 
 
 def test_adding_twice_does_nothing():
     client = FakeClient(
-        {"GET /api/download_clients": FakeResponse(200, [{"name": "Sonarr", "type": "SONARR"}])}
+        {"GET /api/downloaders": FakeResponse(200, [{"name": "Sonarr", "type": "SONARR"}])}
     )
     added, message = client.ensure_client(name="Sonarr", service_id="sonarr", host="http://x:1")
     assert not added
@@ -141,8 +141,8 @@ def test_a_download_client_carries_no_api_key():
     """qBittorrent s'authentifie par identifiant et mot de passe, pas par cle."""
     client = FakeClient(
         {
-            "GET /api/download_clients": FakeResponse(200, []),
-            "POST /api/download_clients": FakeResponse(201, {"id": 1}),
+            "GET /api/downloaders": FakeResponse(200, []),
+            "POST /api/downloaders": FakeResponse(201, {"id": 1}),
         }
     )
     client.ensure_client(
@@ -213,3 +213,17 @@ def test_ensure_client_envoie_le_chemin_rpc():
     posted = [c for c in fake.calls if c[0] == "POST"]
     assert posted, "aucun POST emis"
     assert posted[-1][2]["host"] == "http://transmission:9091/transmission/rpc"
+
+
+def test_un_autobrr_anterieur_a_1_87_garde_l_ancien_chemin():
+    """v1.87.0 a renomme la route ; les versions precedentes ne servent que l'ancienne."""
+    client = FakeClient(
+        {
+            "GET /api/downloaders": FakeResponse(404, text="404 page not found"),
+            "GET /api/download_clients": FakeResponse(200, [{"name": "Sonarr", "type": "SONARR"}]),
+        }
+    )
+
+    assert client.clients() == [{"name": "Sonarr", "type": "SONARR"}]
+    assert ("GET", "/api/download_clients", {}) in client.calls
+

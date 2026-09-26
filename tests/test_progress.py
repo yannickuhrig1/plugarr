@@ -69,6 +69,8 @@ def test_le_total_annonce_correspond_aux_evenements_emis(tmp_path, monkeypatch, 
             if c.enabled(sid) and catalog.get(sid).api_family == "arr"
         ],
     )
+    # La verification ouvre une vraie socket vers des services absents ici.
+    monkeypatch.setattr(orchestrator, "check_host_reachable", lambda c: None)
     # `wait_for_download_clients` interroge REELLEMENT les clients par HTTP, avec
     # 180 s d'attente chacun. Non remplace, ce test attendait des services qui
     # n'existent pas : 738 s a lui seul sur les 913 de la suite entiere, soit

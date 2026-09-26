@@ -7,7 +7,10 @@ le wizard et la ligne de commande ne divergeront jamais.
 
 from __future__ import annotations
 
+import os
 import shutil
+import socket
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -307,6 +310,41 @@ def check_port_doublons(cfg: StackConfig) -> list[Check]:
     ]
 
 
+def _donnees_en_lecture_seule_voulue(data_root: str) -> bool:
+    """Diagnostic lance DEPUIS la console en conteneur ?
+
+    Elle monte DATA_ROOT en lecture seule, par conception : elle surveille, elle
+    n'ecrit pas les medias. Essai reel du 26/09/2026 : le diagnostic y annoncait
+    alors « racine des donnees » en ECHEC BLOQUANT sur une pile saine. Sur une
+    machine hote, des donnees en lecture seule restent une vraie panne.
+    """
+    if not Path("/.dockerenv").exists() or not hasattr(os, "statvfs"):
+        return False
+    try:
+        return bool(os.statvfs(data_root).f_flag & os.ST_RDONLY)
+    except OSError:
+        return False
+
+
+def diagnostic(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
+    """Les controles de `preflight`, lus pour une installation EXISTANTE."""
+    controles = preflight(cfg, project_dir)
+    if not _donnees_en_lecture_seule_voulue(cfg.data_root):
+        return controles
+    non_applicables = {t("racine des donnees"), "hardlinks /data"}
+    return [
+        Check(
+            c.name,
+            True,
+            t("montee en lecture seule dans la console : controlee a l'installation"),
+            blocking=False,
+        )
+        if c.name in non_applicables
+        else c
+        for c in controles
+    ]
+
+
 def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
     checks = check_docker()
     nos_ports = our_published_ports(cfg, project_dir)
@@ -452,7 +490,7 @@ def check_existing_config(cfg: StackConfig) -> Check:
 #: mot de passe, le volume garde l'ancien, et Silo redemarre en boucle sur
 #: « password authentication failed for user "silo" » sans que rien n'explique
 #: pourquoi. Constate en vrai, sur une seconde installation.
-_HASHED_PASSWORDS = ("qbittorrent", "transmission", "jellyfin", "autobrr", "qui")
+_HASHED_PASSWORDS = ("qbittorrent", "transmission", "jellyfin", "autobrr", "qui", "audiobookshelf")
 
 #: Services illisibles pour une autre raison que le hachage : leur etat vit
 #: dans un volume Docker, dont le contenu ne se relit pas.
@@ -490,7 +528,12 @@ def emplacement_etat(cfg: StackConfig, service_id: str) -> str:
     return cfg.config_path(service_id)
 
 
-def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
+def reset_configs(
+    cfg: StackConfig,
+    services: list[str],
+    *,
+    permission_fallback: Callable[[Path], None] | None = None,
+) -> list[Path]:
     """Supprime la configuration des services indiques. Renvoie ce qui a ete efface.
 
     Fonction destructrice, donc bornee de trois facons, et il faut que ces trois
@@ -523,7 +566,8 @@ def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
                         )
                     efface.append(Path(f"volume docker {nom}"))
             continue
-        dossier = Path(cfg.config_path(sid)).resolve()
+        raw_dossier = Path(cfg.config_path(sid))
+        dossier = raw_dossier.resolve()
         if not dossier.is_dir():
             continue
         if racine not in dossier.parents:
@@ -534,13 +578,35 @@ def reset_configs(cfg: StackConfig, services: list[str]) -> list[Path]:
                     racine=racine,
                 )
             )
-        shutil.rmtree(dossier)
+        # Un lien dans la portion propre au service pourrait faire supprimer
+        # l'etat d'un autre service, meme si sa cible reste sous config_root.
+        parent = raw_dossier
+        while parent != Path(cfg.config_root) and parent != parent.parent:
+            if parent.is_symlink():
+                raise ValueError(
+                    t("{chemin} est un lien symbolique : suppression refusee", chemin=parent)
+                )
+            parent = parent.parent
+        try:
+            shutil.rmtree(dossier)
+        except PermissionError:
+            if permission_fallback is None:
+                raise
+            permission_fallback(dossier)
+            if dossier.exists():
+                raise OSError(
+                    t("{chemin} existe encore apres le nettoyage", chemin=dossier)
+                )
         efface.append(dossier)
     return efface
 
 
 def reset_installation_configs(
-    cfg: StackConfig, project_dir: Path, services: list[str]
+    cfg: StackConfig,
+    project_dir: Path,
+    services: list[str],
+    *,
+    permission_fallback: Callable[[Path], None] | None = None,
 ) -> list[Path]:
     """Retire une ancienne pile avant d'en effacer l'etat demande.
 
@@ -557,7 +623,9 @@ def reset_installation_configs(
                 detail=detail or t("cause inconnue"),
             )
         )
-    return reset_configs(cfg, services)
+    if permission_fallback is None:
+        return reset_configs(cfg, services)
+    return reset_configs(cfg, services, permission_fallback=permission_fallback)
 
 
 def prochaine_etape(cfg: StackConfig) -> list[str]:
@@ -808,6 +876,68 @@ def _lift_qbittorrent_ban(cfg: StackConfig) -> bool:
     return True
 
 
+def check_host_reachable(
+    cfg: StackConfig,
+    *,
+    connect: Callable[..., socket.socket] = socket.create_connection,
+    sleep: Callable[[float], None] = time.sleep,
+    attempts: int = 3,
+) -> None:
+    """Verifie en quelques secondes que l'hote des URL joint un port publie.
+
+    Un port publie accepte la connexion des que son conteneur tourne, meme si
+    l'application demarre encore. Essai reel du 25/09/2026 sur un VPS Oracle :
+    sans cette verification, l'attente de Sonarr expirait apres 300 s sur un
+    message trompeur, alors que la cause etait l'adresse (IP publique traduite)
+    ou le pare-feu de la machine (conteneurs rejetes).
+    """
+    target = next(
+        (
+            (catalog.get(sid).display_name, cfg.services[sid].host_port)
+            for sid in catalog.STARTUP_ORDER
+            if cfg.enabled(sid)
+            and catalog.get(sid).api_family == "arr"
+            and cfg.services[sid].host_port
+        ),
+        None,
+    )
+    if target is None:
+        return
+    name, port = target
+    last: OSError | None = None
+    for attempt in range(attempts):
+        if attempt:
+            sleep(2)
+        try:
+            connect((cfg.host, port), timeout=5).close()
+            return
+        except OSError as exc:
+            last = exc
+    if isinstance(last, TimeoutError):
+        raise InstallAborted(
+            t(
+                "{host}:{port} ({service}) ne repond pas depuis la machine elle-meme. "
+                "Sur un VPS, l'IP publique est souvent traduite par le fournisseur et "
+                "n'appartient pas a la machine : indiquez son adresse privee comme "
+                "adresse de la machine.",
+                host=cfg.host,
+                port=port,
+                service=name,
+            )
+        )
+    raise InstallAborted(
+        t(
+            "{host}:{port} ({service}) refuse les connexions venant des conteneurs. "
+            "Le pare-feu de la machine les bloque probablement : autorisez les "
+            "interfaces docker0 et br-* (cause : {cause}).",
+            host=cfg.host,
+            port=port,
+            service=name,
+            cause=last,
+        )
+    )
+
+
 def wait_for_arrs(cfg: StackConfig, on_progress: ProgressFn = _noop) -> None:
     """Attend que chaque *arr reponde AVEC NOTRE CLE, pas juste qu'il ecoute."""
     for sid in catalog.STARTUP_ORDER:
@@ -929,6 +1059,7 @@ def install(
     # ne repondra jamais, et l'attente expirerait sur un diagnostic trompeur.
     _reparer_piles_orphelines(cfg, runner, on_progress)
 
+    check_host_reachable(cfg)
     wait_for_arrs(cfg, on_progress)
     wait_for_download_clients(cfg, on_progress)
 
@@ -951,7 +1082,7 @@ def install(
     # jour, ni boutons. Tout cela vient de `plugarr serve` — encore faut-il
     # pouvoir le lancer. Un utilisateur qui a double-clique un executable n'a pas
     # `plugarr` dans son PATH : on lui depose donc un lanceur cliquable.
-    lanceur = dashboard.write_admin_launcher(project_dir)
+    lanceur = dashboard.write_admin_launcher(project_dir, cfg)
     on_progress(Progress("page d'acces", f"{page} (+ {lanceur.name})"))
 
     _verdict_vpn(cfg, on_progress)

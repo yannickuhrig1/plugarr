@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import catalog, discovery, registre
+from .clients.arr import ArrClient
 from .discovery import Found
 from .i18n import t
 from .models import PlatformProfile, ServiceInstance, StackConfig
@@ -155,3 +156,84 @@ def missing_for_wiring(cfg: StackConfig) -> list[str]:
             t("aucun client de telechargement detecte : les *arr ne seront pas rattaches")
         )
     return notes
+
+
+def compatibility_notes(plan: Plan, data_root: str) -> list[str]:
+    """Report risks visible in Docker mounts without changing any container.
+
+    A mount inventory cannot prove existing files are hardlinked. The real
+    hardlink probe remains a separate check on the user's data root.
+    """
+    notes: list[str] = []
+    relevant = {
+        sid: entry for sid, entry in plan.chosen.items()
+        if sid in (*catalog.MANAGED_ARRS, *catalog.DOWNLOAD_CLIENTS)
+    }
+    downloads_by_source: dict[str, list[str]] = {}
+    for sid, entry in relevant.items():
+        source = entry.data_mounts.get("/downloads")
+        if source:
+            downloads_by_source.setdefault(source.rstrip("/\\"), []).append(sid)
+    shared_downloads = {
+        source: services for source, services in downloads_by_source.items()
+        if any(sid in catalog.MANAGED_ARRS for sid in services)
+        and any(sid in catalog.DOWNLOAD_CLIENTS for sid in services)
+    }
+    for sid, entry in relevant.items():
+        source = entry.data_mounts.get("/data")
+        if not entry.data_mounts:
+            notes.append(t("{service} : aucun montage /data, /downloads ou /media visible ; chemins a verifier.", service=sid))
+        elif source is None:
+            downloads = entry.data_mounts.get("/downloads", "").rstrip("/\\")
+            if downloads not in shared_downloads:
+                notes.append(t(
+                    "{service} : aucun montage de telechargements commun avec un client et un *arr ; "
+                    "verifiez les chemins d'import et les hardlinks avant tout cablage.",
+                    service=sid,
+                ))
+        elif source.rstrip("/") != data_root.rstrip("/"):
+            notes.append(
+                t("{service} : /data pointe vers {source}, different de la racine annoncee ({racine}).", service=sid, source=source, racine=data_root)
+            )
+    for source, services in shared_downloads.items():
+        notes.append(t(
+            "Montage /downloads commun a {services} ({source}) ; les chemins actifs "
+            "dans les applications et les hardlinks restent a verifier avant cablage.",
+            services=", ".join(services), source=source,
+        ))
+        root = data_root.replace("\\", "/").rstrip("/")
+        mounted = source.replace("\\", "/")
+        if mounted != root and not mounted.startswith(root + "/"):
+            notes.append(t(
+                "Le montage de telechargements {source} est hors de la racine declaree {racine} ; "
+                "verifiez les chemins et le systeme de fichiers avant cablage.",
+                source=source, racine=data_root,
+            ))
+    if plan.ambiguous:
+        notes.append(t("Instances en double : choisissez explicitement le conteneur a cabler."))
+    return notes
+
+
+def api_inventory(cfg: StackConfig) -> list[dict[str, str | bool]]:
+    """Read-only version and API-key check for adopted *arr services.
+
+    Do not include exception text: HTTP errors may echo sensitive URLs or
+    response bodies. The detailed key remains in memory only.
+    """
+    results: list[dict[str, str | bool]] = []
+    for sid, inst in cfg.services.items():
+        spec = catalog.get(sid)
+        if spec.api_family != "arr":
+            continue
+        try:
+            with ArrClient(
+                inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version,
+                name=sid,
+            ) as client:
+                version = client.version
+            if not version or version == "?":
+                raise ValueError("missing version")
+            results.append({"service": sid, "ok": True, "version": version})
+        except Exception:  # noqa: BLE001 - un diagnostic doit continuer pour les autres services
+            results.append({"service": sid, "ok": False, "version": ""})
+    return results

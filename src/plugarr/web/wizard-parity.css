@@ -79,7 +79,17 @@
 .choice-box { background: #171821; border: 1px solid #514063; border-radius: 11px; display: grid; gap: 12px; margin: 0 0 22px; padding: 17px; }
 .choice-box legend { color: #e8cafb; font-weight: 700; padding: 0 7px; }
 .choice-box > label { align-items: flex-start; cursor: pointer; display: flex; gap: 10px; line-height: 1.5; }
-.choice-box input { accent-color: var(--purple); flex: none; height: 18px; margin-top: 2px; width: 18px; }
+.choice-box input[type="checkbox"], .choice-box input[type="radio"] { accent-color: var(--purple); flex: none; height: 18px; margin-top: 2px; width: 18px; }
+.choice-box > label.port-field { cursor: default; display: grid; gap: 8px; }
+.choice-box .port-field input[type="number"] {
+  background: #12131d;
+  border: 1px solid #404050;
+  border-radius: 8px;
+  color: #f4f0f8;
+  min-height: 47px;
+  padding: 12px 14px;
+  width: 100%;
+}
 .choice-box p { margin: 0 0 2px; }
 .danger-box { border-color: #805066; }
 .metric-line { color: #d9b9ef; font-weight: 650; margin: 8px 0 24px; }

@@ -1138,6 +1138,11 @@ class VpnScreen(WizardScreen):
                 with Vertical(id="vpn-wireguard"):
                     yield Label("Cle privee WireGuard", classes="group-title")
                     yield Input(password=True, id="vpn-key")
+                    yield Label(
+                        "Adresses WireGuard (si demandees par le fournisseur)",
+                        classes="group-title",
+                    )
+                    yield Input(placeholder="10.x.x.x/32", id="vpn-addresses")
 
                 with Vertical(id="vpn-openvpn", classes="hidden"):
                     yield Label("Identifiant OpenVPN", classes="group-title")
@@ -1339,6 +1344,7 @@ class VpnScreen(WizardScreen):
                 provider=fournisseur if isinstance(fournisseur, str) else "",
                 vpn_type=str(self.query_one("#vpn-type", Select).value),
                 wireguard_private_key=self.query_one("#vpn-key", Input).value.strip(),
+                wireguard_addresses=self.query_one("#vpn-addresses", Input).value.strip(),
                 openvpn_user=self.query_one("#vpn-user", Input).value.strip(),
                 openvpn_password=self.query_one("#vpn-pass", Input).value.strip(),
                 countries=",".join(self.query_one("#vpn-lieux", SelectionList).selected),

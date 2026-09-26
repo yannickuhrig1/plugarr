@@ -16,6 +16,7 @@ dependencies = [
     "PyYAML>=6.0",
     "rich>=13.7",
     "textual>=0.80",
+    "paramiko>=4.0,<5",
     "tzdata; sys_platform == 'win32'",
 ]
 

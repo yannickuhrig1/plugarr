@@ -34,7 +34,7 @@ class _FauxCompose:
     def __init__(self, *_args):
         pass
 
-    def stop(self):
+    def stop(self, **_kwargs):
         return True, ""
 
     def up(self):
@@ -385,3 +385,42 @@ def test_les_deux_appelants_attrapent_bien_cette_erreur():
     ):
         assert "lire_manifeste" in source
         assert "ValueError" in source
+
+
+def test_la_sauvegarde_n_arrete_jamais_la_console(projet, tmp_path, monkeypatch):
+    """Console reelle du 25/09/2026 : elle s'arretait elle-meme en pleine sauvegarde."""
+    cfg, dossier, _config = projet
+    appels = []
+
+    class _Compose(_FauxCompose):
+        def stop(self, **kwargs):
+            appels.append(kwargs)
+            return True, ""
+
+    monkeypatch.setattr(sauvegarde, "Compose", _Compose)
+
+    sauvegarde.sauvegarder(cfg, dossier, tmp_path / "archive.zip")
+
+    assert appels and "console" in appels[0].get("sauf", ())
+
+
+def test_compose_stop_exclut_les_services_demandes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from plugarr import runner as runner_mod
+
+    commandes = []
+
+    def faux_run(cmd, **_kwargs):
+        commandes.append(cmd)
+        sortie = "sonarr\nconsole\nveille\n" if "--services" in cmd else ""
+        return SimpleNamespace(returncode=0, stdout=sortie, stderr="")
+
+    monkeypatch.setattr(runner_mod, "_run", faux_run)
+
+    runner_mod.Compose(tmp_path, "plugarr").stop(sauf=("console",))
+
+    arret = next(c for c in commandes if "stop" in c)
+    assert arret[-2:] == ["sonarr", "veille"]
+    assert "console" not in arret
+

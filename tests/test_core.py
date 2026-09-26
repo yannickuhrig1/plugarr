@@ -441,10 +441,19 @@ def test_with_both_clients_flood_picks_qbittorrent(tmp_path):
 
 
 def test_flood_gets_no_puid_pgid(tmp_path):
-    """Flood n'est pas une image LinuxServer : ces variables n'y font rien."""
+    """Flood ignore PUID/PGID mais doit tourner avec ces identifiants.
+
+    Remonte sur UGOS le 2026-09-23 : l'image utilisait son compte interne et
+    redemarrait en boucle sur « Failed to access runtime directory » quand elle
+    tentait de creer `/config/.local/share/flood`.
+    """
     cfg = make_cfg(tmp_path, services=("qbittorrent", "flood"))
-    env = compose.build_compose(cfg)["services"]["flood"]["environment"]
+    cfg.puid, cfg.pgid = 1000, 10
+    block = compose.build_compose(cfg)["services"]["flood"]
+    env = block["environment"]
     assert "PUID" not in env
+    assert "PGID" not in env
+    assert block["user"] == "1000:10"
 
 
 def test_autobrr_needs_at_least_one_arr():
@@ -603,6 +612,7 @@ def test_lance_en_root_recyclarr_recoit_son_dossier(tmp_path, monkeypatch):
 
     donnes: list[tuple[str, tuple[int, int]]] = []
     monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_reparer_dossier_donnees", lambda *_args: None)
     monkeypatch.setattr(
         layout, "_donner", lambda dossier, owner: donnes.append((dossier.name, owner))
     )
@@ -629,15 +639,19 @@ def test_lance_en_root_les_dossiers_de_donnees_vont_a_l_utilisateur(tmp_path, mo
     """
     from plugarr import layout
 
-    donnes: list[str] = []
-    monkeypatch.setattr(layout, "_est_root", lambda: True)
-    monkeypatch.setattr(layout, "_donner", lambda dossier, owner: donnes.append(dossier.name))
+    donnes: list[tuple[Path, tuple[int, int]]] = []
+    monkeypatch.setattr(
+        layout,
+        "_reparer_dossier_donnees",
+        lambda dossier, owner: donnes.append((dossier, owner)),
+    )
 
     layout.create_tree(tmp_path / "data", tmp_path / "config", ["sonarr"], owner=(1000, 10))
 
+    assert (tmp_path / "data", (1000, 10)) in donnes
     for sous_dossier in layout.DATA_SUBDIRS:
-        nom = Path(sous_dossier).name
-        assert nom in donnes, f"{sous_dossier} laisse a root : {donnes}"
+        dossier = tmp_path / "data" / sous_dossier
+        assert (dossier, (1000, 10)) in donnes, f"{sous_dossier} laisse a root : {donnes}"
 
 
 def test_une_racine_de_donnees_deja_peuplee_n_est_pas_reprise(tmp_path, monkeypatch):
@@ -650,11 +664,104 @@ def test_une_racine_de_donnees_deja_peuplee_n_est_pas_reprise(tmp_path, monkeypa
         (data / sous_dossier).mkdir(parents=True, exist_ok=True)
     donnes: list[str] = []
     monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_reparer_dossier_donnees", lambda *_args: None)
     monkeypatch.setattr(layout, "_donner", lambda dossier, owner: donnes.append(dossier.name))
 
     layout.create_tree(data, tmp_path / "config", ["sonarr"], owner=(1000, 10))
 
     assert donnes == [], donnes
+
+
+def test_les_dossiers_de_donnees_existants_sont_repares_sans_toucher_aux_fichiers(
+    tmp_path, monkeypatch
+):
+    """Correctif valide sur UGOS avec ``chown/chmod`` le 2026-09-23.
+
+    Une premiere installation interrompue avait deja cree l'arborescence sous
+    root. La relance la sautait entierement et Sonarr ne pouvait pas declarer
+    ses dossiers racines. PlugArr doit reprendre les dossiers attendus, sans
+    parcourir une mediatheque potentiellement enorme ni changer ses fichiers.
+    """
+    from plugarr import layout
+
+    data = tmp_path / "data"
+    for sous_dossier in layout.DATA_SUBDIRS:
+        (data / sous_dossier).mkdir(parents=True, exist_ok=True)
+    media_existant = data / "media" / "movies" / "film.mkv"
+    media_existant.write_bytes(b"deja-la")
+
+    repares: list[tuple[Path, tuple[int, int]]] = []
+    recursifs: list[Path] = []
+    monkeypatch.setattr(
+        layout,
+        "_reparer_dossier_donnees",
+        lambda dossier, owner: repares.append((dossier, owner)),
+    )
+    monkeypatch.setattr(layout, "_donner", lambda dossier, owner: recursifs.append(dossier))
+
+    layout.create_tree(data, tmp_path / "config", ["sonarr"], owner=(1000, 10))
+
+    assert (data, (1000, 10)) in repares
+    for sous_dossier in layout.DATA_SUBDIRS:
+        assert (data / sous_dossier, (1000, 10)) in repares
+    assert media_existant not in [dossier for dossier, _ in repares]
+    assert recursifs == [], "les donnees existantes ne doivent jamais etre chown -R"
+
+
+def test_la_reparation_ugreen_ne_touche_qu_aux_dossiers_root(tmp_path, monkeypatch):
+    """On reproduit le ``chown 1000:10`` et le ``chmod 775`` du ticket,
+    uniquement sur le dossier exact et uniquement s'il appartient a root."""
+    from types import SimpleNamespace
+
+    from plugarr import layout
+
+    ouverts: list[Path] = []
+    chown: list[tuple[int, int, int]] = []
+    chmod: list[tuple[int, int]] = []
+    fermes: list[int] = []
+    informations = SimpleNamespace(st_uid=0, st_mode=0o40500)
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout.os, "O_DIRECTORY", 0x10000, raising=False)
+    monkeypatch.setattr(layout.os, "O_NOFOLLOW", 0x20000, raising=False)
+    monkeypatch.setattr(
+        layout.os,
+        "stat",
+        lambda path, **_kw: SimpleNamespace(
+            st_mode=0o120777 if Path(path).name == "link" else 0o40500
+        ),
+    )
+    monkeypatch.setattr(layout.os, "open", lambda path, _flags: ouverts.append(Path(path)) or 42)
+    monkeypatch.setattr(layout.os, "fstat", lambda _fd: informations)
+    monkeypatch.setattr(
+        layout.os,
+        "fchown",
+        lambda fd, uid, gid: chown.append((fd, uid, gid)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        layout.os,
+        "fchmod",
+        lambda fd, mode: chmod.append((fd, mode)),
+        raising=False,
+    )
+    monkeypatch.setattr(layout.os, "close", lambda fd: fermes.append(fd))
+
+    dossier = tmp_path / "data" / "media" / "movies"
+    layout._reparer_dossier_donnees(dossier, (1000, 10))
+
+    informations = SimpleNamespace(st_uid=1000, st_mode=0o40500)
+    layout._reparer_dossier_donnees(tmp_path / "data" / "media" / "tv", (1000, 10))
+
+    informations = SimpleNamespace(st_uid=0, st_mode=0o100777)
+    layout._reparer_dossier_donnees(tmp_path / "data" / "media" / "link", (1000, 10))
+
+    assert ouverts == [
+        dossier,
+        tmp_path / "data" / "media" / "tv",
+    ]
+    assert chown == [(42, 1000, 10)]
+    assert chmod == [(42, 0o770)]
+    assert fermes == [42, 42]
 
 
 def test_sans_proprietaire_on_ne_touche_a_rien(tmp_path, monkeypatch):
@@ -679,11 +786,37 @@ def test_le_dossier_de_recyclarr_est_repris_meme_s_il_existe_deja(tmp_path, monk
     deja.mkdir(parents=True)
     donnes: list[str] = []
     monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_reparer_dossier_donnees", lambda *_args: None)
     monkeypatch.setattr(layout, "_donner", lambda dossier, owner: donnes.append(dossier.name))
 
     layout.create_tree(tmp_path / "data", tmp_path / "config", ["recyclarr"], owner=(1000, 10))
 
     assert "recyclarr" in donnes, donnes
+
+
+def test_le_dossier_de_flood_est_repris_meme_s_il_existe_deja(tmp_path, monkeypatch):
+    """Une ancienne installation sudo ne doit pas condamner Flood a redemarrer.
+
+    Le compte force dans le compose doit pouvoir creer son repertoire
+    d'execution sous `/config/.local/share/flood`.
+    """
+    from plugarr import layout
+
+    deja = tmp_path / "config" / "flood"
+    runtime = deja / ".local" / "share" / "flood"
+    runtime.mkdir(parents=True)
+    donnes: list[tuple[Path, tuple[int, int]]] = []
+    monkeypatch.setattr(layout, "_est_root", lambda: True)
+    monkeypatch.setattr(layout, "_reparer_dossier_donnees", lambda *_args: None)
+    monkeypatch.setattr(
+        layout, "_donner", lambda dossier, owner: donnes.append((dossier, owner))
+    )
+
+    layout.create_tree(
+        tmp_path / "data", tmp_path / "config", ["flood"], owner=(1000, 10)
+    )
+
+    assert (deja, (1000, 10)) in donnes
 
 
 def test_installe_en_root_les_artefacts_reviennent_a_l_utilisateur(tmp_path, monkeypatch):
@@ -799,3 +932,25 @@ def test_chaque_profil_declare_ses_defauts():
     from plugarr.layout import PROFILE_DEFAULTS
 
     assert set(PROFILE_DEFAULTS) == set(PlatformProfile)
+
+
+def test_hardlink_probe_sur_donnees_en_lecture_seule_ne_plante_pas(tmp_path, monkeypatch):
+    """Console en conteneur reelle du 25/09/2026 : DATA_ROOT monte en lecture seule."""
+    import errno
+    import tempfile
+
+    from plugarr.layout import hardlink_supported
+
+    (tmp_path / "torrents").mkdir()
+    (tmp_path / "media").mkdir()
+
+    def lecture_seule(*_args, **_kwargs):
+        raise OSError(errno.EROFS, "Read-only file system")
+
+    monkeypatch.setattr(tempfile, "mkstemp", lecture_seule)
+
+    ok, detail = hardlink_supported(tmp_path)
+
+    assert ok is False
+    assert "Read-only file system" in detail
+

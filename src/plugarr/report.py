@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
 from . import catalog, journal
+from .discovery import Found
 from .i18n import t
 from .models import StackConfig
 from .runner import Check
@@ -51,7 +53,7 @@ def print_checks(checks: list[Check]) -> bool:
     return not blocked
 
 
-def print_summary(cfg: StackConfig) -> None:
+def print_summary(cfg: StackConfig, adopted_sources: dict[str, Found] | None = None) -> None:
     table = Table(title=t("Recapitulatif - rien n'a encore ete ecrit"))
     for col in ("Service", "Image", "URL", "Config"):
         table.add_column(t(col), overflow="fold")
@@ -59,35 +61,48 @@ def print_summary(cfg: StackConfig) -> None:
         if not cfg.enabled(sid):
             continue
         spec, inst = catalog.get(sid), cfg.services[sid]
+        source = adopted_sources.get(sid) if adopted_sources is not None else None
         table.add_row(
             spec.display_name,
-            spec.image,
+            source.image if source is not None else inst.image or spec.image,
             inst.url(cfg.host) if inst.has_web_ui else t("tache de fond"),
-            cfg.config_path(sid),
+            (source.config_dir or t("inconnu")) if source is not None else cfg.config_path(sid),
         )
     console.print(table)
 
-    console.print(
-        Panel(
-            t(
-                "CONFIG_ROOT : {config}\n"
-                "DATA_ROOT   : {data}  (monte sur /data dans TOUS les conteneurs)\n"
-                "PUID:PGID   : {uid}:{gid}  ({origine})\n"
-                "UMASK / TZ  : {umask}   {tz}\n"
-                "Plateforme  : {plateforme}",
-                config=cfg.config_root,
-                data=cfg.data_root,
-                uid=cfg.puid,
-                gid=cfg.pgid,
-                origine=t(cfg.ids_source),
-                umask=cfg.umask,
-                tz=cfg.timezone,
-                plateforme=cfg.platform.value,
-            ),
-            title=t("Chemins"),
-            border_style="blue",
+    if adopted_sources is None:
+        paths = t(
+            "CONFIG_ROOT : {config}\n"
+            "DATA_ROOT   : {data}  (monte sur /data dans TOUS les conteneurs)\n"
+            "PUID:PGID   : {uid}:{gid}  ({origine})\n"
+            "UMASK / TZ  : {umask}   {tz}\n"
+            "Plateforme  : {plateforme}",
+            config=cfg.config_root,
+            data=cfg.data_root,
+            uid=cfg.puid,
+            gid=cfg.pgid,
+            origine=t(cfg.ids_source),
+            umask=cfg.umask,
+            tz=cfg.timezone,
+            plateforme=cfg.platform.value,
         )
-    )
+    else:
+        paths = t(
+            "CONFIG_ROOT : {config}\n"
+            "DATA_ROOT   : {data}  (chemin declare ; montages reels dans l'inventaire)\n"
+            "PUID:PGID   : {uid}:{gid}  ({origine})\n"
+            "UMASK / TZ  : {umask}   {tz}\n"
+            "Plateforme  : {plateforme}",
+            config=cfg.config_root,
+            data=cfg.data_root,
+            uid=cfg.puid,
+            gid=cfg.pgid,
+            origine=t(cfg.ids_source),
+            umask=cfg.umask,
+            tz=cfg.timezone,
+            plateforme=cfg.platform.value,
+        )
+    console.print(Panel(paths, title=t("Chemins"), border_style="blue"))
 
     if cfg.enabled("sabnzbd"):
         trajet = (
@@ -97,7 +112,22 @@ def print_summary(cfg: StackConfig) -> None:
         )
         console.print(Panel(trajet, title="SABnzbd", border_style="cyan"))
 
-    if not cfg.vpn_enabled and any(cfg.enabled(s) for s in catalog.TORRENT_CLIENTS):
+    torrents = [s for s in catalog.TORRENT_CLIENTS if cfg.enabled(s)]
+    if adopted_sources is not None and torrents:
+        details = []
+        for sid in torrents:
+            owner = adopted_sources[sid].network_owner
+            if owner:
+                details.append(
+                    t("{service} partage le reseau du conteneur {conteneur}.",
+                      service=catalog.get(sid).display_name, conteneur=escape(owner))
+                )
+        details.append(t(
+            "Le VPN, la route de sortie et l'etancheite des clients torrent adoptes "
+            "n'ont pas ete verifies. Aucun changement de reseau n'est propose."
+        ))
+        console.print(Panel("\n".join(details), title=t("VPN de la pile existante"), border_style="yellow"))
+    elif not cfg.vpn_enabled and torrents:
         console.print(
             Panel(
                 t(

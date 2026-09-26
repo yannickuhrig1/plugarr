@@ -432,6 +432,11 @@ class Wirer:
             # reste en place et son test echoue, sans que rien ne l'explique. On
             # realigne les seuls champs d'identification.
             identifiants = {nom: values[nom] for nom in ("username", "password") if nom in values}
+            if not dl.adopted:
+                # Second passage reel du 25/09/2026 : le VPN retire, les *arr
+                # visaient encore gluetun:9091 et chaque test echouait. L'adresse
+                # d'un client gere par PlugArr suit son trajet reseau actuel.
+                identifiants.update({nom: values[nom] for nom in ("host", "port") if nom in values})
             try:
                 modifies = client.sync_fields("downloadclient", obj, identifiants)
             except WiringError:
@@ -681,6 +686,8 @@ class Wirer:
             # de passe. Prowlarr passe par une etape distincte, il avait donc
             # ete oublie — 13 liens sur 14 au lieu de 14.
             identifiants = {"username": dl.username or "", "password": dl.password or ""}
+            if not dl.adopted:
+                identifiants.update({"host": hote, "port": port})
             try:
                 modifies = prowlarr.sync_fields("downloadclient", obj, identifiants)
             except WiringError:
@@ -1045,9 +1052,17 @@ class Wirer:
                 faits.append("Jellyfin")
 
             sab = self.cfg.services["sabnzbd"]
+            # `password` est la valeur qui a reellement ete pre-semee dans
+            # sabnzbd.ini et que les *arr viennent de tester. `api_key` en est
+            # normalement la copie, mais une reprise peut laisser les deux
+            # champs divergents. Le choisir en premier faisait alors echouer
+            # uniquement DroppedNeedle avec « API Key Incorrect » tandis que
+            # Sonarr, Radarr, Lidarr et Prowlarr validaient tous SABnzbd.
+            sab_key = sab.password or sab.api_key or ""
+            sab.api_key = sab_key
             if dn.ensure_sabnzbd(
                 url=self.internal_url("sabnzbd"),
-                api_key=sab.api_key or sab.password or "",
+                api_key=sab_key,
                 # La categorie que l'etape SABnzbd vient de creer, avec son
                 # repertoire : sans elle, tout atterrirait a la racine.
                 categorie="music",
@@ -1095,7 +1110,14 @@ class Wirer:
             # cette connexion, l'appel suivant repond « HTTP 401 Unauthorized »
             # et le message d'aide envoie chercher un accueil deja fait qui
             # n'existe pas. Constate au premier essai reel.
-            abs_client.login(identifiant, inst.password or "")
+            # Son mot de passe n'existe lui aussi que hache : reinstallation
+            # reelle du 25/09/2026, HTTP 401 alors que le bon etait dans un
+            # stack.yml precedent. Meme rattrapage que Jellyfin, autobrr et qui.
+            self._connexion_rattrapee(
+                "audiobookshelf",
+                inst,
+                lambda mot: abs_client.login(identifiant, mot),
+            )
 
             faites = [
                 nom
@@ -1651,9 +1673,12 @@ class Wirer:
     def execute(
         self, *, on_step: Callable[[StepResult], None] | None = None,
         on_start: Callable[[str], None] | None = None,
+        selected_steps: set[str] | None = None,
     ) -> list[StepResult]:
         results: list[StepResult] = []
         for step in self.build_plan():
+            if selected_steps is not None and step.name not in selected_steps:
+                continue
             if on_start:
                 on_start(step.name)
             try:
@@ -1665,8 +1690,11 @@ class Wirer:
                 # installation precedente. Le dire ici evite d'envoyer l'
                 # utilisateur chercher une panne reseau.
                 service = step.name.split("/")[0]
+                # Pas « echoue » : il accompagne aussi un 404 d'API. Installation
+                # reelle du 26/09/2026 : « ajout de Sonarr a echoue, HTTP 404 »
+                # recevait ce conseil sur les mots de passe, sans rapport.
                 if service in _HASHED_ONLY and any(
-                    mot in str(exc).lower() for mot in ("401", "refus", "echoue", "unauthorized")
+                    mot in str(exc).lower() for mot in ("401", "refus", "unauthorized")
                 ):
                     conseil = self._conseil_config_existante(service)
                     if conseil:

@@ -32,17 +32,22 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from . import (
     __version__,
     admin,
+    adminauth,
     catalog,
+    compose,
     dashboard,
     downloadclients,
     i18n,
+    imageref,
     import_prowlarr,
     journal,
     migrations,
     orchestrator,
     remote_access,
+    remote_install,
     reprise,
     sauvegarde,
+    updates,
     vpnessai,
     vpnservers,
     wizard_graph,
@@ -65,6 +70,7 @@ from .phone_share import TAILLE_MAX as MAX_PHONE_SHARE
 from .phone_share import PartageTelephone
 from .remote_models import RemoteAccessConfig
 from .runner import Check, check_docker
+from .wiring import StepResult
 
 ASSETS = Path(__file__).parent / "web"
 MAX_INDEXER_RESULTS = 40
@@ -99,6 +105,63 @@ class WizardInput(BaseModel):
     console_enabled: bool = False
     console_port: int = 7373
     remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
+    install_target: str = "local"
+    remote_connection_id: str = Field(default="", max_length=128)
+    remote_fingerprint: str = Field(default="", max_length=256)
+    remote_project_dir: str = Field(default="", max_length=1024)
+    remote_replace: bool = False
+    #: Reprise seulement : prendre la version testee du catalogue quand elle
+    #: est plus recente que celle installee. Sans cela, chaque application garde
+    #: la sienne, ce qui reste le comportement par defaut.
+    upgrade_images: bool = False
+
+
+class RemoteSSHInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=22, ge=1, le=65535)
+    username: str = Field(min_length=1, max_length=255)
+    password: str = Field(default="", max_length=4096)
+    private_key: str = Field(default="", max_length=32768)
+    passphrase: str = Field(default="", max_length=4096)
+    sudo_password: str = Field(default="", max_length=4096)
+
+
+def version_plus_recente(testee: str, installee: str) -> bool:
+    """La version testee du catalogue est-elle plus recente que l'installee ?
+
+    Une version illisible des deux cotes n'est jamais une raison de changer.
+    """
+    a = updates.parse_version(imageref.parse(testee).tag) if testee else None
+    b = updates.parse_version(imageref.parse(installee).tag) if installee else None
+    return a is not None and b is not None and a > b
+
+
+def changements_de_version(previous) -> list[dict]:
+    """Ce que « passer aux versions testees » changerait, application par application.
+
+    Demande du 26/09/2026 : reprendre une installation ne doit pas obliger a
+    tout reparametrer pour obtenir les versions que PlugArr vient de tester.
+    """
+    changements = []
+    for sid, inst in previous.services.items():
+        if sid not in catalog.CATALOG or inst.adopted or not inst.image:
+            continue
+        testee = catalog.get(sid).image
+        if not version_plus_recente(testee, inst.image):
+            continue
+        avant = updates.parse_version(imageref.parse(inst.image).tag)
+        apres = updates.parse_version(imageref.parse(testee).tag)
+        changements.append(
+            {
+                "id": sid,
+                "name": catalog.get(sid).display_name,
+                "installed": imageref.parse(inst.image).tag,
+                "tested": imageref.parse(testee).tag,
+                "major": bool(avant and apres and avant[0] != apres[0]),
+            }
+        )
+    return changements
 
 
 class WizardState:
@@ -136,6 +199,7 @@ class WizardState:
         self.worker = None
         self.admin_server = None
         self.admin_url = None
+        self.console_password = ""
         #: Lien a usage unique vers le telephone (QR code), ouvert a la demande.
         self.phone_share: PartageTelephone | None = None
         self.restore_inspections: dict[str, dict] = {}
@@ -145,6 +209,14 @@ class WizardState:
         #: Indexeurs lus dans une sauvegarde, avec leurs identifiants. Ils ne
         #: quittent jamais le serveur : le navigateur ne voit que la cle.
         self.backup_indexers: dict[str, import_prowlarr.IndexeurSauvegarde] = {}
+        #: Connexions SSH sondees. Les secrets restent uniquement dans ce
+        #: processus et disparaissent a la fermeture de l'assistant.
+        self.remote_connections: dict[str, dict[str, object]] = {}
+        self.install_target = "local"
+        self.remote_connection_id = ""
+        self.remote_project_dir = ""
+        self.remote_existing_sha = ""
+        self.remote_replace_confirmed = False
         self.result = 0
 
     def stack_hash(self, path: Path | None = None):
@@ -246,7 +318,12 @@ class WizardState:
                 for p in providers
             },
             "backup": backup,
-            "form": {
+            "form": self._form_for(cfg, platform, defaults, vpn),
+        }
+
+    def _form_for(self, cfg, platform, defaults, vpn):
+        """Formulaire initial, depuis une configuration existante ou les defauts."""
+        return {
                 "services": [s for s in cfg.services if not catalog.get(s).internal]
                 if cfg
                 else list(catalog.DEFAULT_SELECTION),
@@ -269,14 +346,97 @@ class WizardState:
                 "console_enabled": cfg.console_enabled if cfg else False,
                 "console_port": cfg.console_port if cfg else 7373,
                 "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
+                "install_target": "local",
+                "remote_connection_id": "",
+                "remote_fingerprint": "",
+                "remote_project_dir": "",
+                "remote_replace": False,
                 "reprendre": cfg is not None,
                 "reset_config": False,
-            },
         }
+
+    def _remote_previous(self, target, credentials, probe_result, project_dir):
+        """Pile PlugArr deja presente sur la cible, pour la reprendre.
+
+        Second passage reel du 25/09/2026 sur un VPS : sans reprise, l'assistant
+        repartait des defauts, regenerait les mots de passe et perdait le VPN.
+        """
+        state = remote_install.inspect_project(
+            remote_install.RemoteTarget(
+                host=target.host,
+                port=target.port,
+                username=target.username,
+                expected_fingerprint=probe_result.fingerprint,
+            ),
+            credentials,
+            project_dir,
+            connect=remote_install.connect_paramiko,
+        )
+        if not (state.managed and state.stack_yaml):
+            return None
+        try:
+            cfg, _notes = migrations.lire_texte(state.stack_yaml)
+        except (ValueError, ValidationError):
+            return None
+        return cfg
+
+    def _default_form(self):
+        """Reglages par defaut, sans rien d'une installation precedente."""
+        platform = default_profile()
+        vpn = VpnConfig().model_dump()
+        vpn["provider"] = VPN_ALIASES.get(vpn.get("provider"), vpn.get("provider")) or DEFAULT_VPN
+        return self._form_for(None, platform, PROFILE_DEFAULTS[platform], vpn)
+
+    def _remote_form(self, cfg):
+        platform = cfg.platform
+        vpn = cfg.vpn.model_dump()
+        for key in ("wireguard_private_key", "openvpn_password", "openvpn_user"):
+            vpn[key] = ""  # Les champs vides conservent les identifiants existants.
+        vpn["provider"] = VPN_ALIASES.get(vpn.get("provider"), vpn.get("provider"))
+        return self._form_for(cfg, platform, PROFILE_DEFAULTS[platform], vpn)
+
+    def _remote_connection_for(self, form: WizardInput):
+        if form.install_target == "local":
+            self.install_target = "local"
+            self.remote_connection_id = ""
+            self.remote_project_dir = ""
+            return None
+        if form.install_target != "ssh":
+            raise ValueError("Destination d'installation inconnue.")
+        connection = self.remote_connections.get(form.remote_connection_id)
+        if connection is None:
+            raise ValueError("Connexion SSH absente ou expiree. Testez-la a nouveau.")
+        if form.reprendre and connection.get("previous") is None:
+            raise ValueError(
+                "Aucune pile PlugArr a reprendre sur ce serveur; "
+                "la reprise locale ne s'applique pas a une installation distante."
+            )
+        if time.monotonic() - float(connection["created_at"]) > 900:
+            self.remote_connections.pop(form.remote_connection_id, None)
+            raise ValueError("Le test SSH a expire. Testez la connexion a nouveau.")
+        probe_result = connection["probe"]
+        if not isinstance(probe_result, remote_install.RemoteProbe) or not probe_result.ready:
+            raise ValueError("La cible SSH doit etre Linux avec Docker operationnel.")
+        if not hmac.compare_digest(form.remote_fingerprint, probe_result.fingerprint):
+            raise ValueError("Confirmez exactement l'empreinte SSH affichee.")
+        project = posixpath.normpath(form.remote_project_dir)
+        if (
+            not project.startswith("/")
+            or project == "/"
+            or any(char in form.remote_project_dir for char in ("\n", "\r", "\x00"))
+        ):
+            raise ValueError("Le dossier du projet distant doit etre un chemin Linux absolu.")
+        self.install_target = "ssh"
+        self.remote_connection_id = form.remote_connection_id
+        self.remote_project_dir = project
+        return connection
 
     def build_config(self, payload):
         form = payload if isinstance(payload, WizardInput) else WizardInput.model_validate(payload)
         platform = PlatformProfile(form.platform)
+        connection = self._remote_connection_for(form)
+        if connection is not None and platform == PlatformProfile.WINDOWS:
+            raise ValueError("L'installation SSH prend en charge les cibles Linux et NAS.")
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", form.project_name):
             raise ValueError("Nom de pile : lettres minuscules, chiffres, tirets et underscores.")
         if any(s not in catalog.CATALOG or catalog.get(s).internal for s in form.services):
@@ -337,11 +497,20 @@ class WizardState:
             timezone=form.timezone,
             language=form.language,
         )
+        if connection is not None:
+            probe_result = connection["probe"]
+            cfg.puid = probe_result.uid
+            cfg.pgid = probe_result.gid
+            cfg.ids_source = "utilisateur SSH distant"
+            cfg.ids_certain = True
+        # En SSH, la configuration a reprendre est celle du serveur, jamais celle
+        # du poste qui lance l'assistant.
+        previous = connection.get("previous") if connection is not None else self.previous
         vpn = dict(form.vpn)
         if set(vpn) - set(VpnConfig.model_fields):
             raise ValueError("Champ VPN inconnu.")
-        if form.reprendre and self.previous and self.previous.vpn.enabled:
-            old_vpn = self.previous.vpn
+        if form.reprendre and previous and previous.vpn.enabled:
+            old_vpn = previous.vpn
             old_provider = VPN_ALIASES.get(old_vpn.provider, old_vpn.provider)
             if vpn.get("provider") == old_provider and vpn.get("vpn_type") == old_vpn.vpn_type:
                 for key in ("wireguard_private_key", "openvpn_password", "openvpn_user"):
@@ -424,10 +593,10 @@ class WizardState:
                     raise ValueError("Profil de qualite invalide pour la selection.")
         self.reprise = None
         self.project_dir = self.launch_project_dir
-        if form.reprendre and self.previous is not None:
+        if form.reprendre and previous is not None:
             self.reprise = reprise.appliquer(
                 cfg,
-                self.previous,
+                previous,
                 imposes={
                     "language",
                     "ui_language",
@@ -450,10 +619,13 @@ class WizardState:
             # appartiennent aussi a l'installation precedente. `appliquer`
             # couvre les identifiants et le port principal ; on complete ici
             # sans reprendre les services que l'utilisateur a decoches.
-            for sid in cfg.services.keys() & self.previous.services.keys():
-                old = self.previous.services[sid]
+            for sid in cfg.services.keys() & previous.services.keys():
+                old = previous.services[sid]
                 current = cfg.services[sid]
-                current.image = old.image or current.image
+                garder = old.image and not (
+                    form.upgrade_images and version_plus_recente(current.image, old.image)
+                )
+                current.image = old.image if garder else current.image
                 current.extra_ports = dict(old.extra_ports)
                 current.secret_key = old.secret_key or current.secret_key
             # Les ports repris valaient pour l'ANCIENNE selection.
@@ -462,12 +634,12 @@ class WizardState:
             # Silo restaurait le 8096 de Silo et le compose publiait deux fois
             # le meme port, pour toute la pile.
             orchestrator.resolve_port_conflicts(cfg)
-            if self.previous_project_dir is not None:
+            if connection is None and self.previous_project_dir is not None:
                 self.project_dir = self.previous_project_dir
         cfg.remote_access = form.remote_access.model_copy(deep=True)
         if any(not cfg.enabled(sid) for sid in cfg.remote_access.services):
             raise ValueError("L’accès distant doit concerner des applications sélectionnées.")
-        cfg.project_dir = self.project_dir
+        cfg.project_dir = self.remote_project_dir if connection is not None else self.project_dir
         return cfg
 
     def startup_checks(self):
@@ -680,8 +852,16 @@ class WizardState:
         if not isinstance(values, dict):
             raise TypeError("Configuration VPN invalide.")
         values = dict(values)
-        if self.previous and self.previous.vpn.enabled:
-            old = self.previous.vpn
+        remote_target = payload.get("install_target") == "ssh"
+        previous = (
+            (self.remote_connections.get(str(payload.get("remote_connection_id") or "")) or {}).get(
+                "previous"
+            )
+            if remote_target
+            else self.previous
+        )
+        if previous and previous.vpn.enabled:
+            old = previous.vpn
             old_provider = VPN_ALIASES.get(old.provider, old.provider)
             if values.get("provider") == old_provider and values.get("vpn_type") == old.vpn_type:
                 for key in ("wireguard_private_key", "openvpn_password", "openvpn_user"):
@@ -693,6 +873,45 @@ class WizardState:
                 "Essai VPN",
                 True,
                 "Demonstration : tunnel, adresse publique et port entrant simules.",
+                blocking=False,
+            )
+        elif remote_target:
+            connection_id = payload.get("remote_connection_id")
+            fingerprint = payload.get("remote_fingerprint")
+            if not isinstance(connection_id, str) or not isinstance(fingerprint, str):
+                raise ValueError("Connexion SSH invalide. Testez-la a nouveau.")
+            connection = self.remote_connections.get(connection_id)
+            if connection is None:
+                raise ValueError("Connexion SSH absente ou expiree. Testez-la a nouveau.")
+            if time.monotonic() - float(connection["created_at"]) > 900:
+                self.remote_connections.pop(connection_id, None)
+                raise ValueError("Le test SSH a expire. Testez la connexion a nouveau.")
+            probe_result = connection["probe"]
+            if not isinstance(probe_result, remote_install.RemoteProbe):
+                raise ValueError("Diagnostic SSH invalide. Testez la connexion a nouveau.")
+            if not hmac.compare_digest(fingerprint, probe_result.fingerprint):
+                raise ValueError("Confirmez exactement l'empreinte SSH affichee.")
+            original_target = connection["target"]
+            target = remote_install.RemoteTarget(
+                host=original_target.host,
+                port=original_target.port,
+                username=original_target.username,
+                expected_fingerprint=probe_result.fingerprint,
+            )
+            result = remote_install.test_vpn(
+                target,
+                connection["credentials"],
+                config.model_dump(mode="json"),
+                uid=probe_result.uid,
+                gid=probe_result.gid,
+                admin_image=catalog.CONSOLE_IMAGE,
+                gluetun_image=f"qmcgaw/gluetun:{GLUETUN_TAG}",
+                connect=remote_install.connect_paramiko,
+            )
+            check = Check(
+                str(result.get("name", "Essai VPN")),
+                bool(result.get("ok")),
+                str(result.get("detail", "Essai VPN distant termine.")),
                 blocking=False,
             )
         else:
@@ -760,7 +979,10 @@ class WizardState:
 
     def indexer_overview(self):
         self._require_completed()
-        if not self.cfg.enabled("prowlarr"):
+        # Installation distante reelle du 25/09/2026 : ce panneau interrogeait
+        # Prowlarr depuis CE poste, a l'adresse privee du VPS, et expirait.
+        # Les indexeurs s'ajoutent alors depuis la console du serveur.
+        if not self.cfg.enabled("prowlarr") or self.install_target == "ssh":
             return {"available": False, "count": 0, "configured": [], "demo": self.demo}
         if self.demo:
             definitions = self._demo_indexer_definitions()
@@ -911,6 +1133,50 @@ class WizardState:
                 self.phone_share = PartageTelephone(hote)
             return self.phone_share.publier(contenu, nom)
 
+    def available_updates(self):
+        """Versions plus recentes que celles installees, pour le rapport de fin.
+
+        Demande du 26/09/2026 : PlugArr installe les versions qu'il a testees,
+        et dit ensuite ce qui existe de plus recent. Rien n'est change ici.
+        Route separee du rapport : une vingtaine de registres a interroger ne
+        doit pas retarder l'affichage des acces.
+        """
+        self._require_completed()
+        if self.demo:
+            return {"demo": True, "updates": [], "unchecked": []}
+        cibles = [
+            (sid, catalog.get(sid).display_name, inst.image or catalog.get(sid).image)
+            for sid, inst in orchestrator.iter_selected(self.cfg)
+            if (inst.image or catalog.get(sid).image) and not inst.adopted
+        ]
+
+        def verifier(cible):
+            sid, nom, image = cible
+            try:
+                recentes, probleme = updates.newer_tags(image, timeout=10.0)
+            except Exception as exc:  # noqa: BLE001 - un registre ne doit pas casser le rapport
+                recentes, probleme = [], str(exc)
+            return sid, nom, image, recentes, probleme
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            resultats = list(pool.map(verifier, cibles))
+        return {
+            "demo": False,
+            "updates": [
+                {
+                    "id": sid,
+                    "name": nom,
+                    "current": imageref.parse(image).tag,
+                    "latest": recentes[-1],
+                }
+                for sid, nom, image, recentes, probleme in resultats
+                if recentes and not probleme
+            ],
+            "unchecked": [nom for _sid, nom, _image, _recentes, probleme in resultats if probleme],
+        }
+
     def report(self):
         self._require_completed()
         failed = [result for result in self.results if not result.ok]
@@ -938,17 +1204,34 @@ class WizardState:
                 for sid, inst in orchestrator.iter_selected(self.cfg)
             ],
             "next_steps": next_steps,
-            "env_path": str(self.project_dir / ".env"),
-            "can_indexers": self.cfg.enabled("prowlarr"),
+            "env_path": (
+                posixpath.join(self.remote_project_dir, ".env")
+                if self.install_target == "ssh"
+                else str(self.project_dir / ".env")
+            ),
+            "remote_install": self.install_target == "ssh",
+            "console_url": (
+                f"http://{self.cfg.host}:{self.cfg.console_port}/"
+                if self.cfg.console_enabled and self.install_target == "ssh"
+                else ""
+            ),
+            "console_password": self.console_password if self.install_target == "ssh" else "",
+            "can_indexers": self.cfg.enabled("prowlarr") and self.install_target != "ssh",
             "demo": self.demo,
             "remote": self.remote_result or remote_access.summary(self.cfg, demo=self.demo),
-            "remote_managed": False if self.demo else (self.project_dir / ".plugarr-remote" / "compose.yml").is_file(),
+            "remote_managed": bool(self.remote_result)
+            if self.install_target == "ssh"
+            else False
+            if self.demo
+            else (self.project_dir / ".plugarr-remote" / "compose.yml").is_file(),
         }
 
     def remote_action(self, payload):
         self._require_completed()
         if payload.get("action") not in ("activate", "inspect", "deactivate"):
             raise ValueError("Action distante inconnue.")
+        if self.install_target == "ssh":
+            return self._remote_gateway_action(payload)
         with self.lock:
             if self.remote_worker and self.remote_worker.is_alive():
                 raise ValueError("Une opération d’accès distant est déjà en cours.")
@@ -973,15 +1256,82 @@ class WizardState:
             self.remote_worker.start()
         return {"status": "running"}
 
+    def _remote_gateway_action(self, payload):
+        with self.lock:
+            if self.remote_worker and self.remote_worker.is_alive():
+                raise ValueError("Une opération d’accès distant est déjà en cours.")
+            if payload["action"] in ("activate", "deactivate") and payload.get("confirm") is not True:
+                raise ValueError("Confirmez l’activation de l’accès distant.")
+            connection = self.remote_connections.get(self.remote_connection_id)
+            if connection is None:
+                raise ValueError("La session SSH a expiré. Relancez l’assistant.")
+            self.remote_result = {
+                **remote_access.summary(self.cfg),
+                "status": "running",
+                "message": "Opération distante en cours sur le serveur…",
+            }
+
+            def work():
+                try:
+                    original_target = connection["target"]
+                    target = remote_install.RemoteTarget(
+                        host=original_target.host,
+                        port=original_target.port,
+                        username=original_target.username,
+                        expected_fingerprint=connection["probe"].fingerprint,
+                    )
+                    deployment = remote_install.RemoteDeployment(
+                        project_dir=self.remote_project_dir,
+                        config_root=self.cfg.config_root,
+                        data_root=self.cfg.data_root,
+                        uid=self.cfg.puid,
+                        gid=self.cfg.pgid,
+                        stack_yaml=compose.render_stack(self.cfg),
+                        image=catalog.CONSOLE_IMAGE,
+                        veille_image=catalog.VEILLE_IMAGE,
+                    )
+
+                    def receive(event):
+                        if event.get("kind") == "remote_access" and isinstance(
+                            event.get("result"), dict
+                        ):
+                            self.remote_result = event["result"]
+
+                    remote_install.deploy(
+                        target,
+                        connection["credentials"],
+                        deployment,
+                        connect=remote_install.connect_paramiko,
+                        on_event=receive,
+                        operation=payload["action"],
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self.remote_result = {
+                        **remote_access.summary(self.cfg),
+                        "status": "error",
+                        "message": self.redact(exc),
+                    }
+
+            self.remote_worker = threading.Thread(target=work, daemon=False)
+            self.remote_worker.start()
+        return {"status": "running"}
+
     def access_page(self):
         self._require_completed()
         cfg = self.cfg.model_copy(deep=True)
         if self.demo and cfg.host == "localhost":
             cfg.host = "192.0.2.10"
-        return dashboard.render(cfg, live=False, remote_report=self.remote_result, demo=self.demo).encode("utf-8")
+        return dashboard.render(
+            cfg,
+            live=False,
+            remote_report=self.remote_result,
+            demo=self.demo,
+            console_password=self.console_password if self.install_target == "ssh" else "",
+        ).encode("utf-8")
 
     def close_resources(self):
         self.backup_indexers = {}
+        self.remote_connections = {}
         if self.phone_share is not None:
             self.phone_share.arreter()
             self.phone_share = None
@@ -989,6 +1339,60 @@ class WizardState:
             self.indexer_client.close()
             self.indexer_client = None
             self.indexers = None
+
+    def probe_remote_install(self, payload):
+        """Sonde une cible SSH et conserve ses secrets seulement en memoire."""
+        form = RemoteSSHInput.model_validate(payload)
+        credentials = remote_install.RemoteCredentials(
+            password=form.password,
+            private_key=form.private_key,
+            passphrase=form.passphrase,
+            sudo_password=form.sudo_password,
+        )
+        target = remote_install.RemoteTarget(
+            host=form.host.strip(),
+            port=form.port,
+            username=form.username.strip(),
+        )
+        result = remote_install.probe(
+            target,
+            credentials,
+            connect=remote_install.connect_paramiko,
+        )
+        connection_id = secrets.token_urlsafe(24)
+        project_dir = posixpath.join(result.home, "plugarr")
+        previous = (
+            self._remote_previous(target, credentials, result, project_dir)
+            if result.ready
+            else None
+        )
+        self.remote_connections = {
+            connection_id: {
+                "target": target,
+                "credentials": credentials,
+                "probe": result,
+                "previous": previous,
+                "created_at": time.monotonic(),
+            }
+        }
+        return {
+            "existing": previous is not None,
+            "existing_form": self._remote_form(previous) if previous is not None else None,
+            "version_changes": changements_de_version(previous) if previous is not None else [],
+            "fresh_form": self._default_form() if previous is not None else None,
+            "connection_id": connection_id,
+            "fingerprint": result.fingerprint,
+            "system": result.system,
+            "machine": result.machine,
+            "uid": result.uid,
+            "gid": result.gid,
+            "docker_version": result.docker_version,
+            "ready": result.ready,
+            "suggested_host": result.suggested_host(target.host),
+            "project_dir": project_dir,
+            "config_root": posixpath.join(project_dir, "config"),
+            "data_root": posixpath.join(result.home, "data"),
+        }
 
     def graph_preview(self, payload):
         selected = payload.get("services", [])
@@ -1031,22 +1435,118 @@ class WizardState:
             self.plan_id = None
             form = WizardInput.model_validate(payload)
             cfg = self.build_config(form)
-            if not self.demo and self.stack_hash() != self.initial_hash:
+            self.console_password = ""
+            if self.install_target == "ssh" and cfg.console_enabled and not cfg.admin_password_hash:
+                self.console_password = secrets.token_urlsafe(24)
+                cfg.admin_password_hash = adminauth.hash_password(self.console_password)
+            remote_connection = (
+                self.remote_connections.get(self.remote_connection_id)
+                if self.install_target == "ssh"
+                else None
+            )
+            if self.install_target == "local" and not self.demo and self.stack_hash() != self.initial_hash:
                 raise ValueError(
                     "stack.yml a change. Relancez l'assistant pour reprendre la configuration actuelle."
                 )
-            checks = (
-                []
-                if self.demo
-                else [asdict(c) for c in orchestrator.preflight(cfg, self.project_dir)]
-            )
+            if remote_connection is not None:
+                remote_probe = remote_connection["probe"]
+                original_target = remote_connection["target"]
+                remote_target = remote_install.RemoteTarget(
+                    host=original_target.host,
+                    port=original_target.port,
+                    username=original_target.username,
+                    expected_fingerprint=remote_probe.fingerprint,
+                )
+                remote_project = remote_install.inspect_project(
+                    remote_target,
+                    remote_connection["credentials"],
+                    self.remote_project_dir,
+                    connect=remote_install.connect_paramiko,
+                )
+                expected_remote_sha = hashlib.sha256(
+                    compose.render_stack(cfg).encode("utf-8")
+                ).hexdigest()
+                remote_replace_required = bool(
+                    remote_project.exists
+                    and not hmac.compare_digest(remote_project.stack_sha, expected_remote_sha)
+                )
+                remote_replace_ok = bool(
+                    remote_replace_required and remote_project.managed and form.remote_replace
+                )
+                remote_reset_ok = bool(
+                    remote_project.exists
+                    and remote_project.managed
+                    and remote_project.stack_sha
+                    and remote_project.services
+                    and remote_project.project_name == cfg.project_name
+                    and remote_project.config_root == cfg.config_root
+                    and remote_project.data_root == cfg.data_root
+                    and set(remote_project.services) <= set(catalog.STARTUP_ORDER)
+                )
+                self.remote_existing_sha = remote_project.stack_sha
+                self.remote_replace_confirmed = remote_replace_ok
+                checks = [
+                    asdict(Check("SSH", True, "Connexion et empreinte confirmees.")),
+                    asdict(
+                        Check(
+                            "Linux",
+                            remote_probe.system == "Linux",
+                            f"{remote_probe.system} {remote_probe.machine}".strip(),
+                        )
+                    ),
+                    asdict(
+                        Check(
+                            "Docker distant",
+                            bool(remote_probe.docker_version),
+                            remote_probe.docker_version or "Docker indisponible",
+                        )
+                    ),
+                    asdict(
+                        Check(
+                            "Pile PlugArr distante",
+                            not remote_replace_required or remote_replace_ok,
+                            (
+                                "Aucune pile existante a remplacer."
+                                if not remote_replace_required
+                                else "Mise a jour explicitement confirmee; configurations et medias conserves."
+                                if remote_replace_ok
+                                else "Pile PlugArr existante detectee. Confirmez sa mise a jour."
+                                if remote_project.managed
+                                else "Le dossier contient une pile qui n'est pas reconnue comme geree par PlugArr."
+                            ),
+                        )
+                    ),
+                ]
+                if form.reset_config:
+                    checks.append(
+                        asdict(
+                            Check(
+                                "Remise a zero distante",
+                                remote_reset_ok,
+                                "Ancienne pile reconnue, chemins inchanges et medias exclus."
+                                if remote_reset_ok
+                                else "Pile distante non reconnue ou chemins modifies : suppression refusee.",
+                            )
+                        )
+                    )
+            else:
+                remote_project = None
+                remote_replace_required = False
+                remote_reset_ok = False
+                self.remote_existing_sha = ""
+                self.remote_replace_confirmed = False
+                checks = (
+                    []
+                    if self.demo
+                    else [asdict(c) for c in orchestrator.preflight(cfg, self.project_dir)]
+                )
             blocked = any(not c["ok"] and c["blocking"] for c in checks)
             self.cfg = cfg
             resumed = set(getattr(self.reprise, "services", ()) or ())
             self.reset_cfg = cfg
             self.reset_project_dir = self.project_dir
             self.reset_existing_stack = False
-            if self.previous is not None and not form.reprendre:
+            if self.install_target == "local" and self.previous is not None and not form.reprendre:
                 # « Repartir de zero » doit proposer TOUT l'etat de l'ancienne
                 # installation, y compris les applications decochees et les
                 # volumes Docker. Le choix reste desactive par defaut et les
@@ -1055,12 +1555,16 @@ class WizardState:
                 self.reset_project_dir = self.previous_project_dir or self.launch_project_dir
                 self.reset_existing_stack = self.previous_project_dir is not None
                 self.reset_candidates = orchestrator.existing_configs(self.previous)
-            else:
+            elif self.install_target == "local":
                 self.reset_candidates = [
                     service
                     for service in orchestrator.unusable_configs(cfg)
                     if service not in resumed
                 ]
+            else:
+                self.reset_candidates = (
+                    list(remote_project.services) if remote_reset_ok and remote_project else []
+                )
             self.reset_requested = bool(form.reset_config and self.reset_candidates)
             self.graph = wizard_graph.build(cfg)
             self.plan_id = secrets.token_urlsafe(24) if not blocked else None
@@ -1070,9 +1574,18 @@ class WizardState:
                 warnings.append(
                     "Aucun VPN : les telechargements utiliseront l'adresse IP publique de cette machine."
                 )
-            if self.previous and form.reprendre:
+            if form.reprendre and (self.previous or self.install_target == "ssh"):
                 warnings.append(
                     "Reinstallation : les conteneurs existants seront arretes puis relances. Identifiants et versions sont conserves."
+                )
+            if self.remote_replace_confirmed:
+                warnings.append(
+                    "La pile PlugArr distante sera mise a jour. Ses configurations et ses medias seront conserves."
+                )
+            if self.install_target == "ssh" and self.reset_requested:
+                warnings.append(
+                    "Les configurations et volumes des applications de l'ancienne pile "
+                    "seront supprimes sur le serveur. Les medias resteront intacts."
                 )
             warnings.extend(
                 i18n.t(catalog.get(s).experimental)
@@ -1098,7 +1611,13 @@ class WizardState:
                 "config_root": cfg.config_root,
                 "data_root": cfg.data_root,
                 "project_name": cfg.project_name,
-                "project_dir": str(self.project_dir),
+                "project_dir": self.remote_project_dir
+                if self.install_target == "ssh"
+                else str(self.project_dir),
+                "install_target": self.install_target,
+                "remote_replace_required": remote_replace_required,
+                "remote_replace_managed": bool(remote_project and remote_project.managed),
+                "remote_replace_confirmed": self.remote_replace_confirmed,
                 "host": cfg.host,
                 "remote_access": cfg.remote_access.model_dump(),
                 "puid": cfg.puid,
@@ -1137,13 +1656,27 @@ class WizardState:
                 "reset_locations": [
                     orchestrator.emplacement_etat(self.reset_cfg, service)
                     for service in self.reset_candidates
-                ],
+                ] if self.install_target == "local" else [],
                 "reset_requested": self.reset_requested,
                 "graph": self.graph,
             }
 
     def redact(self, message):
         message = str(message)
+        remote_values = [self.console_password]
+        for connection in self.remote_connections.values():
+            credentials = connection.get("credentials")
+            if isinstance(credentials, remote_install.RemoteCredentials):
+                remote_values.extend(
+                    (
+                        credentials.password,
+                        credentials.private_key,
+                        credentials.passphrase,
+                        credentials.sudo_password,
+                    )
+                )
+        for value in sorted(filter(None, remote_values), key=len, reverse=True):
+            message = message.replace(value, "<masque>")
         if self.cfg:
             values = []
             for inst in self.cfg.services.values():
@@ -1202,9 +1735,18 @@ class WizardState:
             if time.monotonic() - self.validated_at > 300:
                 self.plan_id = None
                 raise ValueError("Les controles ont expire. Verifiez a nouveau la configuration.")
-            if not self.demo and self.stack_hash() != self.initial_hash:
+            if (
+                self.install_target == "local"
+                and not self.demo
+                and self.stack_hash() != self.initial_hash
+            ):
                 self.plan_id = None
                 raise ValueError("stack.yml a change depuis la verification. Relancez l'assistant.")
+            if self.install_target == "ssh":
+                connection = self.remote_connections.get(self.remote_connection_id)
+                if connection is None or time.monotonic() - float(connection["created_at"]) > 900:
+                    self.plan_id = None
+                    raise ValueError("Le test SSH a expire. Testez la connexion a nouveau.")
             self.plan_id = None
             self.status = "running"
             self.graph_results = {}
@@ -1244,6 +1786,95 @@ class WizardState:
                         step_id=step_id,
                     )
                 self.set_status("done")
+                return
+            if self.install_target == "ssh":
+                connection = self.remote_connections.get(self.remote_connection_id)
+                if connection is None:
+                    raise ValueError("Connexion SSH expiree. Relancez l'assistant.")
+                original_target = connection["target"]
+                target = remote_install.RemoteTarget(
+                    host=original_target.host,
+                    port=original_target.port,
+                    username=original_target.username,
+                    expected_fingerprint=connection["probe"].fingerprint,
+                )
+                deployment = remote_install.RemoteDeployment(
+                    project_dir=self.remote_project_dir,
+                    config_root=self.cfg.config_root,
+                    data_root=self.cfg.data_root,
+                    uid=self.cfg.puid,
+                    gid=self.cfg.pgid,
+                    stack_yaml=compose.render_stack(self.cfg),
+                    image=catalog.CONSOLE_IMAGE,
+                    veille_image=catalog.VEILLE_IMAGE,
+                    replace_existing=self.remote_replace_confirmed,
+                    reset_existing=self.reset_requested,
+                    expected_existing_sha=self.remote_existing_sha,
+                )
+
+                def remote_event(event):
+                    kind = event.get("kind")
+                    if kind == "progress":
+                        self.event(
+                            event.get("phase", "Installation distante"),
+                            event.get("message", ""),
+                            event.get("ok", True),
+                            started=event.get("started", False),
+                        )
+                    elif kind == "check":
+                        self.event(
+                            event.get("name", "Verification distante"),
+                            event.get("detail", ""),
+                            event.get("ok", False),
+                        )
+                    elif kind == "step":
+                        self.results.append(
+                            StepResult(
+                                name=str(event.get("name", "Cablage distant")),
+                                ok=bool(event.get("ok")),
+                                detail=str(event.get("detail", "")),
+                                created=bool(event.get("created")),
+                                warnings=list(event.get("warnings") or []),
+                                step_id=str(event.get("step_id") or ""),
+                            )
+                        )
+                        self.event(
+                            event.get("name", "Cablage distant"),
+                            event.get("detail", ""),
+                            event.get("ok", False),
+                            step_id=event.get("step_id") or None,
+                            warnings=event.get("warnings", []),
+                        )
+                    elif kind == "log" and event.get("message"):
+                        self.event("SSH", event["message"])
+                    elif kind == "remote_access" and isinstance(event.get("result"), dict):
+                        self.remote_result = event["result"]
+                        self.event(
+                            "Acces distant",
+                            self.remote_result.get("message", "Configuration terminee."),
+                            self.remote_result.get("status") not in ("error", "failed"),
+                        )
+                    elif kind == "credentials" and isinstance(event.get("services"), dict):
+                        # Evenement prive sur le canal SSH : ne jamais le
+                        # copier dans le journal de progression du navigateur.
+                        for service_id, values in event["services"].items():
+                            instance = self.cfg.services.get(service_id)
+                            if instance is None or not isinstance(values, dict):
+                                continue
+                            for field_name in ("username", "password", "api_key"):
+                                value = values.get(field_name)
+                                if isinstance(value, str):
+                                    setattr(instance, field_name, value)
+
+                result = remote_install.deploy(
+                    target,
+                    connection["credentials"],
+                    deployment,
+                    connect=remote_install.connect_paramiko,
+                    on_event=remote_event,
+                )
+                self.deployed = result.status in ("done", "partial")
+                self.set_status(result.status)
                 return
             journal.start(self.project_dir, "web")
             journal.config(self.cfg)
@@ -1307,6 +1938,11 @@ class WizardState:
         with self.lock:
             if self.status not in ("done", "partial"):
                 raise ValueError("La console est disponible apres la fin de l'installation.")
+            if self.install_target == "ssh":
+                raise ValueError(
+                    "La console locale ne pilote pas le Docker distant. "
+                    "Utilisez les liens des applications ou la console en conteneur."
+                )
             if self.admin_server is None:
                 token = admin.generate_token()
                 if self.demo:
@@ -1331,8 +1967,33 @@ class WizardServer(ThreadingHTTPServer):
         self.state = WizardState(project_dir, demo=demo)
         self.token = secrets.token_urlsafe(32)
         self.stopping = threading.Event()
+        self.access_previews = {}
+        self.access_previews_lock = threading.Lock()
         super().__init__(("127.0.0.1", port), WizardHandler)
         self.origin = f"http://127.0.0.1:{self.server_address[1]}"
+
+    def issue_access_preview(self):
+        # Une navigation ne peut pas fournir le Bearer du fetch authentifie.
+        # Un ticket court, a usage unique, evite de mettre ce Bearer dans l'URL.
+        html = self.state.access_page()
+        ticket = secrets.token_urlsafe(32)
+        with self.access_previews_lock:
+            now = time.monotonic()
+            self.access_previews = {
+                key: value for key, value in self.access_previews.items() if value[0] > now
+            }
+            if len(self.access_previews) >= 8:
+                oldest = min(self.access_previews, key=lambda key: self.access_previews[key][0])
+                del self.access_previews[oldest]
+            self.access_previews[ticket] = (now + 60, html)
+        return {"url": f"/access-preview/{ticket}"}
+
+    def consume_access_preview(self, ticket):
+        with self.access_previews_lock:
+            item = self.access_previews.pop(ticket, None)
+        if item is None or item[0] <= time.monotonic():
+            return None
+        return item[1]
 
 
 class WizardHandler(BaseHTTPRequestHandler):
@@ -1343,7 +2004,7 @@ class WizardHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass  # Ne jamais journaliser les requetes ni le jeton.
 
-    def respond(self, body, status=200, content_type="application/json; charset=utf-8"):
+    def respond(self, body, status=200, content_type="application/json; charset=utf-8", *, csp=None):
         data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -1353,7 +2014,7 @@ class WizardHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+            csp or "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
         )
         self.end_headers()
         self.wfile.write(data)
@@ -1387,11 +2048,30 @@ class WizardHandler(BaseHTTPRequestHandler):
             "/remote.js": ("remote.js", "text/javascript; charset=utf-8"),
             "/graph.css": ("graph.css", "text/css; charset=utf-8"),
         }
-        if not self.allowed(authenticated=route not in assets):
+        preview_route = route.startswith("/access-preview/")
+        if not self.allowed(authenticated=route not in assets and not preview_route):
             return
         if route in assets:
             name, mime = assets[route]
             self.respond((ASSETS / name).read_bytes(), content_type=mime)
+        elif preview_route:
+            ticket = route.removeprefix("/access-preview/")
+            html = self.server.consume_access_preview(ticket)
+            if html is None:
+                self.respond({"error": "Apercu expire. Rouvrez-le depuis PlugArr."}, 404)
+                return
+            hashes = [
+                "'sha256-" + base64.b64encode(hashlib.sha256(match.group(1)).digest()).decode() + "'"
+                for match in re.finditer(
+                    rb"<script(?:\s[^>]*)?>(.*?)</script>", html, re.IGNORECASE | re.DOTALL
+                )
+            ]
+            csp = (
+                "default-src 'none'; script-src " + (" ".join(hashes) or "'none'")
+                + "; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; "
+                "base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'"
+            )
+            self.respond(html, content_type="text/html; charset=utf-8", csp=csp)
         elif route == "/api/bootstrap":
             self.respond(self.server.state.bootstrap())
         elif route == "/api/startup":
@@ -1402,6 +2082,8 @@ class WizardHandler(BaseHTTPRequestHandler):
             self.respond(self.server.state.progress())
         elif route == "/api/report":
             self.respond(self.server.state.report())
+        elif route == "/api/updates":
+            self.respond(self.server.state.available_updates())
         elif route == "/api/indexers":
             self.respond(self.server.state.indexer_overview())
         elif route == "/api/access":
@@ -1551,6 +2233,8 @@ class WizardHandler(BaseHTTPRequestHandler):
                     "effective_count": len(resolved),
                     "planned_links": orchestrator.planned_links(preview),
                 }
+            elif route == "/api/remote-install/probe":
+                result = state.probe_remote_install(body)
             elif route == "/api/path-check":
                 result = state.check_paths(body)
             elif route == "/api/vpn-test":
@@ -1600,6 +2284,7 @@ class WizardHandler(BaseHTTPRequestHandler):
                     state.active_step = None
                     state.deployed = False
                     state.cfg = None
+                    state.console_password = ""
                     state.remote_result = None
                     state.reprise = None
                     state.reset_candidates = []
@@ -1611,6 +2296,8 @@ class WizardHandler(BaseHTTPRequestHandler):
                 result = {"ok": True}
             elif route == "/api/admin":
                 result = state.open_admin()
+            elif route == "/api/access-preview":
+                result = self.server.issue_access_preview()
             elif route == "/api/close":
                 with state.lock:
                     if state.status == "running" or (state.remote_worker and state.remote_worker.is_alive()):

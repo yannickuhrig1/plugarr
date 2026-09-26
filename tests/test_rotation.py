@@ -84,6 +84,8 @@ class _FauxAutobrr(AutobrrClient):
         self._existants = existants
         self.appels: list[tuple[str, str, dict]] = []
         self.name = "autobrr"
+        # Route d'autobrr >= v1.87.0, deja connue : pas de sondage a journaliser.
+        self._chemin_clients = "/api/downloaders"
 
     def clients(self):
         return self._existants
@@ -129,7 +131,7 @@ def test_un_mot_de_passe_change_est_pousse_dans_autobrr():
     methode, chemin, corps = client.appels[0]
     # PUT sur la COLLECTION : autobrr declare `r.Put("/", h.update)`, et
     # `/{id}` n'accepte que GET et DELETE — il repondait 405.
-    assert (methode, chemin) == ("PUT", "/api/download_clients")
+    assert (methode, chemin) == ("PUT", "/api/downloaders")
     assert corps["id"] == 3
     assert corps["password"] == "nouveau"
 

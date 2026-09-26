@@ -191,3 +191,69 @@ def test_chaque_bibliotheque_a_son_fournisseur():
     """`audible` pour ce qui s'ecoute, `google` pour ce qui se lit."""
     assert PROVIDERS["audiobooks"] == "audible"
     assert PROVIDERS["books"] == "google"
+
+
+def test_un_compte_existant_retrouve_le_mot_de_passe_d_une_installation_precedente(monkeypatch):
+    """Reinstallation reelle du 25/09/2026 : HTTP 401, alors que le mot de passe
+    accepte etait dans un stack.yml precedent (stack.yml.5)."""
+    from plugarr import reprise
+    from plugarr.clients import audiobookshelf as module_abs
+    from plugarr.clients.base import WiringError
+
+    cfg = _cfg("audiobookshelf")
+    cfg.services["audiobookshelf"].password = "genere-ce-passage"
+    essais = []
+
+    class Faux:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def wait_ready(self):
+            pass
+
+        def setup(self, **_kw):
+            return False
+
+        def login(self, _user, mot):
+            essais.append(mot)
+            if mot != "celui-du-premier-passage":
+                raise WiringError("audiobookshelf: POST /login a echoue", "HTTP 401", "")
+
+        def ensure_library(self, *_a, **_k):
+            return False
+
+        def libraries(self):
+            return [{"id": "a"}, {"id": "b"}]
+
+        def scan(self, _id):
+            return True
+
+    monkeypatch.setattr(module_abs, "AudiobookshelfClient", Faux)
+    monkeypatch.setattr(
+        reprise, "mots_de_passe_connus", lambda *_a, **_k: ["celui-du-premier-passage"]
+    )
+    wirer = Wirer(cfg)
+
+    resultat = wirer.step_audiobookshelf_setup()
+
+    assert essais == ["genere-ce-passage", "celui-du-premier-passage"]
+    assert cfg.services["audiobookshelf"].password == "celui-du-premier-passage"
+    assert "audiobookshelf" in wirer.recuperations
+    assert resultat.ok
+
+
+def test_sa_configuration_existante_est_signalee_comme_non_relisible(tmp_path):
+    cfg = orchestrator.build_config(
+        services=["audiobookshelf"], config_root=str(tmp_path / "c"), data_root=str(tmp_path / "d")
+    )
+    dossier = tmp_path / "c" / "audiobookshelf"
+    dossier.mkdir(parents=True)
+    (dossier / "absdatabase.sqlite").write_bytes(b"x")
+
+    assert "audiobookshelf" in orchestrator.unusable_configs(cfg)

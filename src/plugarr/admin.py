@@ -27,6 +27,7 @@ import json
 import secrets
 import sys
 import threading
+import traceback
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,6 +41,7 @@ from . import (
     catalog,
     compose,
     dashboard,
+    diagnostics,
     imageref,
     journal,
     orchestrator,
@@ -275,7 +277,7 @@ def doctor_payload(
     """
     controles: list[dict] = [
         {"name": c.name, "ok": c.ok, "detail": c.detail, "blocking": c.blocking, "partage": False}
-        for c in orchestrator.preflight(cfg, project_dir)
+        for c in orchestrator.diagnostic(cfg, project_dir)
         if c.name not in _AVANT_INSTALLATION
     ]
     indisponibles: set[str] = set()
@@ -329,6 +331,10 @@ def doctor_payload(
                     ),
                 }
             )
+    controles += diagnostics.connection_checks(cfg)
+    drift = diagnostics.compose_drift(cfg, project_dir)
+    if drift is not None:
+        controles.append(drift)
     # La fuite VPN en DERNIER, pour qu'elle se lise en bas du rapport, la ou
     # l'oeil s'arrete. C'est le controle dont la reponse compte le plus.
     #
@@ -413,6 +419,29 @@ _CONNEXION = """<!doctype html>
 
 def _page_connexion(erreur: str = "") -> str:
     return _CONNEXION.format(erreur=erreur)
+
+
+_ERREUR_TABLEAU_DE_BORD = """<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PlugArr - administration indisponible</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0d0e16; color: #eeedf6;
+         display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 1.5rem; }
+  main { width: min(42rem, 100%); background: #171821; border: 1px solid #3d3048;
+         border-radius: 14px; padding: 2rem; box-sizing: border-box; }
+  h1 { margin-top: 0; font-size: 1.35rem; }
+  p { color: #c5c3d3; line-height: 1.6; }
+  code { color: #ffb36f; }
+  a { color: #d99cff; }
+</style></head><body><main>
+  <h1>La page d'administration n'a pas pu etre generee</h1>
+  <p>Votre mot de passe a bien ete accepte. PlugArr a rencontre une erreur interne
+     en construisant le tableau de bord, mais la console continue de fonctionner.</p>
+  <p>Rechargez cette page. Si le probleme revient, relevez le diagnostic avec
+     <code>docker logs --tail 200 plugarr-console</code>.</p>
+  <p><a href="/">Recharger la page d'administration</a></p>
+</main></body></html>"""
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -510,8 +539,41 @@ class _Handler(BaseHTTPRequestHandler):
 
         self.sessions.clear_failures()
         jeton = self.sessions.open()
-        page = dashboard.render(self.cfg, live=True).encode("utf-8")
-        self._send(HTTPStatus.OK, page, "text/html; charset=utf-8", cookie=True, cookie_value=jeton)
+        self._send_dashboard(cookie_value=jeton)
+
+    def _send_dashboard(self, *, cookie_value: str | None = None) -> None:
+        """Rend la console sans jamais abandonner la connexion HTTP.
+
+        Une exception non interceptee dans un ``BaseHTTPRequestHandler`` ferme
+        la socket sans reponse. Chrome affiche alors ``ERR_EMPTY_RESPONSE`` et
+        l'utilisateur ne peut ni comprendre la panne ni fournir son diagnostic.
+        Le detail complet reste dans les journaux du conteneur, tandis que le
+        navigateur recoit une page volontairement sans secret.
+        """
+        try:
+            page = dashboard.render(self.cfg, live=True).encode("utf-8")
+        except Exception:  # noqa: BLE001 - frontiere HTTP, aucune exception ne doit fermer la socket
+            print(
+                "ERREUR PlugArr : generation de la page d'administration impossible.",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exc()
+            self._send(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                _ERREUR_TABLEAU_DE_BORD.encode("utf-8"),
+                "text/html; charset=utf-8",
+                cookie=True,
+                cookie_value=cookie_value,
+            )
+            return
+        self._send(
+            HTTPStatus.OK,
+            page,
+            "text/html; charset=utf-8",
+            cookie=True,
+            cookie_value=cookie_value,
+        )
 
     def _send(
         self,
@@ -557,8 +619,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _get_authorised(self):
         route = urlparse(self.path).path
         if route == "/":
-            page = dashboard.render(self.cfg, live=True).encode("utf-8")
-            self._send(HTTPStatus.OK, page, "text/html; charset=utf-8", cookie=True)
+            self._send_dashboard()
         elif route in admin_extensions.GET_ROUTES:
             admin_extensions.get(self, route)
         elif route == "/api/status":

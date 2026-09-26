@@ -22,6 +22,7 @@ import html
 import json
 import socket
 import sys
+import traceback
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -343,7 +344,7 @@ def _paths(cfg: StackConfig) -> str:
     return rows
 
 
-def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_report=None, demo=False) -> str:
+def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_report=None, demo=False, console_password: str = "") -> str:
     """Rend la page.
 
     `live=False` produit le fichier statique ecrit apres l'installation.
@@ -399,6 +400,23 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_repo
             )
             + "</div>"
         )
+        if cfg.console_enabled and console_password:
+            console_url = html.escape(
+                f"http://{host}:{cfg.console_port}/", quote=True
+            )
+            banner += (
+                '<div class="banner info"><strong>'
+                + t("Administration PlugArr")
+                + '</strong><br><a href="'
+                + console_url
+                + '" target="_blank" rel="noopener noreferrer">'
+                + console_url
+                + '</a><br>'
+                + t("Mot de passe de la console")
+                + " : "
+                + _secret(console_password, t("le mot de passe"))
+                + "</div>"
+            )
 
     # Importe ici et non en tete : `orchestrator` importe `dashboard`.
     from .orchestrator import prochaine_etape
@@ -451,8 +469,23 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_repo
     )
 
     if live:
-        from .console_ui import enhance
-        return enhance(page)
+        try:
+            from .console_ui import enhance
+
+            return enhance(page)
+        except Exception:  # noqa: BLE001 - repli volontaire de la couche d'affichage
+            # L'habillage de la console lit des ressources embarquees
+            # (graphe, icones et JavaScript). Une image Docker incomplete ne
+            # doit pas rendre toute l'administration inaccessible : la page
+            # live standard conserve les controles essentiels.
+            print(
+                "AVERTISSEMENT PlugArr : habillage avance indisponible, "
+                "affichage de la console standard.",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exc()
+            return page
     from .mobile_access import append_to
     return append_to(page, cfg, host, remote=remote_report, demo=demo)
 
@@ -1060,7 +1093,7 @@ def admin_command(project_dir: Path) -> str:
     return f'"{Path(sys.executable).resolve()}" -m plugarr serve --project-dir {cible}'
 
 
-def write_admin_launcher(project_dir: Path) -> Path:
+def write_admin_launcher(project_dir: Path, cfg: StackConfig | None = None) -> Path:
     """Ecrit un lanceur double-cliquable pour la page d'administration.
 
     C'est elle qui porte l'etat des services, les boutons demarrer / arreter /
@@ -1071,6 +1104,31 @@ def write_admin_launcher(project_dir: Path) -> Path:
     project_dir = Path(project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)
     cible = project_dir / LAUNCHER_NAME
+    if cfg is not None and cfg.console_enabled:
+        # Installation distante reelle du 25/09/2026 : ecrit depuis le conteneur
+        # d'installation, le lanceur pointait vers SON Python, absent de la
+        # machine (« /usr/local/bin/python3.12: not found »). La console existe
+        # deja en conteneur : on la demarre et on donne son adresse.
+        conteneur = f"{cfg.project_name}-console"
+        adresse = f"http://{cfg.host}:{cfg.console_port}/"
+        if sys.platform == "win32":
+            contenu = (
+                "@echo off\r\n"
+                + _commentaire_lanceur("rem", "\r\n")
+                + f"docker start {conteneur} >nul\r\n"
+                f"echo {adresse}\r\n"
+                "pause\r\n"
+            )
+            cible.write_text(contenu, encoding="utf-8", newline="")
+        else:
+            contenu = (
+                "#!/bin/sh\n"
+                + _commentaire_lanceur("#", "\n")
+                + f"docker start {conteneur} >/dev/null && echo {adresse}\n"
+            )
+            cible.write_text(contenu, encoding="utf-8")
+            cible.chmod(0o755)
+        return cible
     commande = admin_command(project_dir)
 
     if sys.platform == "win32":

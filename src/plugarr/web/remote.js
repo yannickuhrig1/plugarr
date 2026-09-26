@@ -530,7 +530,6 @@ globalThis.PlugArrRemote = (() => {
     try{
       const remote=current.services.some(s=>ids.includes(s.id)&&s.remote_url);
       $('nzb-export-network').querySelector('option[value="remote"]').disabled=!remote;
-      if(!remote)$('nzb-export-network').value='local';
       const distant=$('nzb-export-network').value==='remote';
       $('nzb-export-ssid-label').hidden=!distant;
       $('nzb-export-target-label').hidden=!nzbBase;

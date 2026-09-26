@@ -93,3 +93,17 @@ def test_le_lanceur_est_ecrasable(tmp_path):
     chemin = dashboard.write_admin_launcher(tmp_path)
 
     assert chemin.exists()
+
+
+def test_avec_console_en_conteneur_le_lanceur_ne_depend_pas_du_python_de_l_installation(tmp_path):
+    """VPS reel du 25/09/2026 : « /usr/local/bin/python3.12: not found »."""
+    cfg = _cfg(tmp_path)
+    cfg.console_enabled = True
+    cfg.host = "10.0.0.30"
+
+    contenu = dashboard.write_admin_launcher(tmp_path, cfg).read_text(encoding="utf-8")
+
+    assert f"docker start {cfg.project_name}-console" in contenu
+    assert f"http://10.0.0.30:{cfg.console_port}/" in contenu
+    assert str(Path(sys.executable).resolve()) not in contenu
+

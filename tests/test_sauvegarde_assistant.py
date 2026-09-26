@@ -129,7 +129,7 @@ async def test_une_archive_est_reellement_ecrite(assistant, tmp_path, attendre, 
         def __init__(self, *a, **kw):
             pass
 
-        def stop(self):
+        def stop(self, **_kwargs):
             return True, ""
 
         def up(self):

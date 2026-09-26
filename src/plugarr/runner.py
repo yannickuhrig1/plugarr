@@ -434,7 +434,7 @@ class Compose:
         proc = _run(self._cmd("up", "-d", "--remove-orphans"), cwd=self.dir, timeout=timeout)
         return proc.returncode == 0, (proc.stderr or proc.stdout).strip()
 
-    def stop(self, timeout: int = 300) -> tuple[bool, str]:
+    def stop(self, timeout: int = 300, *, sauf: tuple[str, ...] = ()) -> tuple[bool, str]:
         """Arrete les conteneurs du projet sans les supprimer.
 
         Sert avant un pre-semis : une application qui tourne garde sa
@@ -447,8 +447,19 @@ class Compose:
         # ou de forme. On releve donc les conteneurs en marche AVANT l'arret,
         # au lieu de chercher les mots anglais "Stopping" / "Stopped" pour
         # decider s'il faudra les relancer apres une sauvegarde.
-        running = _run(self._cmd("ps", "-q"), cwd=self.dir, timeout=PROBE_TIMEOUT)
-        proc = _run(self._cmd("stop"), cwd=self.dir, timeout=timeout)
+        cibles: list[str] = []
+        if sauf:
+            # Console reelle du 25/09/2026 : une sauvegarde lancee DEPUIS la
+            # console arretait toute la pile, console comprise. Elle se tuait
+            # au milieu de l'operation et laissait tout arrete.
+            listing = _run(self._cmd("config", "--services"), cwd=self.dir, timeout=PROBE_TIMEOUT)
+            if listing.returncode != 0:
+                raise OSError((listing.stderr or listing.stdout or "").strip() or t("docker compose stop a echoue"))
+            cibles = [s for s in (listing.stdout or "").split() if s not in sauf]
+            if not cibles:
+                return False, ""
+        running = _run(self._cmd("ps", "-q", *cibles), cwd=self.dir, timeout=PROBE_TIMEOUT)
+        proc = _run(self._cmd("stop", *cibles), cwd=self.dir, timeout=timeout)
         sortie = (proc.stderr or "") + (proc.stdout or "")
         if proc.returncode != 0:
             raise OSError(sortie.strip() or t("docker compose stop a echoue"))

@@ -2,8 +2,9 @@
 
 # Compatibilité
 
-Tout ce qui figure ici a été **vérifié contre une instance réelle**, pas déduit de la
-documentation. Les tags d'image sont épinglés dans `src/plugarr/catalog.py`.
+Sauf les entrées explicitement marquées **avant-première**, tout ce qui figure
+ici a été **vérifié contre une instance réelle**, pas déduit de la documentation.
+Les tags d'image sont épinglés dans `src/plugarr/catalog.py`.
 
 Dernière campagne de vérification : **2026-08-31**, Docker Engine 29.6.1,
 Docker Compose v5.3.0, Docker Desktop sous Windows 11 (backend WSL2).
@@ -12,15 +13,17 @@ Docker Compose v5.3.0, Docker Desktop sous Windows 11 (backend WSL2).
 
 | Service | Image | Tag | Version rapportée par l'API |
 |---|---|---|---|
-| Sonarr | `lscr.io/linuxserver/sonarr` | `4.0.19` | 4.0.19.2979 |
-| Radarr | `lscr.io/linuxserver/radarr` | `6.3.0` | vérifié au démarrage |
-| Prowlarr | `lscr.io/linuxserver/prowlarr` | `2.5.2` | vérifié au démarrage |
+| Sonarr | `lscr.io/linuxserver/sonarr` | `4.0.20` | à confirmer (4.0.19.2979 vérifiée) |
+| Radarr | `lscr.io/linuxserver/radarr` | `6.4.4` | à confirmer (6.3.0 vérifiée) |
+| Prowlarr | `lscr.io/linuxserver/prowlarr` | `2.6.5` | à confirmer (2.5.2 vérifiée) |
 | Transmission | `lscr.io/linuxserver/transmission` | `4.1.3` | — |
-| Jellyfin | `lscr.io/linuxserver/jellyfin` | `10.11.11` | 10.11.11 |
+| Jellyfin | `lscr.io/linuxserver/jellyfin` | `12.1ubu2604-ls50` | 12.1.0 : assistant, clé API et bibliothèques vérifiés le 26/09/2026 |
 | Lidarr | `lscr.io/linuxserver/lidarr` | `3.1.0` | 3.1.0.4875 |
 | qBittorrent | `lscr.io/linuxserver/qbittorrent` | `5.2.3` | v5.2.3 |
 | VueTorrent (mod de qBittorrent, en option) | `ghcr.io/vuetorrent/vuetorrent-lsio-mod` | `2.35.0@sha256:f6445ce1…` | page servie : « VueTorrent » |
-| Flood | `jesec/flood` | `4.16.1` | pas encore testé |
+| Flood | `jesec/flood` | `4.16.2` | à confirmer (4.16.1 démarrée sur VPS arm64) |
+| Shelfarr **(avant-première)** | `ghcr.io/pedro-revez-silva/shelfarr` | `2026.09.18.1@sha256:a7afa12a…` | démarrage réel vérifié sur VPS arm64 le 25/09/2026 (conteneur sain, page servie) |
+| Libation pour Shelfarr **(avant-première, interne)** | `ghcr.io/pedro-revez-silva/shelfarr-libation` | `2026.09.18.1@sha256:f3e7b166…` | démarrage réel vérifié sur VPS arm64 le 25/09/2026 (conteneur sain) |
 
 ## Constats vérifiés expérimentalement
 
@@ -419,6 +422,19 @@ machine.
 
 `adopt` détecte donc l'adresse de la machine sur le réseau local, et refuse de continuer
 s'il n'y arrive pas plutôt que de câbler des URL mortes.
+
+### Client torrent derrière Gluetun
+
+Sur une pile Unraid examinée en lecture seule le 25 septembre 2026, qBittorrent
+partageait l'espace réseau de Gluetun : son propre conteneur ne publiait aucun
+port, alors que Gluetun publiait sa WebUI sur `8090`. `scan` lit désormais le
+port WebUI dans `qBittorrent.conf` et cherche la publication correspondante sur
+le conteneur propriétaire du réseau. Il ne modifie ni le VPN ni qBittorrent.
+Si le propriétaire ou le port reste introuvable, le client reste non adoptable.
+
+Cette observation ne valide pas encore un câblage sur cette pile : elle contient
+deux Sonarr, donc un choix explicite est nécessaire, et ses montages ne suivent
+pas tous l'arborescence `/data` de PlugArr.
 
 ### Un nom de conteneur ne prouve rien
 

@@ -34,6 +34,11 @@ class QuiClient:
         self.name = name
         self.base_url = base_url.rstrip("/")
         self._http = new_client(self.base_url)
+        # qui v1.30.0 refuse toute ecriture authentifiee par cookie sans cet
+        # en-tete (HTTP 403 « Missing X-Requested-With header », garde anti-CSRF
+        # de internal/api/middleware/auth.go). Sans effet sur les versions
+        # precedentes. Constate a l'installation reelle du 26/09/2026.
+        self._http.headers["X-Requested-With"] = "XMLHttpRequest"
 
     def close(self) -> None:
         self._http.close()
@@ -126,8 +131,22 @@ class QuiClient:
 
         qui n'interdit pas les doublons : sans cette verification, chaque passage
         de `plugarr wire` ajouterait une entree de plus.
+
+        Une instance existante est REALIGNEE, pas seulement reconnue. Essai reel
+        du 25/09/2026 : le mot de passe de qBittorrent avait change et le VPN
+        avait ete retire puis remis ; qui gardait l'ancien mot de passe, avait
+        cree une seconde instance a la nouvelle adresse, et aucune ne se
+        connectait. On la retrouve par son adresse, sinon par le nom que PlugArr
+        lui donne, et on lui renvoie adresse et identifiants actuels.
         """
-        if any(self._same_host(i.get("host", ""), host) for i in self.instances()):
+        existantes = self.instances()
+        existante = next(
+            (i for i in existantes if self._same_host(i.get("host", ""), host)), None
+        ) or next((i for i in existantes if i.get("name") == name), None)
+        if existante is not None:
+            if existante.get("id") is not None:
+                self._update_instance(existante["id"], name=existante.get("name") or name,
+                                      host=host, username=username, password=password)
             return False
 
         resp = self._request(
@@ -143,6 +162,21 @@ class QuiClient:
             )
         return True
 
+    def _update_instance(self, instance_id, *, name: str, host: str, username: str, password: str) -> None:
+        # qui v1.28.0 : PUT /api/instances/{id}, `name` et `host` obligatoires,
+        # les autres reglages absents du corps sont conserves.
+        resp = self._request(
+            "PUT",
+            f"/api/instances/{instance_id}",
+            json={"name": name, "host": host, "username": username, "password": password},
+        )
+        if resp.status_code not in (200, 204):
+            raise WiringError(
+                "qui: mise a jour de l'instance qBittorrent impossible",
+                f"HTTP {resp.status_code} - {resp.text[:300]}",
+                t("verifiez que qBittorrent est demarre"),
+            )
+
     def connected(self, host: str, timeout: float = 60.0) -> tuple[bool, str]:
         """La connexion est-elle etablie, selon qui lui-meme ?
 
@@ -150,7 +184,7 @@ class QuiClient:
         session vers qBittorrent. On laisse le temps de s'etablir plutot que de
         conclure trop tot.
         """
-        state = {"detail": t("aucune instance a cette adresse")}
+        state = {"detail": t("aucune instance a cette adresse"), "teste": False}
 
         def probe() -> bool:
             for inst in self.instances():
@@ -158,7 +192,24 @@ class QuiClient:
                     continue
                 status = inst.get("connectionStatus") or "inconnu"
                 state["detail"] = f"etat {status}"
-                return bool(inst.get("connected"))
+                if inst.get("connected"):
+                    return True
+                # Essai reel du 25/09/2026 : apres des echecs, qui met l'instance
+                # en attente (backoff) et son etat ne bouge plus pendant une
+                # minute, meme une fois les identifiants corriges. Son test
+                # explicite, lui, repond tout de suite et met l'etat a jour.
+                if not state["teste"] and inst.get("id") is not None:
+                    state["teste"] = True
+                    resp = self._request("POST", f"/api/instances/{inst['id']}/test")
+                    if resp.status_code == 200:
+                        try:
+                            verdict = resp.json()
+                        except ValueError:
+                            verdict = {}
+                        if isinstance(verdict, dict) and verdict.get("connected"):
+                            state["detail"] = "etat connecte (test explicite)"
+                            return True
+                return False
             return False
 
         result = wait_until(probe, label=self.name, timeout=timeout)

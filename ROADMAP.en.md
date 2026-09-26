@@ -9,6 +9,27 @@ working session.
 
 ---
 
+## Diagnose and adopt an existing stack (local work, 25 September)
+
+- [x] `doctor` checks *arr* APIs, testable links, VPN routing, hardlink creation,
+  free disk space, and drift in `docker-compose.yml`/`.env`.
+- [x] `doctor --repair` explains connection and incoming-port fixes and asks
+  before applying each one. A plain diagnosis does not apply changes.
+- [x] `adopt --dry-run` shows containers, images, ports, mounts, and operations.
+  `--only` limits application to chosen steps after confirmation.
+- [x] `doctor --deep-hardlinks` confirms existing hardlinks by inode, using a
+  bounded read-only sample without treating missing evidence as a broken link.
+- [x] Before wiring, `adopt` reads *arr* API versions and stops if an API fails
+  or rejects its key.
+- [x] Discover qBittorrent's port when Gluetun publishes its WebUI, checked
+  against a read-only inventory from a real Unraid host.
+- [ ] Check paths as seen inside each container and detailed API schema
+  compatibility, beyond mount inventory and `system/status`.
+- [ ] Validate this flow on real Unraid, Synology, and UGREEN hosts, then offer
+  guided fixes for adopted stacks in the web interface.
+
+---
+
 ## What works today
 
 Sixteen services installed and **wired** in one pass, verified against real
@@ -82,13 +103,13 @@ installation**.
 
 Verified against the registries on 4 September 2026, ready to be pinned. This is
 not the work, it is its precondition: a service only enters the catalogue once it
-is **wired and verified** against a real instance. Three of the five digests
-recorded that day are now in the catalogue: Seerr, Audiobookshelf and
-DroppedNeedle.
+is **wired and verified** against a real instance. Four of the five services
+studied are now present: Seerr, Audiobookshelf, DroppedNeedle and Shelfarr.
+Shelfarr remains marked as a test integration until it is validated on a real
+installation.
 
 | | pinned image |
 |---|---|
-| Shelfarr | `ghcr.io/pedro-revez-silva/shelfarr:2026.08.31.1@sha256:08e06f5b…` |
 | Shelfmark | `ghcr.io/calibrain/shelfmark:v1.3.15@sha256:96022903…` |
 
 ---
@@ -106,8 +127,10 @@ below, and each has a first point to settle before writing a line:
   wizard. theme.park is set aside for 0.10.0: measured, it does not survive a
   restart without Internet. See "Customising the interfaces".
 
-**Shelfarr and Shelfmark** follow: their digests are already recorded, and
-Audiobookshelf unblocks them, since they deliver into its libraries.
+**Shelfarr is integrated as a test version.** Its Compose services, Libation
+companion, volumes and dependencies are generated. A real installation still
+has to validate startup, and settings should only be automated if a public,
+stable setup API can be verified. Shelfmark follows.
 
 ### What the pack update settled — shipped in 0.6.0
 
@@ -188,7 +211,6 @@ real instance. The order below is the order of study.
 | **Tautulli** | **Plex** monitoring and statistics. Cannot come before Plex. |
 | **Jellystat** | Jellyfin statistics. Requires a **PostgreSQL** database in a second container, where the whole catalogue fits in one. |
 | **Tracearr** | Playback tracking and account sharing detection. The `latest` image demands an external database and Redis; the `supervised` tag bundles everything into one container. |
-| **Shelfarr** | `ghcr.io/pedro-revez-silva/shelfarr`, **2026.08.31.1**. Book requests for the *arr ecosystem — a Seerr for books. Searches through Prowlarr, downloads via qBittorrent, delivers to Audiobookshelf. Fills the hole left by Readarr, archived since 27 June 2025. |
 | **Shelfmark** | `ghcr.io/calibrain/shelfmark`, **v1.3.15**, 60 releases. A search and request UI for books, with sources and clients brought by you. |
 | **Whisparr v2 and v3** | Requested by a user, as an explicit opt-in. **Two distinct applications sharing one name**, not two versions: v2 derives from Sonarr (a site is a series, a scene an episode, ThePornDB metadata), v3 "Eros" from Radarr (a scene is a movie, StashDB metadata). v3 does not take over a library organised by v2, hence the point of offering both. Images recorded at hotio: `ghcr.io/hotio/whisparr`, tags `v2` (2.2.0) and `v3` (3.5.0), **both on port 6969**: one must be shifted for them to coexist. Their APIs differ the way Sonarr's and Radarr's do: two wirings, not one. To verify against a real instance before relying on it: that Prowlarr wires both (its connector targets `/api/v3`, which is the API version and not Whisparr's), that autobrr's `WHISPARR` type accepts v3, and that pre-seeding `config.xml` holds for each. |
 | **Deluge** | Requested in use. A third BitTorrent client, alongside Transmission and qBittorrent. Image recorded at linuxserver: `lscr.io/linuxserver/deluge`, tag `2.2.0` (2026-08-24), with a **second `libtorrentv1` line** (`libtorrentv1-2.2.0-ls62`, 2026-09-07): two libtorrent libraries for the same Deluge version, so we will have to pick which one we pin and write down why. Web interface on **8112**, default password `deluge` — no port clash with the clients already in the catalogue. The trap is elsewhere: the *arr require **both the WebUI AND Label plugins to be active**, and without Label there are no categories at all, therefore no download tracking. That is the same blind spot as SABnzbd's empty category directories, and it belongs in pre-seeding, not in a README note. To verify against a real instance before relying on it: that the *arr connector authenticates with a password ALONE, without a username, unlike Transmission and qBittorrent; that the Label plugin can be enabled from a configuration file and not only from the interface; and what Deluge does with the incoming port, because `port_sync_clients` currently returns only **one** client (qBittorrent first) and Deluge will have to either join it or be excluded from port forwarding explicitly rather than by omission. |

@@ -14,7 +14,13 @@ from textual.widgets import Button, Input, RadioButton, Select, SelectionList, S
 from plugarr import vpnservers
 from plugarr.models import VPN_PROVIDERS, VpnConfig
 from plugarr.tui.app import PlugArrApp
-from plugarr.tui.screens import PathsScreen, SummaryScreen, TemplatesScreen, VpnScreen
+from plugarr.tui.screens import (
+    PathsScreen,
+    RemoteAccessScreen,
+    SummaryScreen,
+    TemplatesScreen,
+    VpnScreen,
+)
 
 
 @pytest.fixture
@@ -48,8 +54,10 @@ async def test_il_est_saute_sans_client_de_telechargement(app, appuyer):
         pilot.app.selection = ["sonarr", "jellyfin"]
         await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
+        # L'ecran suivant est l'acces distant (Sonarr est choisi), puis le
+        # recapitulatif : l'essentiel est que cet ecran-ci soit saute.
         assert await appuyer(
-            pilot, "#next", lambda: isinstance(pilot.app.screen, SummaryScreen)
+            pilot, "#next", lambda: isinstance(pilot.app.screen, RemoteAccessScreen)
         )
 
 

@@ -991,12 +991,12 @@ class TemplatesScreen(WizardScreen):
         if not self._validate():
             return
         self.app.recyclarr_templates = self.choices()
-        self.app.push_screen(SummaryScreen())
+        self.app.push_screen(ecran_avant_recapitulatif(self.app))
 
     @on(Button.Pressed, "#skip")
     def skip(self) -> None:
         self.app.recyclarr_templates = {}
-        self.app.push_screen(SummaryScreen())
+        self.app.push_screen(ecran_avant_recapitulatif(self.app))
 
     @on(Button.Pressed, "#back")
     def back(self) -> None:
@@ -1457,7 +1457,112 @@ def _suite_apres_vpn(app) -> None:
     ):
         app.push_screen(TemplatesScreen())
     else:
-        app.push_screen(SummaryScreen())
+        app.push_screen(ecran_avant_recapitulatif(app))
+
+
+# ------------------------------------------------------------- acces distant
+
+
+def ecran_avant_recapitulatif(app):
+    """L'acces distant ne concerne que Sonarr, Radarr et qBittorrent."""
+    from .. import remote_access
+
+    if any(sid in app.selection for sid in remote_access.SUPPORTED):
+        return RemoteAccessScreen()
+    return SummaryScreen()
+
+
+class RemoteAccessScreen(WizardScreen):
+    """Parite avec l'assistant web, qui avait seul cet ecran : acces local,
+    HTTPS avec un domaine, ou Tailscale. Rien n'est active avant la fin de
+    l'installation, ou le rapport propose l'activation."""
+
+    SUB_TITLE = "Acces distant"
+
+    def content(self) -> ComposeResult:
+        with VerticalScroll(id="remote-access"):
+            yield Static(
+                "Choisissez comment joindre vos applications hors de chez vous. "
+                "[dim]Rien n'est active maintenant : l'activation se fait apres "
+                "l'installation, depuis le rapport.[/dim]",
+                id="ra-intro",
+            )
+            with RadioSet(id="ra-mode"):
+                yield RadioButton("Local uniquement", value=True, id="ra-local")
+                yield RadioButton("HTTPS avec votre domaine", id="ra-https")
+                yield RadioButton("Tailscale (reseau prive)", id="ra-tailscale")
+            yield Input(placeholder="votre-domaine.fr", id="ra-domain", classes="hidden")
+            yield SelectionList(id="ra-services", classes="hidden")
+            yield Static(id="ra-aide")
+        yield Horizontal(
+            Button("Suivant", variant="primary", id="next"),
+            Button("Retour", id="back"),
+            classes="actions",
+        )
+
+    def on_mount(self) -> None:
+        from textual.widgets.selection_list import Selection
+
+        from .. import remote_access
+
+        actuel = self.app.remote_access or self.app.build_config().remote_access
+        self.query_one(f"#ra-{actuel.mode}", RadioButton).value = True
+        self.query_one("#ra-domain", Input).value = actuel.domain
+        liste = self.query_one("#ra-services", SelectionList)
+        choisis = set(actuel.services) or set(remote_access.SUPPORTED)
+        for sid in remote_access.SUPPORTED:
+            if sid in self.app.selection:
+                liste.add_option(Selection(catalog.get(sid).display_name, sid, sid in choisis))
+        self._afficher(actuel.mode)
+
+    def _mode(self) -> str:
+        bouton = self.query_one("#ra-mode", RadioSet).pressed_button
+        return (bouton.id or "ra-local").removeprefix("ra-") if bouton else "local"
+
+    def _afficher(self, mode: str) -> None:
+        https = mode == "https"
+        self.query_one("#ra-domain", Input).set_class(not https, "hidden")
+        self.query_one("#ra-services", SelectionList).set_class(not https, "hidden")
+        aides = {
+            "local": t("Vos applications restent joignables depuis votre reseau seulement."),
+            "https": t(
+                "Chaque application recoit une adresse HTTPS sur votre domaine. Les "
+                "sous-domaines doivent pointer vers votre connexion publique, et la box "
+                "doit transmettre les ports 80 et 443 a cette machine."
+            ),
+            "tailscale": t(
+                "Vos appareils rejoignent le reseau prive Tailscale de ce serveur. "
+                "Sur Linux, PlugArr prepare Tailscale et donne le lien de connexion a la fin."
+            ),
+        }
+        self.query_one("#ra-aide", Static).update("[dim]" + aides[mode] + "[/dim]")
+
+    @on(RadioSet.Changed, "#ra-mode")
+    def _changer(self, _event: RadioSet.Changed) -> None:
+        self._afficher(self._mode())
+
+    @on(Button.Pressed, "#next")
+    def go(self) -> None:
+        from ..remote_models import RemoteAccessConfig
+
+        mode = self._mode()
+        domaine = self.query_one("#ra-domain", Input).value.strip() if mode == "https" else ""
+        services = list(self.query_one("#ra-services", SelectionList).selected) if mode == "https" else []
+        try:
+            choix = RemoteAccessConfig(mode=mode, domain=domaine, services=services)
+            if mode == "https" and (not choix.domain or not choix.services):
+                raise ValueError(t("Indiquez un domaine seul et choisissez au moins une application."))
+        except ValueError as exc:
+            message = exc.errors()[0]["msg"] if hasattr(exc, "errors") else str(exc)
+            self.query_one("#ra-aide", Static).update(f"[red]{message}[/red]")
+            return
+        self.app.remote_access = choix
+        self.app.stack_config = None
+        self.app.push_screen(SummaryScreen())
+
+    @on(Button.Pressed, "#back")
+    def back(self) -> None:
+        self.app.pop_screen()
 
 
 # ----------------------------------------------------------------- recapitulatif
@@ -1527,6 +1632,11 @@ class SummaryScreen(WizardScreen):
             ),
             f"[b]PUID:PGID[/b]      {cfg.puid}:{cfg.pgid} [dim]({t(cfg.ids_source)})[/dim]",
             f"[b]UMASK / TZ[/b]     {cfg.umask}   {cfg.timezone}",
+            t("[b]Acces distant[/b]  {mode}", mode=(
+                f"HTTPS · {cfg.remote_access.domain}"
+                if cfg.remote_access.mode == "https"
+                else "Tailscale" if cfg.remote_access.mode == "tailscale" else t("Local uniquement")
+            )),
         ]
         concurrents = downloadclients.concurrents(cfg.services)
         if concurrents:
@@ -1890,6 +2000,17 @@ class ReportScreen(WizardScreen):
             yield Static(id="report-next")
             yield Static(t("[b]Mises a jour disponibles[/b]  [dim]recherche...[/dim]"), id="report-updates")
             yield Static(id="report-admin")
+            # Acces distant : parite avec l'assistant web, qui l'activait ici.
+            yield Static(id="report-remote", classes="hidden")
+            yield Checkbox(
+                "Je comprends que cette passerelle rend ces applications joignables hors de chez moi.",
+                id="remote-confirm",
+                classes="hidden",
+            )
+            with Horizontal(id="remote-actions", classes="hidden"):
+                yield Button("Activer l'acces distant", id="remote-activate", disabled=True)
+                yield Button("Actualiser", id="remote-refresh")
+                yield Button("Desactiver", id="remote-deactivate", disabled=True)
         yield Horizontal(
             Button("Ouvrir la page d'acces", variant="success", id="open-page"),
             Button(t("Ouvrir l'administration"), id="open-admin"),
@@ -1998,6 +2119,79 @@ class ReportScreen(WizardScreen):
         self.query_one("#report-next", Static).update(body)
         self._ouvrir_automatiquement()
         self.chercher_mises_a_jour()
+        self._preparer_acces_distant()
+
+    def _preparer_acces_distant(self) -> None:
+        from .. import remote_access
+
+        cfg = self.app.stack_config
+        if cfg is None or cfg.remote_access.mode == "local":
+            return
+        for selecteur in ("#report-remote", "#remote-confirm", "#remote-actions"):
+            self.query_one(selecteur).remove_class("hidden")
+        self._afficher_acces(remote_access.summary(cfg))
+
+    def _afficher_acces(self, resultat: dict) -> None:
+        lignes = [t("[b]Acces distant[/b]  {message}", message=resultat.get("message", ""))]
+        lignes += [f"  {sid} : {url}" for sid, url in (resultat.get("urls") or {}).items()]
+        if resultat.get("auth_url"):
+            lignes.append(t("  Lien d'association Tailscale : {lien}", lien=resultat["auth_url"]))
+        self.query_one("#report-remote", Static).update("\n".join(lignes))
+
+    @on(Checkbox.Changed, "#remote-confirm")
+    def _confirmer_acces(self, event: Checkbox.Changed) -> None:
+        self.query_one("#remote-activate", Button).disabled = not event.value
+        self.query_one("#remote-deactivate", Button).disabled = not event.value
+
+    @on(Button.Pressed, "#remote-activate")
+    def _activer(self) -> None:
+        self.operation_acces("activate")
+
+    @on(Button.Pressed, "#remote-refresh")
+    def _actualiser(self) -> None:
+        self.operation_acces("inspect")
+
+    @on(Button.Pressed, "#remote-deactivate")
+    def _desactiver(self) -> None:
+        self.operation_acces("deactivate")
+
+    @work(thread=True, exclusive=True, group="acces-distant")
+    def operation_acces(self, action: str) -> None:
+        """Meme sequence que l'assistant web : operation, puis page d'acces
+        reecrite avec le resultat. Une erreur imprevue ne montre jamais son
+        detail : il peut contenir un lien d'autorisation Tailscale."""
+        from .. import dashboard, remote_access
+
+        cfg = self.app.stack_config
+        if cfg is None:
+            return
+        if action in ("activate", "deactivate") and not self.query_one("#remote-confirm", Checkbox).value:
+            return
+        self.app.call_from_thread(
+            self._afficher_acces, {"message": t("Configuration de l'acces distant en cours...")}
+        )
+        operation = {
+            "activate": remote_access.activate,
+            "inspect": remote_access.inspect,
+            "deactivate": remote_access.deactivate,
+        }[action]
+        try:
+            resultat = operation(cfg, Path(self.app.project_dir))
+            chemin = Path(self.app.project_dir) / dashboard.FILENAME
+            chemin.write_text(dashboard.render(cfg, remote_report=resultat), encoding="utf-8")
+            chemin.chmod(0o600)
+        except ValueError as exc:
+            resultat = {**remote_access.summary(cfg), "message": str(exc)}
+        except Exception:  # noqa: BLE001
+            journal.LOGGER.exception("acces distant")
+            resultat = {
+                **remote_access.summary(cfg),
+                "message": t(
+                    "Verification distante impossible. Verifiez Docker, le reseau et les "
+                    "identifiants des applications."
+                ),
+            }
+        self.app.call_from_thread(self._afficher_acces, resultat)
 
     def _ouvrir_automatiquement(self) -> None:
         """Ouvre la page d'acces sans attendre un clic.

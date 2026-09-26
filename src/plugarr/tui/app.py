@@ -84,6 +84,9 @@ class PlugArrApp(App):
         self.platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
         #: Template TRaSH choisi par service. Vide = celui par defaut.
         self.recyclarr_templates: dict[str, str] = {}
+        #: Acces distant choisi a l'ecran (None : pas encore demande, la reprise
+        #: garde alors celui de l'installation en place).
+        self.remote_access = None
         self.stack_config: StackConfig | None = None
         #: Ce qui a ete repris, pour que le recapitulatif le montre.
         self.reprise: object | None = None
@@ -157,6 +160,8 @@ class PlugArrApp(App):
         if self.console_enabled is not None:
             cfg.console_enabled = self.console_enabled
             cfg.console_port = self.console_port
+        if self.remote_access is not None:
+            cfg.remote_access = self.remote_access.model_copy(deep=True)
 
         # Une installation deja presente : on reprend ce qu'elle portait plutot
         # que de l'effacer. Le VPN est le cas grave — sans cela il disparait en
@@ -199,7 +204,8 @@ class PlugArrApp(App):
                         {"console_enabled", "console_port"}
                         if self.console_enabled is not None
                         else set()
-                    ),
+                    )
+                    | ({"remote_access"} if self.remote_access is not None else set()),
                 )
                 # Ecrire ici les artefacts d'une pile installee ailleurs
                 # donnerait DEUX repertoires de projet portant le meme nom de

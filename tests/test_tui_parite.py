@@ -149,3 +149,86 @@ async def test_le_rapport_ouvre_l_administration(app, monkeypatch, attendre):
         assert await attendre(pilot, lambda: "45678" in str(zone.render()))
 
     assert ouvertes == ["http://127.0.0.1:45678/?t=jeton-essai"]
+
+
+# --------------------------------------------------------- 5. acces distant
+
+
+@pytest.mark.asyncio
+async def test_l_acces_https_se_choisit_dans_le_tui(app, attendre):
+    from textual.widgets import Input, RadioButton
+
+    from plugarr.tui.screens import RemoteAccessScreen
+
+    async with app.run_test() as pilot:
+        pilot.app.selection = ["sonarr", "radarr", "qbittorrent"]
+        await pilot.app.push_screen(RemoteAccessScreen())
+        await pilot.pause()
+        ecran = pilot.app.screen
+        ecran.query_one("#ra-https", RadioButton).value = True
+        await pilot.pause()
+        ecran.query_one("#ra-domain", Input).value = "exemple.fr"
+        ecran.query_one("#next", Button).press()
+        assert await attendre(pilot, lambda: isinstance(pilot.app.screen, SummaryScreen))
+
+        choix = pilot.app.remote_access
+        assert (choix.mode, choix.domain) == ("https", "exemple.fr")
+        assert set(choix.services) == {"sonarr", "radarr", "qbittorrent"}
+        assert pilot.app.build_config().remote_access.domain == "exemple.fr"
+
+
+@pytest.mark.asyncio
+async def test_un_domaine_invalide_est_refuse(app, attendre):
+    from textual.widgets import Input, RadioButton
+
+    from plugarr.tui.screens import RemoteAccessScreen
+
+    async with app.run_test() as pilot:
+        pilot.app.selection = ["sonarr"]
+        await pilot.app.push_screen(RemoteAccessScreen())
+        await pilot.pause()
+        ecran = pilot.app.screen
+        ecran.query_one("#ra-https", RadioButton).value = True
+        await pilot.pause()
+        ecran.query_one("#ra-domain", Input).value = "https://exemple.fr/chemin"
+        ecran.query_one("#next", Button).press()
+        await pilot.pause()
+
+        assert isinstance(pilot.app.screen, RemoteAccessScreen)
+        assert pilot.app.remote_access is None
+
+
+@pytest.mark.asyncio
+async def test_l_activation_de_l_acces_distant_exige_la_confirmation(app, monkeypatch, attendre):
+    from textual.widgets import Checkbox
+
+    from plugarr import remote_access
+    from plugarr.remote_models import RemoteAccessConfig
+
+    appels = []
+    monkeypatch.setattr(
+        remote_access,
+        "activate",
+        lambda cfg, dossier, **_k: appels.append(cfg.remote_access.mode)
+        or {"mode": "tailscale", "status": "association", "message": "Autorisez ce serveur",
+            "urls": {}, "auth_url": "https://login.tailscale.com/a/xyz", "demo": False},
+    )
+
+    async with app.run_test() as pilot:
+        pilot.app.selection = ["sonarr"]
+        pilot.app.remote_access = RemoteAccessConfig(mode="tailscale")
+        pilot.app.stack_config = pilot.app.build_config()
+        pilot.app.results = []
+        await pilot.app.push_screen(ReportScreen())
+        await pilot.pause()
+        ecran = pilot.app.screen
+        activer = ecran.query_one("#remote-activate", Button)
+        assert activer.disabled is True
+
+        ecran.query_one("#remote-confirm", Checkbox).value = True
+        await pilot.pause()
+        activer.press()
+        zone = ecran.query_one("#report-remote", Static)
+        assert await attendre(pilot, lambda: "Autorisez ce serveur" in str(zone.render()))
+
+    assert appels == ["tailscale"]

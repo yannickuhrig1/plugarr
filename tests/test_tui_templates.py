@@ -11,7 +11,7 @@ from textual.widgets import Button, Select, Static
 
 from plugarr.clients import recyclarr
 from plugarr.tui.app import PlugArrApp
-from plugarr.tui.screens import PathsScreen, SummaryScreen, TemplatesScreen
+from plugarr.tui.screens import PathsScreen, RemoteAccessScreen, SummaryScreen, TemplatesScreen
 
 AVAILABLE = {
     "sonarr": ["sonarr-german-hd-bluray-web", "web-1080p", "web-2160p"],
@@ -152,8 +152,10 @@ async def test_l_ecran_est_saute_sans_recyclarr(app, appuyer):
         pilot.app.selection = ["sonarr", "radarr"]
         await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
+        # L'ecran suivant est l'acces distant (Sonarr est choisi), puis le
+        # recapitulatif : l'essentiel est que cet ecran-ci soit saute.
         assert await appuyer(
-            pilot, "#next", lambda: isinstance(pilot.app.screen, SummaryScreen)
+            pilot, "#next", lambda: isinstance(pilot.app.screen, RemoteAccessScreen)
         )
 
 

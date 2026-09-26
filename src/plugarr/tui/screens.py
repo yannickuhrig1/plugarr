@@ -578,7 +578,19 @@ class ServicesScreen(WizardScreen):
     @on(Button.Pressed, "#next")
     def go(self) -> None:
         self.app.selection = catalog.resolve_dependencies(self.selection())
+        if self._reprise_directe():
+            self.app.push_screen(SummaryScreen(saute=True))
+            return
         self.app.push_screen(PathsScreen())
+
+    def _reprise_directe(self) -> bool:
+        """Parite avec l'assistant web : en reprise, les ecrans Chemins, VPN et
+        Qualite ne feraient que redemander ce qui est deja connu."""
+        if not getattr(self.app, "reprendre", True):
+            return False
+        self.app.stack_config = None
+        self.app.build_config()
+        return getattr(self.app, "reprise", None) is not None
 
     @on(Button.Pressed, "#back")
     def back(self) -> None:
@@ -1454,8 +1466,21 @@ def _suite_apres_vpn(app) -> None:
 class SummaryScreen(WizardScreen):
     SUB_TITLE = "Etape 3/3 - Recapitulatif (rien n'est encore ecrit)"
 
+    def __init__(self, *args: object, saute: bool = False, **kw: object) -> None:
+        #: Arrive directement depuis les applications, en reprise.
+        self.saute = saute
+        super().__init__(*args, **kw)
+
     def content(self) -> ComposeResult:
         with VerticalScroll(id="summary"):
+            yield Static(
+                t(
+                    "[cyan]Reglages repris : les ecrans Chemins, VPN et Qualite ont "
+                    "ete passes.[/cyan] [dim]« Modifier les reglages » pour y revenir.[/dim]"
+                ),
+                id="saute",
+                classes="" if self.saute else "hidden",
+            )
             yield DataTable(id="summary-table", cursor_type="row")
             yield Static(id="summary-paths")
             yield Static(id="summary-warnings")
@@ -1473,9 +1498,14 @@ class SummaryScreen(WizardScreen):
                 yield RadioButton("Supprimer et repartir de zero", id="cfg-supprimer")
         yield Horizontal(
             Button("Installer et cabler", variant="success", id="install"),
+            Button(t("Modifier les reglages"), id="modifier", classes="" if self.saute else "hidden"),
             Button("Retour", id="back"),
             classes="actions",
         )
+
+    @on(Button.Pressed, "#modifier")
+    def modifier(self) -> None:
+        self.app.push_screen(PathsScreen())
 
     def on_mount(self) -> None:
         cfg = self.app.build_config()
@@ -1710,11 +1740,27 @@ class InstallScreen(WizardScreen):
         yield RichLog(id="install-log", markup=True, wrap=True)
         yield Horizontal(
             Button("Terminer", variant="primary", id="done", disabled=True),
+            Button(t("Revoir les reglages et reessayer"), id="retry", classes="hidden"),
             classes="actions",
         )
 
     def on_mount(self) -> None:
         self.run_install()
+
+    def _proposer_relance(self) -> None:
+        # Parite avec l'assistant web, qui offrait deja ce bouton : apres un
+        # echec, le TUI ne proposait que « Terminer ».
+        self.query_one("#retry", Button).remove_class("hidden")
+
+    @on(Button.Pressed, "#retry")
+    def retry(self) -> None:
+        """Retour au recapitulatif, reconstruit : l'essai interrompu a pu ecrire
+        une configuration, que la reprise doit maintenant reconnaitre."""
+        self.app.stack_config = None
+        self.app.results = []
+        self.app.pop_screen()
+        self.app.pop_screen()
+        self.app.push_screen(SummaryScreen())
 
     def _log(self, text: str) -> None:
         self.query_one("#install-log", RichLog).write(text)
@@ -1776,6 +1822,7 @@ class InstallScreen(WizardScreen):
             app.call_from_thread(self._log, f"[red]{exc}[/red]")
             app.call_from_thread(self._phase, "[red]Installation interrompue[/red]")
             app.call_from_thread(self._enable_done, [])
+            app.call_from_thread(self._proposer_relance)
             return
         except Exception as exc:  # noqa: BLE001 - rien ne doit tuer l'assistant
             # Sans ce filet, une erreur imprevue fait disparaitre la fenetre en
@@ -1791,6 +1838,7 @@ class InstallScreen(WizardScreen):
             )
             app.call_from_thread(self._phase, "[red]Installation interrompue[/red]")
             app.call_from_thread(self._enable_done, [])
+            app.call_from_thread(self._proposer_relance)
             return
         app.call_from_thread(self._enable_done, results)
 
@@ -1840,10 +1888,73 @@ class ReportScreen(WizardScreen):
         with VerticalScroll(id="report"):
             yield DataTable(id="report-table", cursor_type="row")
             yield Static(id="report-next")
+            yield Static(t("[b]Mises a jour disponibles[/b]  [dim]recherche...[/dim]"), id="report-updates")
+            yield Static(id="report-admin")
         yield Horizontal(
             Button("Ouvrir la page d'acces", variant="success", id="open-page"),
+            Button(t("Ouvrir l'administration"), id="open-admin"),
             Button("Fermer", variant="primary", id="close"),
             classes="actions",
+        )
+
+    @work(thread=True)
+    def chercher_mises_a_jour(self) -> None:
+        """Parite avec l'assistant web : versions testees installees, les plus
+        recentes signalees. Rien n'est change."""
+        from .. import updates
+
+        cfg = self.app.stack_config
+        if cfg is None:
+            return
+        try:
+            donnees = updates.disponibles(cfg)
+        except Exception as exc:  # noqa: BLE001 - le rapport doit rester lisible
+            texte = t("[b]Mises a jour disponibles[/b]  [yellow]recherche impossible : {erreur}[/yellow]", erreur=exc)
+        else:
+            if donnees["updates"]:
+                texte = t("[b]Mises a jour disponibles[/b]") + "\n" + "\n".join(
+                    f"  {u['name']} : {u['current']} -> {u['latest']}" for u in donnees["updates"]
+                ) + "\n" + t(
+                    "[dim]PlugArr installe les versions qu'il a testees ; ces mises a jour "
+                    "se font ensuite depuis l'administration.[/dim]"
+                )
+            else:
+                texte = t("[b]Mises a jour disponibles[/b]  toutes les applications sont dans leur derniere version.")
+            if donnees["unchecked"]:
+                texte += "\n" + t("[dim]Non verifiees : {noms}[/dim]", noms=", ".join(donnees["unchecked"]))
+        self.app.call_from_thread(self.query_one("#report-updates", Static).update, texte)
+
+    @on(Button.Pressed, "#open-admin")
+    def open_admin(self) -> None:
+        """Meme mecanisme que l'assistant web : la console tourne dans ce
+        processus, sur 127.0.0.1, le temps que l'assistant reste ouvert."""
+        import webbrowser
+
+        from .. import admin
+
+        zone = self.query_one("#report-admin", Static)
+        if getattr(self.app, "admin_url", None) is None:
+            cfg = self.app.stack_config
+            if cfg is None:
+                return
+            jeton = admin.generate_token()
+            serveur = admin.build_server(
+                cfg, Path(self.app.project_dir), host="127.0.0.1", port=0, token=jeton
+            )
+            import threading
+
+            threading.Thread(target=serveur.serve_forever, daemon=True).start()
+            self.app.admin_server = serveur
+            self.app.admin_url = f"http://127.0.0.1:{serveur.server_address[1]}/?t={jeton}"
+        try:
+            ouverte = webbrowser.open(self.app.admin_url)
+        except Exception:  # noqa: BLE001 - un NAS n'a pas de navigateur
+            ouverte = False
+        zone.update(
+            (t("[green]Administration ouverte dans votre navigateur.[/green]") if ouverte
+             else t("[yellow]Aucun navigateur ici : ouvrez cette adresse sur cette machine.[/yellow]"))
+            + f"\n[dim]{self.app.admin_url}[/dim]\n"
+            + t("[dim]Elle reste disponible tant que l'assistant est ouvert ; ensuite, lancez administration.sh.[/dim]")
         )
 
     def on_mount(self) -> None:
@@ -1886,6 +1997,7 @@ class ReportScreen(WizardScreen):
         )
         self.query_one("#report-next", Static).update(body)
         self._ouvrir_automatiquement()
+        self.chercher_mises_a_jour()
 
     def _ouvrir_automatiquement(self) -> None:
         """Ouvre la page d'acces sans attendre un clic.

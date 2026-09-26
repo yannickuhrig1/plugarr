@@ -374,3 +374,40 @@ def check(cfg: StackConfig, *, check_tags: bool = True) -> list[UpdateInfo]:
         info.service = sid
         results.append(info)
     return results
+
+
+def disponibles(cfg) -> dict:
+    """Versions plus recentes que celles installees, application par application.
+
+    Commun a l'assistant web et au TUI : PlugArr installe les versions qu'il a
+    testees, puis dit ce qui existe de plus recent. Rien n'est change ici.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from . import catalog, orchestrator
+
+    cibles = [
+        (sid, catalog.get(sid).display_name, inst.image or catalog.get(sid).image)
+        for sid, inst in orchestrator.iter_selected(cfg)
+        if (inst.image or catalog.get(sid).image) and not inst.adopted
+    ]
+
+    def verifier(cible):
+        sid, nom, image = cible
+        try:
+            recentes, probleme = newer_tags(image, timeout=10.0)
+        except Exception as exc:  # noqa: BLE001 - un registre ne doit pas casser le rapport
+            recentes, probleme = [], str(exc)
+        return sid, nom, image, recentes, probleme
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        resultats = list(pool.map(verifier, cibles))
+    return {
+        "updates": [
+            {"id": sid, "name": nom, "current": imageref.parse(image).tag, "latest": recentes[-1]}
+            for sid, nom, image, recentes, probleme in resultats
+            if recentes and not probleme
+        ],
+        "unchecked": [nom for _sid, nom, _image, _recentes, probleme in resultats if probleme],
+    }
+

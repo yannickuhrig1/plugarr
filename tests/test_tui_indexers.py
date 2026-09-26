@@ -29,6 +29,14 @@ DEFINITION = IndexerDefinition(
 )
 
 
+@pytest.fixture(autouse=True)
+def _sans_registres(monkeypatch):
+    """Le rapport cherche les mises a jour dans les registres : jamais en test."""
+    from plugarr import updates
+
+    monkeypatch.setattr(updates, "disponibles", lambda _cfg: {"updates": [], "unchecked": []})
+
+
 @pytest.fixture
 def screen_app(tmp_path, monkeypatch):
     monkeypatch.setattr(IndexersScreen, "load_definitions", lambda self: None)

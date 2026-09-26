@@ -15,6 +15,14 @@ from plugarr.tui.app import PlugArrApp
 from plugarr.tui.screens import PathsScreen, ServicesScreen, SummaryScreen
 
 
+@pytest.fixture(autouse=True)
+def _sans_registres(monkeypatch):
+    """Le rapport cherche les mises a jour dans les registres : jamais en test."""
+    from plugarr import updates
+
+    monkeypatch.setattr(updates, "disponibles", lambda _cfg: {"updates": [], "unchecked": []})
+
+
 @pytest.fixture
 def app(tmp_path):
     return PlugArrApp(project_dir=tmp_path)

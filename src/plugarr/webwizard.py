@@ -1150,38 +1150,8 @@ class WizardState:
         self._require_completed()
         if self.demo:
             return {"demo": True, "updates": [], "unchecked": []}
-        cibles = [
-            (sid, catalog.get(sid).display_name, inst.image or catalog.get(sid).image)
-            for sid, inst in orchestrator.iter_selected(self.cfg)
-            if (inst.image or catalog.get(sid).image) and not inst.adopted
-        ]
-
-        def verifier(cible):
-            sid, nom, image = cible
-            try:
-                recentes, probleme = updates.newer_tags(image, timeout=10.0)
-            except Exception as exc:  # noqa: BLE001 - un registre ne doit pas casser le rapport
-                recentes, probleme = [], str(exc)
-            return sid, nom, image, recentes, probleme
-
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            resultats = list(pool.map(verifier, cibles))
-        return {
-            "demo": False,
-            "updates": [
-                {
-                    "id": sid,
-                    "name": nom,
-                    "current": imageref.parse(image).tag,
-                    "latest": recentes[-1],
-                }
-                for sid, nom, image, recentes, probleme in resultats
-                if recentes and not probleme
-            ],
-            "unchecked": [nom for _sid, nom, _image, _recentes, probleme in resultats if probleme],
-        }
+        # `updates` du module est lu a l'appel : les tests le remplacent.
+        return {"demo": False, **updates.disponibles(self.cfg)}
 
     def report(self):
         self._require_completed()

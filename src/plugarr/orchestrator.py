@@ -913,6 +913,13 @@ def check_host_reachable(
             return
         except OSError as exc:
             last = exc
+    if isinstance(last, ConnectionRefusedError):
+        # Rien n'ecoute ENCORE : un conteneur recree demarre a peine. Validation
+        # reelle du 26/09/2026 : apres une remise a zero, Sonarr refusait
+        # pendant quelques secondes, et l'installation s'arretait a tort sur un
+        # diagnostic de pare-feu. L'attente de son API, juste apres, s'en charge.
+        # Le pare-feu d'Oracle, lui, repond « No route to host ».
+        return
     if isinstance(last, TimeoutError):
         raise InstallAborted(
             t(

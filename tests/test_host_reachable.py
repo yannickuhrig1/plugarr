@@ -63,3 +63,14 @@ def test_un_echec_passager_est_reessaye():
 
     check_host_reachable(_cfg("10.0.0.30"), connect=connect, sleep=lambda _s: None)
     assert reponses == []
+
+
+def test_un_port_qui_refuse_encore_laisse_l_attente_normale_juger():
+    """Validation reelle du 26/09/2026 : conteneurs recrees par une remise a
+    zero, Sonarr refusait quelques secondes, et l'installation s'arretait sur un
+    faux diagnostic de pare-feu."""
+
+    def connect(_address, timeout):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    check_host_reachable(_cfg("10.0.0.30"), connect=connect, sleep=lambda _s: None)

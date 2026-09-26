@@ -48,7 +48,8 @@ def test_une_selection_shelfarr_tire_une_pile_complete():
 
 
 def test_shelfarr_publie_5056_et_reutilise_toute_l_arborescence_plugarr():
-    block = compose.build_compose(_cfg())["services"]["shelfarr"]
+    cfg = _cfg()
+    block = compose.build_compose(cfg)["services"]["shelfarr"]
 
     assert block["ports"] == ["5056:80"]
     assert block["environment"] == {
@@ -56,8 +57,8 @@ def test_shelfarr_publie_5056_et_reutilise_toute_l_arborescence_plugarr():
         "SHELFARR_LIBATION_URL": "http://shelfarr-libation:8080",
         "SHELFARR_LIBATION_TOKEN_FILE": "/run/shelfarr-libation/token",
         "SHELFARR_LIBATION_IMPORT_ROOT": "/imports/libation",
-        "PUID": "1000",
-        "PGID": "1000",
+        "PUID": str(cfg.puid),
+        "PGID": str(cfg.pgid),
         "CHOWN_ON_START": "auto",
         "TZ": "Etc/UTC",
     }

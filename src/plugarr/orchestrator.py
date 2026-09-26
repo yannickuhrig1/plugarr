@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -345,6 +346,63 @@ def diagnostic(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]
     ]
 
 
+def controles_hote(cfg: StackConfig) -> list[Check]:
+    r"""Ce qu'une installation LOCALE ne peut pas faire sur cette machine. BLOQUANT.
+
+    Essai reel du 26/09/2026 sous Windows, pile en `generic-linux` :
+
+    - `/opt/plugarr/config` : PlugArr l'ecrivait dans `C:\opt\plugarr\config`,
+      Docker Desktop montait un AUTRE dossier, dans sa machine virtuelle. Sonarr
+      ne voyait pas le config.xml pre-seme, se donnait une cle a lui, et
+      l'installation mourait cinq minutes plus tard sur un 401 ;
+    - la console en conteneur se monte a son chemin de l'hote, et Docker
+      Desktop refuse un chemin `C:\...` comme cible (« too many colons »).
+      `docker compose up` echouait pour toute la pile.
+
+    Vide hors de Windows : une installation distante tourne sous Linux, dans
+    le conteneur d'installation, et ces controles n'y ont pas de sens.
+    """
+    if sys.platform != "win32":
+        return []
+    controles = []
+    for libelle, chemin in (
+        (t("racine des configurations"), cfg.config_root),
+        (t("racine des donnees"), cfg.data_root),
+    ):
+        texte = str(chemin).strip()
+        # `//serveur/partage` n'est pas un chemin Linux : on ne juge que `/x`.
+        if texte.startswith("/") and not texte.startswith("//"):
+            controles.append(
+                Check(
+                    libelle,
+                    False,
+                    t(
+                        "« {chemin} » est un chemin Linux. Sous Windows, PlugArr "
+                        "l'ecrirait dans {resolu}, mais Docker Desktop monterait un "
+                        "autre dossier, dans sa machine virtuelle : les services ne "
+                        "verraient pas leur configuration. Choisissez le profil "
+                        "windows ou un chemin C:\\...",
+                        chemin=texte,
+                        resolu=Path(texte).resolve(),
+                    ),
+                )
+            )
+    if cfg.console_enabled:
+        controles.append(
+            Check(
+                t("console en conteneur"),
+                False,
+                t(
+                    "impossible sous Windows : Docker Desktop ne monte pas un dossier "
+                    "C:\\... au meme chemin dans un conteneur Linux. Decochez-la ; "
+                    "la console s'ouvre sur ce PC avec {lanceur}.",
+                    lanceur=dashboard.LAUNCHER_NAME,
+                ),
+            )
+        )
+    return controles
+
+
 def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
     checks = check_docker()
     nos_ports = our_published_ports(cfg, project_dir)
@@ -374,6 +432,7 @@ def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
     # Un conflit INTERNE ne fait ecouter personne : les lignes ci-dessus le
     # declarent libre. Il se voit en comparant le plan a lui-meme.
     checks.extend(check_port_doublons(cfg))
+    checks.extend(controles_hote(cfg))
     # AVANT l'espace disque et les hardlinks, et surtout avant toute ecriture :
     # les deux racines doivent etre inscriptibles. C'est le controle qui
     # manquait. Sans lui, un chemin impossible ne se signalait qu'en
@@ -985,6 +1044,11 @@ def install(
 
     Leve InstallAborted avec un message actionnable en cas d'echec bloquant.
     """
+    # Avant toute ecriture : le TUI ne passe pas par le preflight, et une
+    # reprise peut apporter des reglages d'une autre machine.
+    refus = [c for c in controles_hote(cfg) if not c.ok]
+    if refus:
+        raise InstallAborted("\n".join(f"{c.name} : {c.detail}" for c in refus))
     cfg.project_dir = project_dir
     created = create_tree(
         cfg.data_root, cfg.config_root, list(cfg.services), owner=(cfg.puid, cfg.pgid)

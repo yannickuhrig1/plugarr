@@ -746,10 +746,21 @@ class Wirer:
             },
         )
         warnings = [f"champs ignores: {', '.join(skipped)}"] if skipped else []
+        etat = t("cree") if created else t("deja present")
+        if not created:
+            # Essai reel du 26/09/2026 : Jellyfin reinitialise, donc une cle
+            # neuve, et les *arr repris gardaient l'ancienne dans leur
+            # notification. « deja present », puis un test en echec. Meme
+            # realignement que pour les Applications de Prowlarr.
+            modifies = client.sync_fields(
+                "notification", obj, {nom: values[nom] for nom in ("host", "port", "apiKey")}
+            )
+            if modifies:
+                etat = t("realigne ({champs})", champs=", ".join(modifies))
         result = StepResult(
             f"{arr_id} -> jellyfin (rafraichissement de bibliotheque)",
             ok=client.find_by_name("notification", "Jellyfin") is not None,
-            detail=(t("cree") if created else t("deja present")) + f" (id={obj.get('id', '?')})",
+            detail=etat + f" (id={obj.get('id', '?')})",
             created=created,
             warnings=warnings,
         )

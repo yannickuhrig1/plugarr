@@ -12,6 +12,7 @@ from textual.app import App
 from textual.theme import Theme
 
 from .. import i18n, journal, orchestrator, reprise
+from ..layout import default_profile
 from ..models import PlatformProfile, StackConfig, VpnConfig
 from ..wiring import StepResult
 from .screens import WelcomeScreen
@@ -81,7 +82,10 @@ class PlugArrApp(App):
         #: reservee aux hotes sans systemd.
         self.console_enabled: bool | None = None
         self.console_port: int = 7373
-        self.platform: PlatformProfile = PlatformProfile.GENERIC_LINUX
+        # Le profil de la machine, comme l'ecran Chemins et la ligne de
+        # commande. `generic-linux` en dur valait sous Windows des qu'un ecran
+        # sautait l'ecran Chemins (essai reel du 26/09/2026).
+        self.platform: PlatformProfile = default_profile()
         #: Template TRaSH choisi par service. Vide = celui par defaut.
         self.recyclarr_templates: dict[str, str] = {}
         #: Acces distant choisi a l'ecran (None : pas encore demande, la reprise
@@ -132,14 +136,29 @@ class PlugArrApp(App):
 
     def build_config(self) -> StackConfig:
         """Materialise la saisie en StackConfig. Les secrets sont generes ici."""
+        # `build_config` est rejoue quand on bascule le choix de reprise : on
+        # repart du repertoire de lancement, sinon un « repartir de zero »
+        # ecrirait quand meme dans l'installation qu'on vient d'ecarter.
+        self.project_dir = self._project_dir_lance
+        # Le `CONFIG_ROOT` que l'utilisateur vient de saisir sert de cle : il
+        # designe les services en place, et c'est lui qui permet de retrouver
+        # le stack.yml de l'installation d'origine meme si l'executable a ete
+        # lance depuis un autre dossier.
+        trouvee = reprise.trouver(self.project_dir, self.config_root) if self.reprendre else None
+        # Ecran Chemins pas encore vu, parce que la reprise l'a saute : le
+        # profil, les chemins et le nom de pile sont ceux de l'installation
+        # retrouvee. Essai reel du 26/09/2026 sous Windows : on partait des
+        # valeurs par defaut, `generic-linux` et `/opt/plugarr/config`, et la
+        # pile reprise etait recreee a cote de ses propres configurations.
+        herite = trouvee.cfg if trouvee is not None and self.config_root is None else None
         cfg = orchestrator.build_config(
             services=self.selection,
-            config_root=self.config_root,
-            data_root=self.data_root,
-            platform=self.platform,
+            config_root=herite.config_root if herite else self.config_root,
+            data_root=herite.data_root if herite else self.data_root,
+            platform=herite.platform if herite else self.platform,
             timezone=self.timezone,
             username=self.username,
-            project_name=self.project_name,
+            project_name=herite.project_name if herite else self.project_name,
             language=self.language,
             host=self.host,
         )
@@ -171,49 +190,39 @@ class PlugArrApp(App):
         # les profils viennent de ses ecrans, pas de l'heritage.
         self.reprise = None
         self.reprise_depuis = None
-        # `build_config` est rejoue quand on bascule le choix de reprise : on
-        # repart du repertoire de lancement, sinon un « repartir de zero »
-        # ecrirait quand meme dans l'installation qu'on vient d'ecarter.
-        self.project_dir = self._project_dir_lance
-        if self.reprendre:
-            # Le `CONFIG_ROOT` que l'utilisateur vient de saisir sert de cle :
-            # il designe les services en place, et c'est lui qui permet de
-            # retrouver le stack.yml de l'installation d'origine meme si
-            # l'executable a ete lance depuis un autre dossier.
-            trouvee = reprise.trouver(self.project_dir, self.config_root)
-            if trouvee is not None:
-                self.reprise = reprise.appliquer(
-                    cfg,
-                    trouvee.cfg,
-                    imposes=(
-                        {"vpn", "language", "ui_language", "recyclarr_templates"}
-                        if self.vpn.enabled
-                        else {"language", "ui_language", "recyclarr_templates"}
-                    )
-                    | ({"client_prefere"} if cfg.client_prefere else set())
-                    # Demande a l'ecran, qui partait du choix en place :
-                    # « interface d'origine » est alors un choix, pas un oubli.
-                    | ({"qbittorrent_ui"} if self.qbittorrent_ui is not None else set())
-                    # Meme raison : decocher la veille est un choix.
-                    | (
-                        {"veille_enabled", "veille_port", "veille_socket"}
-                        if self.veille_enabled is not None
-                        else set()
-                    )
-                    | (
-                        {"console_enabled", "console_port"}
-                        if self.console_enabled is not None
-                        else set()
-                    )
-                    | ({"remote_access"} if self.remote_access is not None else set()),
+        if trouvee is not None:
+            self.reprise = reprise.appliquer(
+                cfg,
+                trouvee.cfg,
+                imposes=(
+                    {"vpn", "language", "ui_language", "recyclarr_templates"}
+                    if self.vpn.enabled
+                    else {"language", "ui_language", "recyclarr_templates"}
                 )
-                # Ecrire ici les artefacts d'une pile installee ailleurs
-                # donnerait DEUX repertoires de projet portant le meme nom de
-                # pile Docker, et le second recreerait les conteneurs du
-                # premier. On suit l'installation d'origine.
-                if trouvee.project_dir != Path(self.project_dir):
-                    self.reprise_depuis = trouvee.project_dir
-                    self.project_dir = trouvee.project_dir
+                | ({"client_prefere"} if cfg.client_prefere else set())
+                # Demande a l'ecran, qui partait du choix en place :
+                # « interface d'origine » est alors un choix, pas un oubli.
+                | ({"qbittorrent_ui"} if self.qbittorrent_ui is not None else set())
+                # Meme raison : decocher la veille est un choix.
+                | (
+                    {"veille_enabled", "veille_port", "veille_socket"}
+                    if self.veille_enabled is not None
+                    else set()
+                )
+                | (
+                    {"console_enabled", "console_port"}
+                    if self.console_enabled is not None
+                    else set()
+                )
+                | ({"remote_access"} if self.remote_access is not None else set()),
+            )
+            # Ecrire ici les artefacts d'une pile installee ailleurs
+            # donnerait DEUX repertoires de projet portant le meme nom de
+            # pile Docker, et le second recreerait les conteneurs du
+            # premier. On suit l'installation d'origine.
+            if trouvee.project_dir != Path(self.project_dir):
+                self.reprise_depuis = trouvee.project_dir
+                self.project_dir = trouvee.project_dir
         return cfg
 
 

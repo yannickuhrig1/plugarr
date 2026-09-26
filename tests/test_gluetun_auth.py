@@ -110,6 +110,57 @@ def test_gluetun_relit_la_cle_sur_place(tmp_path):
     assert sortie == gluetun_auth.cle(cfg)
 
 
+def test_le_fichier_est_ecrit_en_lf_meme_sous_windows(tmp_path):
+    """Essai reel du 26/09/2026 sous Windows : fichier en CRLF, cle relue vide
+    dans Gluetun, 401 sur /v1/portforward et « aucun port obtenu » a tort."""
+    cfg = _cfg(tmp_path)
+
+    gluetun_auth.assurer(cfg)
+
+    assert b"\r" not in gluetun_auth.chemin(cfg).read_bytes()
+
+
+def test_un_fichier_crlf_existant_passe_en_lf_sans_autre_changement(tmp_path):
+    cfg = _cfg(tmp_path)
+    fichier = gluetun_auth.chemin(cfg)
+    fichier.parent.mkdir(parents=True)
+    fichier.write_bytes(
+        b'[[roles]]\r\nname = "plugarr"\r\nroutes = ["GET /v1/portforward"]\r\n'
+        b'auth = "apikey"\r\napikey = "cle-en-crlf"\r\n'
+    )
+
+    assert gluetun_auth.assurer(cfg)[0] is False
+    assert fichier.read_bytes() == (
+        b'[[roles]]\nname = "plugarr"\nroutes = ["GET /v1/portforward"]\n'
+        b'auth = "apikey"\napikey = "cle-en-crlf"\n'
+    )
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="pas de sh")
+def test_la_cle_est_relue_dans_un_fichier_crlf(tmp_path):
+    """Un fichier deja ecrit en CRLF par une version precedente reste lisible.
+
+    Le `sed` de Git pour Windows ignore deja les CR : sous Windows ce test passe
+    meme sans le correctif. Il porte sur le `sed` de busybox, celui de Gluetun,
+    et c'est sous Linux qu'il fait foi."""
+    cfg = _cfg(tmp_path)
+    fichier = gluetun_auth.chemin(cfg)
+    fichier.parent.mkdir(parents=True)
+    fichier.write_bytes(
+        b'[[roles]]\r\nname = "plugarr"\r\nroutes = ["GET /v1/portforward"]\r\n'
+        b'auth = "apikey"\r\napikey = "cle-en-crlf"\r\n'
+    )
+    script = gluetun_auth.LIRE_CLE_SH.replace(
+        gluetun_auth.FICHIER_CONTENEUR, fichier.as_posix()
+    )
+
+    sortie = subprocess.run(
+        ["sh", "-c", script + '; printf %s "$K"'], capture_output=True, text=True, check=True
+    ).stdout
+
+    assert sortie == "cle-en-crlf"
+
+
 def test_le_fichier_est_donne_a_puid_pgid_pour_la_veille(tmp_path, monkeypatch):
     """La veille tourne sous PUID:PGID ; ecrit par root en 600, le fichier lui
     restait illisible (constate sur le banc : 401 de Gluetun)."""

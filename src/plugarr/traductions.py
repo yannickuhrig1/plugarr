@@ -1199,4 +1199,7 @@ EN.update({
     "Choisir l'interface : web (graphique) ou tui (terminal).": "Choose an interface: web (graphical) or tui (terminal).",
     "Mode d'interface": "Interface mode",
     "Memoriser ce choix sur cet ordinateur ?": "Remember this choice on this computer?",
+    "« {chemin} » est un chemin Linux. Sous Windows, PlugArr l'ecrirait dans {resolu}, mais Docker Desktop monterait un autre dossier, dans sa machine virtuelle : les services ne verraient pas leur configuration. Choisissez le profil windows ou un chemin C:\\...": "\"{chemin}\" is a Linux path. On Windows, PlugArr would write it to {resolu}, but Docker Desktop would mount another folder, inside its virtual machine: the services would not see their configuration. Choose the windows profile or a C:\\... path.",
+    "impossible sous Windows : Docker Desktop ne monte pas un dossier C:\\... au meme chemin dans un conteneur Linux. Decochez-la ; la console s'ouvre sur ce PC avec {lanceur}.": "not possible on Windows: Docker Desktop cannot mount a C:\\... folder at the same path in a Linux container. Untick it; the console opens on this PC with {lanceur}.",
+    "[cyan]Installation retrouvee dans {dossier} : ses applications sont cochees.[/cyan] [dim]En decocher une retire ses conteneurs de la pile, pas ses donnees.[/dim]": "[cyan]Installation found in {dossier}: its applications are ticked.[/cyan] [dim]Unticking one removes its containers from the stack, not its data.[/dim]",
 })

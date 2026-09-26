@@ -505,6 +505,20 @@ class SauvegardeScreen(WizardScreen):
 # ------------------------------------------------------------------- selection
 
 
+def _installation_retrouvee(app):
+    """L'installation que la reprise suivra, tant que le choix de reprendre tient.
+
+    Meme recherche que `build_config`, avec la meme cle : le `CONFIG_ROOT` s'il
+    a deja ete saisi, sinon le repertoire de lancement puis le registre.
+    """
+    if not getattr(app, "reprendre", True):
+        return None
+    from .. import reprise
+
+    depart = getattr(app, "_project_dir_lance", None) or app.project_dir or "."
+    return reprise.trouver(Path(depart), app.config_root)
+
+
 class ServicesScreen(WizardScreen):
     SUB_TITLE = "Etape 1/3 - Quels services installer ?"
 
@@ -513,6 +527,26 @@ class ServicesScreen(WizardScreen):
     COLUMNS = ((Category.ARR,), (Category.DOWNLOAD, Category.MEDIA, Category.UI))
 
     def content(self) -> ComposeResult:
+        # En reprise, les applications de l'installation retrouvee, pas celles
+        # par defaut. Essai reel du 26/09/2026 : six applications cochees
+        # d'office, et `docker compose up` retirait les conteneurs des dix
+        # autres de la pile reprise. Meme choix que l'assistant web.
+        precedente = _installation_retrouvee(self.app)
+        cochees = (
+            {sid for sid in precedente.cfg.services if precedente.cfg.enabled(sid)}
+            if precedente is not None
+            else set(catalog.DEFAULT_SELECTION)
+        )
+        if precedente is not None:
+            yield Static(
+                t(
+                    "[cyan]Installation retrouvee dans {dossier} : ses applications "
+                    "sont cochees.[/cyan] [dim]En decocher une retire ses conteneurs "
+                    "de la pile, pas ses donnees.[/dim]",
+                    dossier=precedente.project_dir,
+                ),
+                id="services-reprise",
+            )
         with Horizontal(id="services"):
             for index, categories in enumerate(self.COLUMNS):
                 with VerticalScroll(classes="service-column", id=f"column-{index}"):
@@ -524,7 +558,7 @@ class ServicesScreen(WizardScreen):
                         for spec in sorted(specs, key=lambda s: s.display_name):
                             yield Checkbox(
                                 spec.display_name,
-                                value=spec.id in catalog.DEFAULT_SELECTION,
+                                value=spec.id in cochees,
                                 id=f"svc-{spec.id}",
                                 classes="service",
                             )
@@ -603,12 +637,23 @@ class ServicesScreen(WizardScreen):
 class PathsScreen(WizardScreen):
     SUB_TITLE = "Etape 2/3 - Chemins et plateforme"
 
+    def __init__(self, *args: object, depart=None, **kw: object) -> None:
+        #: La configuration en cours, depuis « Modifier les reglages » en
+        #: reprise : on part de SES chemins. Les valeurs par defaut du profil
+        #: auraient fait basculer, sans un mot, vers une installation neuve.
+        self.depart = depart
+        super().__init__(*args, **kw)
+
+    def _profil_de_depart(self) -> PlatformProfile:
+        return self.depart.platform if self.depart is not None else default_profile()
+
     def content(self) -> ComposeResult:
         # Le profil propose est celui de la machine. Proposer generic-linux a un
         # utilisateur Windows le menait droit dans le piege : il gardait des
         # chemins Linux, crees ensuite a la racine du disque courant.
-        courant = default_profile()
+        courant = self._profil_de_depart()
         defaults = PROFILE_DEFAULTS[courant]
+        depart = self.depart
         # `VerticalScroll` et non `Vertical` : l'ecran a grossi (identifiant,
         # adresse de la machine) et depassait la fenetre. Sans defilement, les
         # derniers champs etaient simplement INACCESSIBLES — il fallait
@@ -625,13 +670,19 @@ class PathsScreen(WizardScreen):
             yield Static(id="platform-note")
 
             yield Label("Racine des configurations", classes="group-title")
-            yield Input(value=defaults.config_root, id="config-root")
+            yield Input(
+                value=depart.config_root if depart is not None else defaults.config_root,
+                id="config-root",
+            )
 
             yield Label(
                 "Racine des donnees [dim](montee sur /data dans TOUS les conteneurs)[/dim]",
                 classes="group-title",
             )
-            yield Input(value=defaults.data_root, id="data-root")
+            yield Input(
+                value=depart.data_root if depart is not None else defaults.data_root,
+                id="data-root",
+            )
 
             yield Label(
                 "Identifiant [dim](le meme pour tous les services installes)[/dim]",
@@ -662,7 +713,9 @@ class PathsScreen(WizardScreen):
                 "[dim](a changer pour en installer une SECONDE a cote)[/dim]",
                 classes="group-title",
             )
-            yield Input(value="plugarr", id="project-name")
+            yield Input(
+                value=depart.project_name if depart is not None else "plugarr", id="project-name"
+            )
 
             yield Label("Fuseau horaire", classes="group-title")
             yield Input(value="Europe/Paris", id="tz")
@@ -733,7 +786,7 @@ class PathsScreen(WizardScreen):
         return courante if any(lang.code == courante for lang in langues.PROPOSEES) else "en"
 
     def on_mount(self) -> None:
-        self._update_note(default_profile())
+        self._update_note(self._profil_de_depart())
 
     @on(RadioSet.Changed, "#platform")
     def _on_platform(self, event: RadioSet.Changed) -> None:
@@ -1610,7 +1663,7 @@ class SummaryScreen(WizardScreen):
 
     @on(Button.Pressed, "#modifier")
     def modifier(self) -> None:
-        self.app.push_screen(PathsScreen())
+        self.app.push_screen(PathsScreen(depart=self.app.build_config()))
 
     def on_mount(self) -> None:
         cfg = self.app.build_config()

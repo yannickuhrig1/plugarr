@@ -38,16 +38,16 @@ VUETORRENT_MOD = (
 #: les pieds de celui qui la regarde. Le digest est celui de l'INDEX multi
 #: architecture, donc valable pour amd64 comme pour arm64.
 VEILLE_IMAGE = (
-    "ghcr.io/yannickuhrig1/plugarr:0.10.0-stack7-preview.2"
-    "@sha256:2c3e0fe967b7fa1ab7476406287d8dac330a8b6f5932df6ff71a3db051230db4"
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-stack7-preview.3"
+    "@sha256:027d44f23d05df058447447842c52c4c9bea3f91d469cec1405411c706965352"
 )
 
 #: La meme PlugArr, variante `admin` : elle porte le client Docker et le
 #: greffon compose, que la console appelle. Tag DISTINCT, pour qu'elle ne soit
 #: jamais prise pour celle de la veille, qui n'a aucun client Docker.
 CONSOLE_IMAGE = (
-    "ghcr.io/yannickuhrig1/plugarr:0.10.0-stack7-preview.2-admin"
-    "@sha256:9f447a4a3b64ee1275802106c107850a1e834d8048a1927b36701fa906c62d08"
+    "ghcr.io/yannickuhrig1/plugarr:0.10.0-stack7-preview.3-admin"
+    "@sha256:ce2b498de5d4fa4e8bae9f2d93f961fb09ff18febdcaa7e3e38487c5b42ee97a"
 )
 
 #: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et

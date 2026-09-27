@@ -52,8 +52,11 @@ def test_le_fichier_est_servi_une_seule_fois(partage):
 def test_un_mauvais_jeton_ne_consomme_rien(partage):
     lien = partage.publier(CONTENU, "f.zip")
     base, jeton = lien["url"].rsplit("/", 1)
+    # Un jeton qui finit deja par `x` (une fois sur 64) restait le bon jeton,
+    # et le test echouait : CI de main, 27/09/2026.
+    autre = "y" if jeton.endswith("x") else "x"
 
-    assert _get(f"{base}/{jeton[:-1]}x").status_code == 404
+    assert _get(f"{base}/{jeton[:-1]}{autre}").status_code == 404
     assert _get(lien["url"].replace("/t/", "/autre/")).status_code == 404
     assert _get(lien["url"].rsplit("/t/", 1)[0] + "/").status_code == 404
     assert _get(lien["url"]).content == CONTENU

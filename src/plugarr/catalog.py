@@ -50,6 +50,13 @@ CONSOLE_IMAGE = (
     "@sha256:7a442274053d4a9b190f14aa8495f173a998b57ba6e73f8950568476dcbd86a5"
 )
 
+#: L'image ci-dessus connait-elle le tunnel Cloudflare et les sous-domaines
+#: personnalises ? Sur un serveur SSH, c'est ELLE qui lit stack.yml et active
+#: l'acces distant : une image qui ne les connait pas refuserait toute la pile.
+#: A passer a True en epinglant une image construite depuis une version qui
+#: les connait (0.11.1 ne les connait pas).
+CONSOLE_IMAGE_TUNNEL_CLOUDFLARE = False
+
 #: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et
 #: REFUSE tout POST, donc creer, demarrer ou arreter quoi que ce soit. Epingle
 #: tag ET condensat, comme le reste. v0.5.0 du 2026-07-27, multi architecture.

@@ -6,11 +6,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 
+// Jeton fictif de la forme de cloudflared : base64 d'un JSON a/s/t.
+const TOKEN = Buffer.from(JSON.stringify({a:'0123456789abcdef0123456789abcdef',t:'6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',s:Buffer.from('fictif-'.repeat(5)).toString('base64')})).toString('base64');
+
 async function scenario(browser, mode, root) {
+  const domain = ['https','cloudflare'].includes(mode);
   const project = path.join(root, mode);
   fs.mkdirSync(project, {recursive:true});
   const exe = process.env.PLUGARR_TEST_EXE;
-  const program = exe || path.resolve('build/share-0ae7d00-20260915/env/Scripts/python.exe');
+  const program = exe || process.env.PLUGARR_TEST_PYTHON || path.resolve('build/share-0ae7d00-20260915/env/Scripts/python.exe');
   const args = [...(exe ? [] : ['-m','plugarr']), 'web','--demo','--no-open','--port','0','--project-dir',project];
   const child = spawn(program,args,{env:{...process.env,PYTHONPATH:path.resolve('src'),PYTHONUNBUFFERED:'1',PLUGARR_NO_SELF_UPDATE:'1'},windowsHide:true});
   const context = await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
@@ -54,6 +58,18 @@ async function scenario(browser, mode, root) {
       assert.equal(await page.locator('#remote-services input:checked').count(),3);
       await page.screenshot({path:path.join(root,'acces-distant.png'),fullPage:true});
     }
+    if(mode==='cloudflare') {
+      await page.fill('#remote-domain','maison.example');
+      // Sans jeton, on reste sur l'etape.
+      await next(); await expect(page.locator('[data-step="4"]')).toBeVisible();
+      await page.fill('#remote-name-sonarr','series');
+      await expect(page.locator('.remote-service .remote-address').first()).toHaveText('https://series.maison.example');
+      await page.fill('#remote-name-qbittorrent','series');
+      await page.fill('#remote-token',`docker run cloudflare/cloudflared:latest tunnel --no-autoupdate run --token ${TOKEN}`);
+      await next(); await expect(page.locator('[data-step="4"]')).toBeVisible();
+      await page.fill('#remote-name-qbittorrent','torrent');
+      await page.screenshot({path:path.join(root,'tunnel-cloudflare.png'),fullPage:true});
+    }
     await next(); await expect(page.locator('[data-step="5"]')).toBeVisible();
     await page.locator('#confirm').check();
     await expect(page.locator('#next')).toBeEnabled({timeout:20000});
@@ -63,11 +79,16 @@ async function scenario(browser, mode, root) {
       await page.locator('#remote-confirm').check();
       await page.locator('#remote-activate').click();
       await expect(page.locator('#remote-status')).toContainText('Simulation : aucune passerelle',{timeout:15000});
+      if(mode==='cloudflare'){
+        await expect(page.locator('.remote-route')).toHaveCount(3);
+        assert.deepEqual(await page.locator('.remote-route').first().locator('input').evaluateAll(n=>n.map(i=>i.value)),['series','maison.example','http://sonarr:8989']);
+        assert.equal(await page.content().then(html=>html.includes(TOKEN)),false);
+      }
       await page.selectOption('#mobile-network','remote');
     } else await expect(page.locator('#remote-result')).toBeHidden();
     await page.selectOption('#mobile-client','qbremote');
     assert.equal(await page.locator('#mobile-service').inputValue(),'qbittorrent');
-    await expect(page.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(mode==='https'?'443':'8080');
+    await expect(page.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(domain?'443':'8080');
     await expect(page.locator('#mobile-fields input[type="password"]')).toHaveCount(1);
     const checkArrExport=async(target,suffix)=>{
       await target.selectOption('#mobile-client','arrcontrol');
@@ -88,7 +109,8 @@ async function scenario(browser, mode, root) {
         const qb=data.services.find(s=>s.serviceId==='qbittorrent');
         assert.ok(qb.config.fields.password);assert.equal(qb.apiKey,null);
         assert.equal(qb.url,qb.config.fields.localUrl);
-        assert.equal(new URL(qb.url).protocol,network==='remote'&&mode==='https'?'https:':'http:');
+        assert.equal(new URL(qb.url).protocol,network==='remote'&&domain?'https:':'http:');
+        if(network==='remote'&&mode==='cloudflare')assert.equal(new URL(qb.url).hostname,'torrent.maison.example');
         if(network==='remote'&&mode==='tailscale')assert.equal(new URL(qb.url).hostname,'100.101.102.103');
       }
     };
@@ -123,7 +145,7 @@ async function scenario(browser, mode, root) {
     await offline.goto(pathToFileURL(destination).href);
     await offline.selectOption('#mobile-client','qbremote');
     if(mode!=='local')await offline.selectOption('#mobile-network','remote');
-    await expect(offline.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(mode==='https'?'443':'8080');
+    await expect(offline.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(domain?'443':'8080');
     await checkArrExport(offline,'offline');
     await checkNzbExport(offline,'offline');
     await offline.setViewportSize({width:390,height:844});
@@ -136,7 +158,8 @@ async function scenario(browser, mode, root) {
 }
 (async()=>{
   const root=fs.mkdtempSync(path.resolve('build/wizard-remote-e2e-'));
-  const browser=await chromium.launch({headless:true});
-  try {for(const mode of ['https','tailscale','local'])await scenario(browser,mode,root);console.log(`Artifacts: ${root}`);}
+  // PLAYWRIGHT_CHANNEL=msedge : le navigateur deja installe, sans telechargement.
+  const browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||undefined});
+  try {for(const mode of ['https','cloudflare','tailscale','local'])await scenario(browser,mode,root);console.log(`Artifacts: ${root}`);}
   finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

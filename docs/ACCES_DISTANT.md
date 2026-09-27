@@ -9,7 +9,8 @@ et avant Vérification. Ce n'est plus la maquette HTML séparée.
    tester la connexion puis confirmer l'empreinte présentée.
 2. Choisir les applications et les dossiers comme auparavant. Les chemins SSH
    sont ceux du serveur, jamais ceux du PC qui affiche l'assistant.
-3. À l'étape 5 sur 7, choisir **Chez moi**, **Tailscale** ou **Mon domaine**.
+3. À l'étape 5 sur 7, choisir **Chez moi**, **Tailscale**, **Mon domaine** ou
+   **Tunnel Cloudflare**.
 4. Confirmer l'installation de la stack.
 5. Pour une installation locale, activer ensuite l'accès distant. Pour une
    installation SSH, PlugArr tente l'activation sur le serveur après la stack ;
@@ -59,6 +60,59 @@ le serveur. Elle ne prouve pas l'accessibilité depuis Internet : tester sur le
 téléphone en 4G/5G reste nécessaire. Les URL proposées pendant un état « à vérifier »
 ne constituent pas une confirmation de connexion.
 
+## Sous-domaines
+
+Pour **Mon domaine** comme pour **Tunnel Cloudflare**, chaque application reçoit un
+sous-domaine, modifiable dans l'assistant web comme dans la TUI : `series` au lieu de
+`sonarr` par exemple, si `sonarr.mondomaine.fr` sert déjà à autre chose. Lettres,
+chiffres et tirets, un seul niveau, deux applications jamais sur le même nom. Les
+noms par défaut ne sont pas écrits dans `stack.yml`.
+
+## Tunnel Cloudflare
+
+Le serveur ouvre une connexion **sortante** vers Cloudflare : aucun port à rediriger,
+IP de la box non publiée, et le CGNAT n'y change rien. Il faut un domaine dont le DNS
+est géré par Cloudflare.
+
+1. Dans Cloudflare : **Networking**, **Tunnels**, **Create a tunnel**. Choisir Docker
+   et copier la commande affichée. La coller telle quelle dans PlugArr : seul le jeton
+   est gardé, après vérification de sa forme.
+2. Créer un tunnel **réservé à PlugArr**. Un jeton qui tourne déjà sur une autre
+   machine en ferait une réplique : Cloudflare enverrait une partie du trafic à
+   l'autre machine, qui ne connaît pas ces applications.
+3. Indiquer le domaine de la zone Cloudflare (`mondomaine.fr`). Le certificat gratuit
+   de Cloudflare ne couvre qu'un niveau de sous-domaine : `series.maison.mondomaine.fr`
+   n'aurait pas de certificat.
+4. Après l'installation, activer l'accès distant. PlugArr démarre `cloudflared`
+   (image épinglée par version et empreinte) à côté des applications, puis affiche
+   les routes à créer : onglet **Routes** du tunnel, **Add route**, **Published
+   application**, avec le sous-domaine, le domaine et l'URL du service à recopier
+   (`http://sonarr:8989`, ou `http://gluetun:8080` pour qBittorrent derrière le VPN).
+5. Si Cloudflare répond « An A, AAAA, or CNAME record with that host already exists »,
+   le nom est déjà pris : choisir un autre sous-domaine dans PlugArr, ou supprimer
+   l'ancien enregistrement.
+6. **Actualiser l'état** : PlugArr lit le journal du connecteur, puis interroge chaque
+   adresse publique. L'API doit refuser un accès anonyme **et** accepter la clé API de
+   cette installation : une adresse qui mène à une autre instance (ancien `sonarr.`
+   relié à un autre tunnel) est signalée comme telle. Sont aussi reconnus : adresse
+   absente du DNS, aucun connecteur actif (erreur 1033), route vers une mauvaise URL
+   (502), Cloudflare Access ou vérification anti-robot devant l'adresse.
+
+Ne pas placer Cloudflare Access devant ces adresses : nzb360 et qbRemote ne
+passeraient plus, et PlugArr le signale. Si une application Access couvre tout le
+domaine (`*.mondomaine.fr`), ajouter ces adresses à une application Access en
+**Bypass** : Access évalue le Bypass en premier (essai réel du 27/09/2026). L'authentification des applications reste
+exigée comme en mode domaine. Le jeton est un secret : il est gardé dans `stack.yml`
+et dans `.plugarr-remote/tunnel.env` (droits 600), jamais renvoyé au navigateur ni
+écrit dans le rapport. À la reprise, un champ vide conserve le jeton enregistré.
+Désactiver arrête le connecteur ; le tunnel et ses routes restent dans le compte
+Cloudflare.
+
+Sur un serveur SSH, l'activation tourne dans l'image d'administration PlugArr
+épinglée. Tant qu'elle ne connaît ni le tunnel ni les sous-domaines personnalisés
+(`catalog.CONSOLE_IMAGE_TUNNEL_CLOUDFLARE`), l'assistant refuse ces choix pour un
+serveur SSH plutôt que de laisser une image plus ancienne refuser toute la pile.
+
 ## Sécurité et limites de cette livraison
 
 - Le fichier HTML contient les vrais secrets en installation réelle, même lorsque
@@ -85,6 +139,7 @@ ne constituent pas une confirmation de connexion.
 ## Vérifications reproductibles
 
 - Tests Python : `tests/test_remote_install.py`, `tests/test_remote_access.py`,
+  `tests/test_remote_cloudflare.py`,
   tests du webwizard, du dashboard,
   de la reprise et de l'empaquetage.
 - Test navigateur Chromium : `tests/js/wizard_remote.cjs`, avec Playwright disponible.

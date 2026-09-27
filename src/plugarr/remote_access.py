@@ -16,11 +16,25 @@ import httpx
 import yaml
 
 from . import catalog, runner
+from .remote_models import identifiant_tunnel
 
 SUPPORTED = ("sonarr", "radarr", "qbittorrent")
 CADDY_IMAGE = "caddy:2.11.4-alpine"
 # Official stable channel; the actual image ID is recorded by Docker.
 TAILSCALE_IMAGE = "tailscale/tailscale:stable"
+#: Connecteur du tunnel Cloudflare. Epingle tag ET digest, comme le catalogue :
+#: index multi architecture (amd64, arm64) releve sur Docker Hub le 2026-09-27.
+CLOUDFLARED_IMAGE = (
+    "cloudflare/cloudflared:2026.9.3"
+    "@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c"
+)
+#: Modes qui publient une adresse HTTPS par application sur le domaine.
+DOMAIN_MODES = ("https", "cloudflare")
+#: Ligne ecrite par cloudflared pour chaque connexion etablie avec Cloudflare
+#: (connection/observer.go), et refus d'un jeton qu'il ne sait pas decoder
+#: (cmd/cloudflared/tunnel/subcommands.go).
+TUNNEL_CONNECTED = "Registered tunnel connection"
+TUNNEL_BAD_TOKEN = "Provided Tunnel token is not valid"
 
 
 def external_urls(cfg, address=""):
@@ -28,19 +42,36 @@ def external_urls(cfg, address=""):
     for sid in SUPPORTED:
         if not cfg.enabled(sid):
             continue
-        if cfg.remote_access.mode == "https" and sid in cfg.remote_access.services:
-            prefix = "qb" if sid == "qbittorrent" else sid
-            result[sid] = f"https://{prefix}.{cfg.remote_access.domain}"
+        if cfg.remote_access.mode in DOMAIN_MODES and sid in cfg.remote_access.services:
+            result[sid] = f"https://{cfg.remote_access.hostname(sid)}"
         elif cfg.remote_access.mode == "tailscale" and address:
             host = f"[{address}]" if ":" in address else address
             result[sid] = cfg.services[sid].url(host)
     return result
 
 
+def _upstream(cfg, sid):
+    inst = cfg.services[sid]
+    return inst.internal_url(catalog.get(sid), cfg.host, behind_vpn=cfg.vpn.protects(sid))
+
+
+def routes(cfg):
+    """Routes a declarer dans le tunnel, champ par champ, comme le tableau de
+    bord Cloudflare les demande : sous-domaine, domaine, URL du service."""
+    if cfg.remote_access.mode != "cloudflare":
+        return []
+    return [{"service": sid, "subdomain": cfg.remote_access.label(sid), "domain": cfg.remote_access.domain,
+             "hostname": cfg.remote_access.hostname(sid), "service_url": _upstream(cfg, sid)}
+            for sid in SUPPORTED if sid in cfg.remote_access.services and cfg.enabled(sid)]
+
+
 def summary(cfg, *, demo=False):
-    return {"mode": cfg.remote_access.mode, "status": "local" if cfg.remote_access.mode == "local" else "pending",
-            "message": "Accès local uniquement." if cfg.remote_access.mode == "local" else "À activer après l’installation des applications.",
-            "urls": {}, "demo": demo, "auth_url": ""}
+    result = {"mode": cfg.remote_access.mode, "status": "local" if cfg.remote_access.mode == "local" else "pending",
+              "message": "Accès local uniquement." if cfg.remote_access.mode == "local" else "À activer après l’installation des applications.",
+              "urls": {}, "demo": demo, "auth_url": ""}
+    if cfg.remote_access.mode == "cloudflare":
+        result.update(routes=routes(cfg), tunnel_id=identifiant_tunnel(cfg.remote_access.tunnel_token))
+    return result
 
 
 def _folder(project_dir):
@@ -53,6 +84,8 @@ def _command(cfg, project_dir, *args, timeout=30):
                           str(_folder(project_dir) / "compose.yml"), *args], timeout=timeout)
     if result.returncode:
         # Docker output can contain association URLs. Do not echo it to logs.
+        if cfg.remote_access.mode == "cloudflare":
+            raise ValueError("Le connecteur Cloudflare n’a pas démarré. Vérifiez Docker et réessayez.")
         raise ValueError("La passerelle distante n’a pas démarré. Vérifiez Docker, les ports 80/443 et réessayez.")
     return result.stdout
 
@@ -74,7 +107,10 @@ def deactivate(cfg, project_dir, *, demo=False):
     if not demo and (_folder(project_dir) / "compose.yml").exists():
         _command(cfg, project_dir, "down", timeout=60)
     result = summary(cfg, demo=demo)
-    result.update(status="disabled", urls={}, message="Désactivation simulée." if demo else "Passerelle Docker PlugArr arrêtée. Une connexion Tailscale native éventuelle reste gérée par Tailscale.")
+    message = "Désactivation simulée." if demo else "Passerelle Docker PlugArr arrêtée. Une connexion Tailscale native éventuelle reste gérée par Tailscale."
+    if cfg.remote_access.mode == "cloudflare" and not demo:
+        message = "Connecteur Cloudflare arrêté. Le tunnel et ses routes restent dans votre compte Cloudflare : supprimez-les là-bas si vous n’en voulez plus."
+    result.update(status="disabled", urls={}, message=message)
     return result
 
 
@@ -89,21 +125,33 @@ def gateway_compose(cfg):
                     entrypoint=["/usr/local/bin/tailscaled"],
                     command=["--state=/var/lib/tailscale/tailscaled.state", "--socket=/tmp/tailscaled.sock"])
         return {"services": {"gateway": base}}
+    applications = {"applications": {"external": True, "name": cfg.project_name + "_plugarr"}}
+    if cfg.remote_access.mode == "cloudflare":
+        # Connexion SORTANTE vers Cloudflare : aucun port publie, rien a
+        # rediriger sur la box, et le CGNAT n'y change rien. Les arguments sont
+        # ceux de la commande Docker du tableau de bord ; le jeton passe par
+        # TUNNEL_TOKEN, lu dans un fichier prive plutot que dans ce compose.
+        base.update(image=CLOUDFLARED_IMAGE, command=["tunnel", "--no-autoupdate", "run"],
+                    env_file=["./tunnel.env"], networks=["applications"])
+        return {"services": {"gateway": base}, "networks": applications}
     base.update(image=CADDY_IMAGE, ports=["80:80", "443:443"],
                 volumes=["./Caddyfile:/etc/caddy/Caddyfile:ro", f"{root}/caddy-data:/data", f"{root}/caddy-config:/config"],
                 networks=["applications"])
-    return {"services": {"gateway": base},
-            "networks": {"applications": {"external": True, "name": cfg.project_name + "_plugarr"}}}
+    return {"services": {"gateway": base}, "networks": applications}
 
 
-def caddyfile(cfg):
-    blocks = ["# Managed by PlugArr. Private credentials are never served here.", "{\n admin off\n}"]
-    for sid, url in external_urls(cfg).items():
+def _check_publishable(cfg):
+    for sid in external_urls(cfg):
         inst = cfg.services[sid]
         if inst.adopted or inst.url_base:
             raise ValueError("L’accès HTTPS automatique est réservé aux services gérés par PlugArr, sans sous-chemin.")
-        upstream = inst.internal_url(catalog.get(sid), cfg.host, behind_vpn=cfg.vpn.protects(sid))
-        blocks.append(f"{urlsplit(url).hostname} {{\n reverse_proxy {upstream}\n}}")
+
+
+def caddyfile(cfg):
+    _check_publishable(cfg)
+    blocks = ["# Managed by PlugArr. Private credentials are never served here.", "{\n admin off\n}"]
+    for sid, url in external_urls(cfg).items():
+        blocks.append(f"{urlsplit(url).hostname} {{\n reverse_proxy {_upstream(cfg, sid)}\n}}")
     return "\n\n".join(blocks) + "\n"
 
 
@@ -133,7 +181,7 @@ def _protect_applications(cfg, directory):
                 # Keep existing accepted domains; append the proxy domain and internal aliases.
                 existing = str(old.get("web_ui_domain_list", ""))
                 hosts = [h for h in existing.split(";") if h and h != "*"]
-                hosts += [cfg.host, "localhost", "qbittorrent", "gluetun", "qb." + cfg.remote_access.domain]
+                hosts += [cfg.host, "localhost", "qbittorrent", "gluetun", cfg.remote_access.hostname("qbittorrent")]
                 desired["web_ui_domain_list"] = ";".join(dict.fromkeys(hosts))
                 backup = directory / "qbittorrent-web-before.json"
                 if not backup.exists():
@@ -176,6 +224,16 @@ def activate(cfg, project_dir, *, demo=False):
                 raise ValueError("Configurez le DNS des sous-domaines vers votre connexion publique, puis réessayez.") from exc
         _protect_applications(cfg, directory)
         _private_write(directory / "Caddyfile", rendered)
+    elif cfg.remote_access.mode == "cloudflare":
+        # Pas de controle DNS ici : Cloudflare cree l'enregistrement quand on
+        # ajoute la route, et le tableau de bord propose de le faire une fois
+        # le connecteur en ligne. `inspect` dit ensuite ce qui manque.
+        _check_publishable(cfg)
+        _protect_applications(cfg, directory)
+        _private_write(directory / "tunnel.env", f"TUNNEL_TOKEN={cfg.remote_access.tunnel_token}\n")
+    if cfg.remote_access.mode != "cloudflare":
+        # Le compose qu'on ecrit ne le lit plus : ne pas garder un secret inutile.
+        (directory / "tunnel.env").unlink(missing_ok=True)
     _private_write(directory / "compose.yml", yaml.safe_dump(config, sort_keys=False))
     _command(cfg, project_dir, "up", "-d", "--force-recreate", timeout=240)
     if cfg.remote_access.mode == "tailscale":
@@ -208,6 +266,100 @@ def _tailscale_result(cfg, data):
     return result
 
 
+def _check_public(cfg, sid, url):
+    """Ce que repond l'adresse publique, vue depuis le serveur.
+
+    Un refus de l'API anonyme ne suffit pas : l'adresse peut mener a une AUTRE
+    instance (un ancien `sonarr.` du meme domaine, relie a un autre tunnel). La
+    cle API de celle-ci doit donc etre acceptee, et seulement apres le refus
+    anonyme : c'est l'adresse que les fiches du telephone utiliseront.
+    """
+    hostname = urlsplit(url).hostname
+    qb = sid == "qbittorrent"
+    path = "/api/v2/app/preferences" if qb else "/api/v3/system/status"
+    try:
+        socket.getaddrinfo(hostname, 443)
+    except OSError:
+        return {"service": sid, "ok": False, "reason": "dns"}
+    try:
+        with httpx.Client(timeout=8, trust_env=False, follow_redirects=False) as client:
+            response = client.get(url + path)
+            # Page de verification anti-robot : la seule valeur possible de
+            # `cf-mitigated` est `challenge` (documentation Cloudflare
+            # « Detect a Challenge Page response »). Un 403 de qBittorrent
+            # anonyme n'a pas cet en-tete.
+            if response.headers.get("cf-mitigated") == "challenge":
+                return {"service": sid, "ok": False, "reason": "challenge"}
+            # qBittorrent 5 repond 403 sans session ; Sonarr et Radarr 401.
+            if response.status_code in ((401, 403) if qb else (401,)):
+                key = cfg.services[sid].api_key
+                if not qb and key:
+                    own = client.get(url + path, headers={"X-Api-Key": key})
+                    if own.status_code != 200:
+                        return {"service": sid, "ok": False, "reason": "other_instance"}
+                return {"service": sid, "ok": True, "reason": ""}
+    except httpx.HTTPError:
+        return {"service": sid, "ok": False, "reason": "unreachable"}
+    code = response.status_code
+    location = response.headers.get("location", "")
+    if 300 <= code < 400 and (urlsplit(location).hostname or "").endswith(".cloudflareaccess.com"):
+        reason = "access"
+    elif code == 530 or (code >= 500 and "1033" in response.text[:4000]):
+        reason = "tunnel"
+    elif code in (502, 504):
+        reason = "origin"
+    elif code == 404:
+        reason = "route"
+    elif code == 403:
+        reason = "blocked"
+    elif code == 200:
+        reason = "open"
+    else:
+        reason = f"http {code}"
+    return {"service": sid, "ok": False, "reason": reason}
+
+
+def _explain(cfg, check):
+    sid, reason = check["service"], check["reason"]
+    name = catalog.get(sid).display_name
+    host = cfg.remote_access.hostname(sid)
+    tunnel = cfg.remote_access.mode == "cloudflare"
+    texts = {
+        "dns": f"{name} : {host} n’existe pas encore dans le DNS. "
+               + ("Ajoutez sa route dans le tunnel." if tunnel else "Créez l’enregistrement vers votre connexion publique."),
+        "tunnel": f"{name} : Cloudflare ne trouve aucun connecteur actif pour {host} (tunnel arrêté, ou adresse reliée à un autre tunnel).",
+        "origin": f"{name} : Cloudflare joint le serveur mais pas l’application. "
+                  + (f"Vérifiez l’URL du service de la route : {_upstream(cfg, sid)}." if tunnel else "Vérifiez que l’application tourne."),
+        "route": f"{name} : {host} n’a pas de route vers l’application"
+                 + (" dans ce tunnel." if tunnel else "."),
+        # Essai reel du 2026-09-27 : une application Access `*.domaine` couvrait
+        # toute nouvelle adresse. On ne la retire pas pour une adresse : on
+        # ajoute celle-ci a une application en Bypass, qui passe en premier.
+        "access": f"{name} : Cloudflare Access protège {host}. Les applications mobiles ne passeront pas : dans Zero Trust, ajoutez cette adresse à une application en Bypass, ou retirez-la de la protection.",
+        "challenge": f"{name} : Cloudflare impose une vérification anti-robot sur {host}. Les applications mobiles seraient bloquées : désactivez cette règle pour cette adresse.",
+        "blocked": f"{name} : {host} refuse la requête (403) avant l’application. Une règle de sécurité Cloudflare ou un pare-feu la filtre.",
+        "other_instance": f"{name} : {host} mène à une autre instance, qui refuse la clé API de celle-ci. Un ancien enregistrement ou un autre tunnel utilise ce nom : choisissez un autre sous-domaine.",
+        "open": f"{name} : l’API répond sans identifiants sur {host}. Coupez cet accès avant toute utilisation.",
+        "unreachable": f"{name} : {host} ne répond pas en HTTPS.",
+    }
+    return texts.get(reason, f"{name} : réponse inattendue de {host} ({reason}).")
+
+
+def _tunnel_state(cfg, project_dir):
+    """Etat du connecteur, lu dans son journal. Rien de ce journal n'est
+    affiche : seules deux lignes connues sont cherchees."""
+    compose = _folder(project_dir) / "compose.yml"
+    # Pas encore active, ou passerelle d'un autre mode (Caddy, Tailscale).
+    if not compose.is_file() or CLOUDFLARED_IMAGE not in compose.read_text(encoding="utf-8"):
+        return "absent"
+    logs = _command(cfg, project_dir, "logs", "--no-color", "--tail", "500", "gateway")
+    if TUNNEL_CONNECTED in logs:
+        return "connected"
+    if TUNNEL_BAD_TOKEN in logs:
+        return "bad_token"
+    return "waiting"
+
+
 def inspect(cfg, project_dir, *, demo=False):
     if demo:
         return activate(cfg, project_dir, demo=True)
@@ -224,17 +376,24 @@ def inspect(cfg, project_dir, *, demo=False):
         return _tailscale_result(cfg, json.loads(raw))
     result = summary(cfg)
     urls = external_urls(cfg)
-    checks = []
-    for sid, url in urls.items():
-        try:
-            with httpx.Client(timeout=5, trust_env=False, follow_redirects=False) as client:
-                path = "/api/v2/app/preferences" if sid == "qbittorrent" else "/api/v3/system/status"
-                response = client.get(url + path)
-                ok = response.status_code in (401, 403)
-        except httpx.HTTPError:
-            ok = False
-        checks.append({"service": sid, "ok": ok})
+    if cfg.remote_access.mode == "cloudflare":
+        state = _tunnel_state(cfg, project_dir)
+        if state != "connected":
+            message = {
+                "absent": "Connecteur Cloudflare pas encore installé : activez l’accès distant.",
+                "bad_token": "Cloudflare refuse ce jeton : recopiez la commande d’installation du tunnel, puis réactivez.",
+            }.get(state, "Le connecteur n’est pas encore relié à Cloudflare. Vérifiez le jeton (tunnel supprimé ?) et l’accès Internet sortant du serveur, puis actualisez.")
+            result.update(status="pending", urls=urls, checks=[], tunnel=state, message=message)
+            return result
+    checks = [_check_public(cfg, sid, url) for sid, url in urls.items()]
     good = all(c["ok"] for c in checks) and bool(checks)
-    result.update(status="checked" if good else "pending", urls=urls, checks=checks,
-                  message="HTTPS répond depuis le serveur et refuse l’API anonyme. Testez maintenant depuis votre téléphone en 4G/5G." if good else "HTTPS reste à vérifier : DNS, certificat, ports de la box ou authentification. La stack locale reste disponible.")
+    details = " ".join(_explain(cfg, c) for c in checks if not c["ok"])
+    if cfg.remote_access.mode == "cloudflare":
+        message = ("Le tunnel répond par Cloudflare et refuse l’API anonyme. Configurez maintenant votre téléphone, puis testez en 4G/5G."
+                   if good else "Connecteur en ligne. Reste à ajouter ou corriger les routes du tunnel dans Cloudflare. " + details)
+        result.update(tunnel="connected")
+    else:
+        message = ("HTTPS répond depuis le serveur et refuse l’API anonyme. Testez maintenant depuis votre téléphone en 4G/5G."
+                   if good else "HTTPS reste à vérifier : DNS, certificat, ports de la box ou authentification. La stack locale reste disponible. " + details)
+    result.update(status="checked" if good else "pending", urls=urls, checks=checks, message=message.strip())
     return result

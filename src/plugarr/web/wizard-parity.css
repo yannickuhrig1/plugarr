@@ -177,3 +177,14 @@ td code { overflow-wrap: anywhere; white-space: normal; }
 .phone-qr[hidden] { display: none !important; }
 .phone-qr svg { width: min(260px, 100%); height: auto; background: #fff; border-radius: 8px; }
 .phone-qr code { overflow-wrap: anywhere; font-size: 0.85em; opacity: 0.8; }
+
+/* Acces distant par domaine : une ligne par application, sous-domaine
+   modifiable sur place, adresse complete en apercu. */
+.remote-service { align-items: center; display: grid; gap: 8px 14px; grid-template-columns: minmax(130px, auto) minmax(0, 11rem) minmax(0, 1fr); margin: 10px 0; }
+.remote-service > input { min-height: 40px !important; padding: 8px 10px !important; }
+/* `.form-grid label` met ses enfants en colonne : la case passait au-dessus du nom. */
+.remote-service .inline-choice { align-items: center !important; flex-direction: row !important; }
+.remote-address { color: var(--muted); overflow-wrap: anywhere; }
+.remote-routes { margin-top: 16px; }
+.remote-route { border-top: 1px solid #404050; margin-top: 14px; padding-top: 10px; }
+@media (max-width: 640px) { .remote-service { grid-template-columns: 1fr; } }

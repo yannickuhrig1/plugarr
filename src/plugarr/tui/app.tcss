@@ -250,3 +250,23 @@ Checkbox.service.-on > .toggle--button {
 #ph-fields, #ph-notice, #ph-qr {
     margin: 1 0 0 0;
 }
+
+/* -- acces distant : un sous-domaine modifiable par application ----------- */
+
+#ra-noms {
+    height: auto;
+    padding: 0 2;
+}
+
+.ra-ligne {
+    height: auto;
+}
+
+.ra-nom-libelle {
+    width: 14;
+    padding: 1 0;
+}
+
+.ra-ligne Input {
+    width: 1fr;
+}

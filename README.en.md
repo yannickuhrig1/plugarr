@@ -198,6 +198,29 @@ and resumed where it is; the manager can move it afterwards.
 
 The portable executable still updates itself when it closes.
 
+### Linux x86_64: portable archive or Debian package
+
+The [latest release](https://github.com/yannickuhrig1/plugarr/releases) contains
+two Linux x86_64 distributions, with no Python to install:
+
+- `PlugArr-linux-x86_64.tar.gz` holds `plugarr`, `plugarr-admin`, and their
+  shared runtime. Extract it, then run `./PlugArr/plugarr` in a terminal or
+  `./PlugArr/plugarr-admin` to open the manager;
+- `plugarr_x.y.z_amd64.deb` installs the same programs under `/opt/plugarr`,
+  the `plugarr` and `plugarr-admin` commands on PATH, and a “PlugArr
+  Administration” menu entry on compatible desktops.
+
+On Debian or Ubuntu:
+
+```bash
+sudo apt install ./plugarr_x.y.z_amd64.deb
+```
+
+Installing the package never creates or moves a stack, media file, or secret.
+Docker must already be usable by your account. Automatic updates remain specific
+to Windows executables for now: on Linux, install the newer archive or package
+after verifying its SHA-256 checksum.
+
 ### Install on a server or NAS from Windows
 
 The first page of the web wizard offers **On this computer** or **On a server

@@ -108,7 +108,10 @@ pyz = PYZ(a.pure)
 # L'executable n'avait aucune icone : Windows lui collait celle, generique,
 # de tout binaire console. `assets/plugarr.ico` porte sept tailles, de 16 a
 # 256 px — voir scripts/icone.py, qui l'engendre depuis le visuel d'origine.
-# Elle est ecrite en toutes lettres dans chaque EXE : un test la cherche.
+# Elle est ecrite en toutes lettres dans chaque EXE : un test la cherche. Le
+# bootloader Linux ne sait pas embarquer une icone Windows ; le paquet Debian
+# installe son SVG dans le theme d'icones du systeme.
+OPTIONS_ICONE = {"icon": str(ROOT / "assets" / "plugarr.ico")} if sys.platform == "win32" else {}
 
 if os.environ.get("PLUGARR_ONEDIR") == "1":
     # Version installee (packaging/installer/plugarr.iss) : un DOSSIER, deux
@@ -124,7 +127,7 @@ if os.environ.get("PLUGARR_ONEDIR") == "1":
         [],
         exclude_binaries=True,
         name="plugarr",
-        icon=str(ROOT / "assets" / "plugarr.ico"),
+        **OPTIONS_ICONE,
         debug=False,
         strip=False,
         upx=False,
@@ -138,7 +141,7 @@ if os.environ.get("PLUGARR_ONEDIR") == "1":
         exclude_binaries=True,
         # Le lanceur reconnait ce nom : voir packaging/launcher.py.
         name="plugarr-admin",
-        icon=str(ROOT / "assets" / "plugarr.ico"),
+        **OPTIONS_ICONE,
         debug=False,
         strip=False,
         upx=False,
@@ -163,7 +166,7 @@ else:
         a.datas,
         [],
         name=os.environ.get("PLUGARR_EXE_NAME", "plugarr"),
-        icon=str(ROOT / "assets" / "plugarr.ico"),
+        **OPTIONS_ICONE,
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,

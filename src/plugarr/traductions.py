@@ -868,6 +868,7 @@ EN: dict[str, str] = {
     "[b]Sous-domaines[/b] [dim](modifiables)[/dim]": "[b]Subdomains[/b] [dim](editable)[/dim]",
     "Commande ou jeton du tunnel, copie depuis Cloudflare": "Tunnel command or token, copied from Cloudflare",
     "Jeton enregistre : laissez vide pour le garder": "Token saved: leave empty to keep it",
+    "La console en conteneur ne connait pas encore le tunnel Cloudflare ni les sous-domaines personnalises. Desactivez-la, ou choisissez un autre acces.": "The containerized console does not know the Cloudflare tunnel or custom subdomains yet. Disable it, or choose another access.",
     "Adresses HTTPS sur votre domaine gere par Cloudflare, sans ouvrir de port, meme derriere un CGNAT. Dans Cloudflare : Networking, Tunnels, Create a tunnel, choisissez Docker et collez la commande affichee. Creez un tunnel reserve a PlugArr. Les routes a ajouter sont donnees apres l'installation.": "HTTPS addresses on your Cloudflare-managed domain, without opening any port, even behind CGNAT. In Cloudflare: Networking, Tunnels, Create a tunnel, choose Docker and paste the displayed command. Create a tunnel reserved for PlugArr. The routes to add are listed after installation.",
     "  Routes du tunnel (Cloudflare : Networking, Tunnels, onglet Routes, Add route, Published application) :": "  Tunnel routes (Cloudflare: Networking, Tunnels, Routes tab, Add route, Published application):",
     "    {service} : Subdomain {sous_domaine}, Domain {domaine}, Service URL {url}": "    {service}: Subdomain {sous_domaine}, Domain {domaine}, Service URL {url}",

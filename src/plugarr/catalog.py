@@ -53,8 +53,8 @@ CONSOLE_IMAGE = (
 #: L'image ci-dessus connait-elle le tunnel Cloudflare et les sous-domaines
 #: personnalises ? Sur un serveur SSH, c'est ELLE qui lit stack.yml et active
 #: l'acces distant : une image qui ne les connait pas refuserait toute la pile.
-#: A passer a True en epinglant une image construite depuis une version qui
-#: les connait (0.11.1 ne les connait pas).
+#: La meme image sert a la console en conteneur. A passer a True en epinglant
+#: `plugarr:0.12.0-admin` ou plus recente (publiee par le tag v0.12.0).
 CONSOLE_IMAGE_TUNNEL_CLOUDFLARE = False
 
 #: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et

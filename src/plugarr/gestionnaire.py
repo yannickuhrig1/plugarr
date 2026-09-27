@@ -1313,6 +1313,10 @@ class _Gestion(BaseHTTPRequestHandler):
             nom, type_ = _STATIQUES[route]
             self._repondre((WEB / nom).read_bytes(), type_=type_)
             return
+        if route == "/favicon.svg":
+            if self._permis(authentifie=False):
+                self._repondre(dashboard.plugarr_icon_svg(), type_="image/svg+xml")
+            return
         if route == "/api/textes":
             # Sans jeton : ce sont des libelles, et la page doit pouvoir dire
             # dans la bonne langue que sa session manque.

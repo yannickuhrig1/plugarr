@@ -338,3 +338,43 @@ def test_un_serveur_ssh_attend_une_image_qui_connait_le_tunnel(tmp_path, monkeyp
     monkeypatch.setattr(catalog, "CONSOLE_IMAGE_TUNNEL_CLOUDFLARE", False)
     with pytest.raises(ValueError, match="image d’administration"):
         state.build_config(form)
+
+
+# -- images epinglees : veille et console en conteneur -------------------------
+
+
+def test_la_veille_ne_recoit_ni_le_jeton_ni_l_acces_distant(tmp_path):
+    """Sa copie de stack.yml est lue par une image de veille epinglee, qui
+    refuserait le mode tunnel ; et le jeton n'a rien a faire chez elle."""
+    from plugarr import veille_config
+
+    _, cfg = config(tmp_path, names={"sonarr": "series"})
+    reduit = veille_config.reduire(cfg).model_dump(mode="json")
+    assert reduit["remote_access"] == {"mode": "local", "domain": "", "services": []}
+    assert TOKEN not in json.dumps(reduit)
+    assert cfg.remote_access.tunnel_token == TOKEN
+
+
+def test_la_console_en_conteneur_attend_une_image_qui_connait_le_tunnel(tmp_path, monkeypatch):
+    state = webwizard.WizardState(tmp_path, demo=True)
+    form = state.bootstrap()["form"]
+    form.update(services=["sonarr"], reprendre=False, console_enabled=True,
+                remote_access={"mode": "cloudflare", "domain": "maison.example", "services": ["sonarr"],
+                               "tunnel_token": TOKEN})
+    monkeypatch.setattr(catalog, "CONSOLE_IMAGE_TUNNEL_CLOUDFLARE", False)
+    with pytest.raises(ValueError, match="console en conteneur"):
+        state.build_config(form)
+    form["remote_access"] = {"mode": "https", "domain": "maison.example", "services": ["sonarr"]}
+    assert state.build_config(form).console_enabled is True
+    monkeypatch.setattr(catalog, "CONSOLE_IMAGE_TUNNEL_CLOUDFLARE", True)
+    form["remote_access"] = {"mode": "cloudflare", "domain": "maison.example", "services": ["sonarr"],
+                             "tunnel_token": TOKEN}
+    assert state.build_config(form).remote_access.mode == "cloudflare"
+
+
+def test_la_page_d_acces_porte_l_icone_de_plugarr(tmp_path):
+    from plugarr import dashboard
+
+    _, cfg = config(tmp_path, mode="https")
+    page = dashboard.render(cfg)
+    assert '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,' in page

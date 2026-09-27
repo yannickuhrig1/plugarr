@@ -37,6 +37,7 @@ import yaml
 
 from .layout import _donner
 from .models import StackConfig
+from .remote_models import RemoteAccessConfig
 
 DOSSIER = "veille"
 FICHIER = "stack.yml"
@@ -53,6 +54,10 @@ def chemin(cfg: StackConfig) -> Path:
 def reduire(cfg: StackConfig) -> StackConfig:
     """Copie de la configuration sans les secrets que la veille n'utilise pas."""
     reduit = cfg.model_copy(deep=True)
+    # La veille ne publie rien : l'acces distant ne la concerne pas. Le retirer
+    # ote le jeton du tunnel Cloudflare, et garde ce fichier lisible par une
+    # image de veille qui ne connait pas ce mode.
+    reduit.remote_access = RemoteAccessConfig()
     reduit.vpn.wireguard_private_key = ""
     reduit.vpn.wireguard_addresses = ""
     reduit.vpn.openvpn_user = ""

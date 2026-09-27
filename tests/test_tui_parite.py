@@ -300,6 +300,38 @@ async def test_le_tunnel_cloudflare_et_les_noms_se_choisissent_dans_le_tui(app, 
 
 
 @pytest.mark.asyncio
+async def test_le_tunnel_est_refuse_avec_la_console_en_conteneur(app, monkeypatch):
+    import base64
+    import json
+
+    from textual.widgets import Input, RadioButton
+
+    from plugarr import catalog
+    from plugarr.tui.screens import RemoteAccessScreen
+
+    monkeypatch.setattr(catalog, "CONSOLE_IMAGE_TUNNEL_CLOUDFLARE", False)
+    jeton = base64.b64encode(json.dumps({
+        "a": "0123456789abcdef0123456789abcdef", "t": "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "s": base64.b64encode(b"fictif-" * 5).decode(),
+    }).encode()).decode()
+    async with app.run_test() as pilot:
+        pilot.app.selection = ["sonarr"]
+        pilot.app.console_enabled = True
+        await pilot.app.push_screen(RemoteAccessScreen())
+        await pilot.pause()
+        ecran = pilot.app.screen
+        ecran.query_one("#ra-cloudflare", RadioButton).value = True
+        await pilot.pause()
+        ecran.query_one("#ra-domain", Input).value = "exemple.fr"
+        ecran.query_one("#ra-jeton", Input).value = jeton
+        ecran.query_one("#next", Button).press()
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, RemoteAccessScreen)
+        assert pilot.app.remote_access is None
+        assert "console en conteneur" in str(ecran.query_one("#ra-aide", Static).render())
+
+
+@pytest.mark.asyncio
 async def test_un_domaine_invalide_est_refuse(app, attendre):
     from textual.widgets import Input, RadioButton
 

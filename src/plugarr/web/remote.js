@@ -15,8 +15,11 @@ globalThis.PlugArrRemote = (() => {
     seerr:{category:'requests',notifications:['pending','approved','available','failed']},
     qbittorrent:{category:'downloads',notifications:[]},
   };
+  // Sous-domaines proposes, et modes qui publient une adresse sur le domaine.
+  const defaults={sonarr:'sonarr',radarr:'radarr',qbittorrent:'qb'}, domainModes=['https','cloudflare'];
+  const labelPattern=/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
   let bootstrap, form, request, renderReport, language=()=>document.documentElement.lang;
-  let current, selected=[], effective=[], pollTimer, mounted=false;
+  let current, selected=[], effective=[], names={}, tokenSaved=false, pollTimer, mounted=false;
   // Sauvegardes chargees pour la fusion. Elles restent dans le navigateur.
   let nzbBase=null, nzbBaseError='', qbStatus='';
   const text = (fr,en) => language()==='en'?en:fr;
@@ -27,23 +30,51 @@ globalThis.PlugArrRemote = (() => {
     remoteHttps:'With my domain name',remoteHttpsHelp:'HTTPS addresses. Requires a domain and a reachable inbound connection.',
     remoteDomain:'Your domain',remoteDomainHelp:'Domain only, without https://. One subdomain per application.',
     remoteDnsHelp:'Point subdomains at your public connection and forward ports 80 and 443 to the server. A certificate does not bypass CGNAT.',
+    remoteCloudflare:'With a Cloudflare tunnel',remoteCloudflareHelp:'HTTPS addresses on your Cloudflare-managed domain, without opening any port. Works behind CGNAT.',
+    remoteNamesHelp:'You can rename each subdomain, for instance if sonarr is already used on this domain.',
+    remoteToken:'Tunnel token',remoteTokenHelp:'In Cloudflare: Networking, Tunnels, Create a tunnel. Choose Docker and paste the displayed command here: PlugArr keeps only the token.',
+    remoteTokenSaved:'Token saved: leave empty to keep it.',
+    remoteTunnelHelp:'Create a tunnel reserved for PlugArr: a token already running on another machine would split traffic between both. Use the Cloudflare zone domain (mydomain.com): the free certificate covers only one subdomain level. After installation, PlugArr lists the routes to add to the tunnel. No Cloudflare Access on these addresses: mobile apps would no longer get through. If Access protects the whole domain, add them to a Bypass application.',
     remoteHeading:'Remote access',remoteConfirm:'I authorize the chosen gateway configuration and access to the selected applications.',
     remoteActivate:'Activate remote access',remoteAssociate:'Connect my Tailscale account',remoteRefresh:'Refresh status',
     mobileTitle:'Set up my phone',mobileIntro:'Select your app and copy the fields. A check from the server does not replace a phone test.',
     mobileClient:'Mobile app',mobileConnection:'Connection',
   };
   function mode(){return document.querySelector('input[name="remote-mode"]:checked')?.value||'local';}
+  const subdomain=sid=>names[sid]||defaults[sid];
+  const address=sid=>`https://${subdomain(sid)}.${$('remote-domain').value.trim()||text('votre-domaine.fr','your-domain.com')}`;
+  // Meme lecture que PlugArr (remote_models.jeton_tunnel) : Cloudflare montre
+  // une commande d'installation, le jeton est dedans. Base64 standard d'un JSON
+  // portant le compte (a), le secret (s) et l'identifiant du tunnel (t).
+  function tunnelToken(value){
+    for(const candidate of value.match(/[A-Za-z0-9+/]{40,}={0,2}/g)||[]){
+      try{
+        const data=JSON.parse(atob(candidate));
+        if(data&&typeof data.a==='string'&&data.a&&typeof data.s==='string'&&data.s&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(data.t)))return candidate;
+      }catch{}
+    }
+    return '';
+  }
   function refresh(services=effective){
     effective=services;
     if(!$('remote-domain-box'))return;
-    $('remote-domain-box').hidden=mode()!=='https';
+    $('remote-domain-box').hidden=!domainModes.includes(mode());
+    $('remote-dns-help').hidden=mode()!=='https';
+    $('remote-tunnel-box').hidden=mode()!=='cloudflare';
+    $('remote-token-saved').hidden=!tokenSaved;
     $('remote-tail-help').hidden=mode()!=='tailscale';
     $('remote-tail-help').textContent=bootstrap?.demo?text('Association simulée à la fin de la démonstration.','Account association is simulated at the end of this demo.'):text('Sur Linux, PlugArr prépare Tailscale et propose le lien de connexion à la fin. Sur Windows, installez et connectez Tailscale sur ce PC. Le réseau privé peut donner accès aux autres ports du serveur selon vos règles Tailscale.','On Linux, PlugArr prepares Tailscale and provides the login link after installation. On Windows, install and connect Tailscale on this PC. Your tailnet policy may also allow access to other server ports.');
     $('remote-services').replaceChildren();
     for(const sid of ids.filter(s=>effective.includes(s))){
-      const label=el('label'),input=el('input');label.className='inline-choice';input.type='checkbox';input.checked=selected.includes(sid);input.value=sid;
+      const row=el('div'),choice=el('label'),input=el('input'),name=el('input'),preview=el('code',address(sid));
+      row.className='remote-service';choice.className='inline-choice';input.type='checkbox';input.checked=selected.includes(sid);input.value=sid;
       input.addEventListener('change',()=>{selected=input.checked?[...new Set([...selected,sid])]:selected.filter(s=>s!==sid);});
-      label.append(input,el('span',`${sid} · https://${sid==='qbittorrent'?'qb':sid}.${$('remote-domain').value.trim()||text('votre-domaine.fr','your-domain.com')}`));$('remote-services').append(label);
+      // Le nom se modifie sur place : reconstruire la ligne volerait le focus.
+      name.id=`remote-name-${sid}`;name.value=subdomain(sid);name.maxLength=63;name.spellcheck=false;name.autocomplete='off';
+      name.setAttribute('aria-label',text(`Sous-domaine de ${sid}`,`${sid} subdomain`));
+      name.addEventListener('input',()=>{names[sid]=name.value.trim().toLowerCase();name.setCustomValidity('');preview.textContent=address(sid);});
+      preview.className='remote-address';
+      choice.append(input,el('span',sid));row.append(choice,name,preview);$('remote-services').append(row);
     }
     $('remote-step-summary').textContent=mode()==='local'?text('Vous pourrez configurer un accès distant lors d’une prochaine installation.','You can configure remote access during a later installation.'):text('Les adresses et fiches mobiles seront disponibles à la fin. L’activation distante est une opération séparée.','Addresses and mobile forms will appear after installation. Remote activation is a separate operation.');
   }
@@ -51,18 +82,36 @@ globalThis.PlugArrRemote = (() => {
   // l'enregistrait, meme si le serveur etait en HTTPS ou Tailscale.
   function load(remote){
     remote=remote||{mode:'local',domain:'',services:[]};selected=[...(remote.services||[])];
+    names={...(remote.names||{})};tokenSaved=!!remote.tunnel_token_saved;$('remote-token').value='';
     document.querySelectorAll('input[name="remote-mode"]').forEach(n=>{n.checked=n.value===remote.mode;});
     $('remote-domain').value=remote.domain||'';refresh();
   }
-  function read(services=effective){return {mode:mode(),domain:mode()==='https'?$('remote-domain').value.trim():'',services:mode()==='https'?selected.filter(s=>services.includes(s)):[]};}
+  function read(services=effective){
+    const domain=domainModes.includes(mode()),chosen=domain?selected.filter(s=>services.includes(s)):[];
+    return {mode:mode(),domain:domain?$('remote-domain').value.trim():'',services:chosen,
+      names:Object.fromEntries(chosen.filter(s=>names[s]).map(s=>[s,names[s]])),
+      // Vide avec un jeton enregistre : PlugArr garde l'ancien.
+      tunnel_token:mode()==='cloudflare'?tunnelToken($('remote-token').value):''};
+  }
+  function refuse(field,fr,en){field.setCustomValidity(text(fr,en));field.reportValidity();return false;}
   function valid(){
-    $('remote-domain').setCustomValidity('');
-    if(mode()==='https'){
+    $('remote-domain').setCustomValidity('');$('remote-token').setCustomValidity('');
+    if(domainModes.includes(mode())){
       const value=$('remote-domain').value.trim();
-      if(!/^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+\.?$/.test(value)||!selected.some(s=>effective.includes(s))) {
-        $('remote-domain').setCustomValidity(text('Indiquez un domaine seul et choisissez au moins une application.','Enter a domain only and select at least one application.'));
-        $('remote-domain').reportValidity();return false;
+      if(!/^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+\.?$/.test(value)||!selected.some(s=>effective.includes(s)))
+        return refuse($('remote-domain'),'Indiquez un domaine seul et choisissez au moins une application.','Enter a domain only and select at least one application.');
+      const chosen=selected.filter(s=>effective.includes(s)),used=new Set();
+      for(const sid of chosen){
+        const field=$(`remote-name-${sid}`);field.setCustomValidity('');
+        if(!labelPattern.test(subdomain(sid)))return refuse(field,'Sous-domaine invalide : lettres, chiffres et tirets, sans point ni tiret aux extrémités.','Invalid subdomain: letters, digits and hyphens, no dot and no hyphen at either end.');
+        if(used.has(subdomain(sid)))return refuse(field,'Deux applications ne peuvent pas partager le même sous-domaine.','Two applications cannot share the same subdomain.');
+        used.add(subdomain(sid));
       }
+    }
+    if(mode()==='cloudflare'){
+      const raw=$('remote-token').value.trim();
+      if(!raw&&!tokenSaved)return refuse($('remote-token'),'Collez la commande du tunnel affichée par Cloudflare.','Paste the tunnel command shown by Cloudflare.');
+      if(raw&&!tunnelToken(raw))return refuse($('remote-token'),'Jeton de tunnel illisible : collez la commande d’installation affichée par Cloudflare, ou le jeton seul.','Unreadable tunnel token: paste the install command shown by Cloudflare, or the token alone.');
     }
     return true;
   }
@@ -79,9 +128,11 @@ globalThis.PlugArrRemote = (() => {
   function init(boot,fields,api,render,getLanguage){
     bootstrap=boot;form=fields;request=api;renderReport=render;language=getLanguage;
     const remote=form.remote_access||{mode:'local',domain:'',services:[]};selected=[...remote.services];
-    document.querySelectorAll('input[name="remote-mode"]').forEach(n=>{n.checked=n.value===remote.mode;n.addEventListener('change',()=>{if(mode()==='https'&&!selected.length)selected=ids.filter(s=>effective.includes(s));refresh();});});
+    names={...(remote.names||{})};tokenSaved=!!remote.tunnel_token_saved;
+    document.querySelectorAll('input[name="remote-mode"]').forEach(n=>{n.checked=n.value===remote.mode;n.addEventListener('change',()=>{if(domainModes.includes(mode())&&!selected.length)selected=ids.filter(s=>effective.includes(s));refresh();});});
     $('remote-domain').value=remote.domain||'';
     $('remote-domain').addEventListener('input',()=>{$('remote-domain').setCustomValidity('');refresh();});
+    $('remote-token').addEventListener('input',()=>$('remote-token').setCustomValidity(''));
     $('remote-confirm').addEventListener('change',()=>$('remote-activate').disabled=!$('remote-confirm').checked);
     $('remote-activate').addEventListener('click',()=>action('activate'));
     $('remote-refresh').addEventListener('click',()=>action('inspect'));
@@ -107,6 +158,21 @@ globalThis.PlugArrRemote = (() => {
         if(data.demo)row.append(el('code',service.remote_url));
         else {const link=el('a',service.remote_url);link.href=service.remote_url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}
         $('remote-links').append(row);
+      }
+      // Les routes se declarent dans le tableau de bord Cloudflare : on donne
+      // chaque champ tel qu'il le demande, pret a copier.
+      if(remote.mode==='cloudflare'&&remote.routes?.length){
+        const box=el('div'),tunnel=remote.tunnel_id?`${remote.tunnel_id.slice(0,8)}…`:'';box.className='remote-routes';
+        box.append(el('p',text(`Dans Cloudflare : Networking, Tunnels, ${tunnel?'tunnel '+tunnel:'votre tunnel'}, onglet Routes, Add route, Published application. Une route par application :`,
+          `In Cloudflare: Networking, Tunnels, ${tunnel?'tunnel '+tunnel:'your tunnel'}, Routes tab, Add route, Published application. One route per application:`)));
+        for(const route of remote.routes){
+          const row=el('div');row.className='remote-route';row.append(el('strong',route.service));
+          row.append(field(text('Sous-domaine (Subdomain)','Subdomain'),route.subdomain),field(text('Domaine (Domain)','Domain'),route.domain),field(text('URL du service (Service URL)','Service URL'),route.service_url));
+          box.append(row);
+        }
+        box.append(el('p',text('Si Cloudflare répond « An A, AAAA, or CNAME record with that host already exists », ce nom sert déjà : choisissez un autre sous-domaine dans PlugArr, ou supprimez l’ancien enregistrement.',
+          'If Cloudflare answers “An A, AAAA, or CNAME record with that host already exists”, that name is taken: pick another subdomain in PlugArr, or delete the old record.')));
+        $('remote-links').append(box);
       }
       clearTimeout(pollTimer);if(remote.status==='running')pollTimer=setTimeout(update,2500);
     }

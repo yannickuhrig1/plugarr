@@ -228,8 +228,12 @@ def appliquer(
     if "remote_access" not in imposes:
         neuve.remote_access = ancienne.remote_access.model_copy(deep=True)
         neuve.remote_access.services = [s for s in neuve.remote_access.services if neuve.enabled(s)]
-        if neuve.remote_access.mode == "https" and not neuve.remote_access.services:
+        neuve.remote_access.names = {
+            s: nom for s, nom in neuve.remote_access.names.items() if s in neuve.remote_access.services
+        }
+        if neuve.remote_access.mode in ("https", "cloudflare") and not neuve.remote_access.services:
             neuve.remote_access.mode = "local"
+            neuve.remote_access.tunnel_token = ""
 
     # Les identifiants, service par service. C'est ce qui evite d'annoncer un
     # mot de passe que le service refusera.

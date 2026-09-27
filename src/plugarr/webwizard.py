@@ -106,7 +106,9 @@ class WizardInput(BaseModel):
     veille_socket: bool = False
     console_enabled: bool = False
     console_port: int = 7373
-    remote_access: RemoteAccessConfig = Field(default_factory=RemoteAccessConfig)
+    #: Valide dans `build_config`, APRES reprise du jeton Cloudflare enregistre :
+    #: la page ne le recoit jamais, et un champ vide veut dire « garder l'ancien ».
+    remote_access: dict = Field(default_factory=dict)
     install_target: str = "local"
     remote_connection_id: str = Field(default="", max_length=128)
     remote_fingerprint: str = Field(default="", max_length=256)
@@ -352,7 +354,11 @@ class WizardState:
                 "veille_socket": cfg.veille_socket if cfg else False,
                 "console_enabled": cfg.console_enabled if cfg else False,
                 "console_port": cfg.console_port if cfg else 7373,
-                "remote_access": cfg.remote_access.model_dump() if cfg else {"mode": "local", "domain": "", "services": []},
+                "remote_access": {
+                    **cfg.remote_access.model_dump(exclude={"tunnel_token"}),
+                    # Le jeton reste ici ; la page sait seulement qu'il existe.
+                    "tunnel_token_saved": bool(cfg.remote_access.tunnel_token),
+                } if cfg else {"mode": "local", "domain": "", "services": []},
                 "install_target": "local",
                 "remote_connection_id": "",
                 "remote_fingerprint": "",
@@ -645,9 +651,37 @@ class WizardState:
             orchestrator.resolve_port_conflicts(cfg)
             if connection is None and self.previous_project_dir is not None:
                 self.project_dir = self.previous_project_dir
-        cfg.remote_access = form.remote_access.model_copy(deep=True)
+        acces = dict(form.remote_access)
+        # Indication d'affichage ajoutee par `_form_for` : un formulaire renvoye
+        # tel quel doit rester valide.
+        acces.pop("tunnel_token_saved", None)
+        if (
+            acces.get("mode") == "cloudflare"
+            and not str(acces.get("tunnel_token") or "").strip()
+            and form.reprendre
+            and previous is not None
+        ):
+            # Meme regle que les cles VPN : un champ vide conserve le secret.
+            acces["tunnel_token"] = previous.remote_access.tunnel_token
+        try:
+            cfg.remote_access = RemoteAccessConfig.model_validate(acces)
+        except ValidationError as exc:
+            # Le message du modele, jamais la valeur saisie : elle peut etre le jeton.
+            raise ValueError(
+                exc.errors(include_input=False)[0]["msg"].removeprefix("Value error, ")
+            ) from None
         if any(not cfg.enabled(sid) for sid in cfg.remote_access.services):
             raise ValueError("L’accès distant doit concerner des applications sélectionnées.")
+        if (
+            connection is not None
+            and not catalog.CONSOLE_IMAGE_TUNNEL_CLOUDFLARE
+            and (cfg.remote_access.mode == "cloudflare" or cfg.remote_access.names)
+        ):
+            raise ValueError(
+                "Sur un serveur SSH, le tunnel Cloudflare et les sous-domaines personnalisés "
+                "attendent une image d’administration PlugArr plus récente. Installez sur cet "
+                "ordinateur, ou choisissez un autre accès pour ce serveur."
+            )
         cfg.project_dir = self.remote_project_dir if connection is not None else self.project_dir
         return cfg
 
@@ -1672,7 +1706,7 @@ class WizardState:
                 "remote_replace_managed": bool(remote_project and remote_project.managed),
                 "remote_replace_confirmed": self.remote_replace_confirmed,
                 "host": cfg.host,
-                "remote_access": cfg.remote_access.model_dump(),
+                "remote_access": cfg.remote_access.model_dump(exclude={"tunnel_token"}),
                 "puid": cfg.puid,
                 "pgid": cfg.pgid,
                 "ids_source": i18n.t(cfg.ids_source),
@@ -1738,6 +1772,7 @@ class WizardState:
                 getattr(self.cfg.vpn, k)
                 for k in ("wireguard_private_key", "openvpn_password", "openvpn_user")
             )
+            values.append(self.cfg.remote_access.tunnel_token)
             for value in sorted(filter(None, values), key=len, reverse=True):
                 message = message.replace(value, "<masque>")
         return re.sub(r"(?i)((?:api_?key|token|password|passkey)=)[^&\s]+", r"\1<masque>", message)[

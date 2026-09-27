@@ -23,6 +23,7 @@ from xml.etree import ElementTree as ET
 
 from . import catalog
 from .i18n import t
+from .runner import sans_fenetre
 from .seed import read_api_key
 
 #: Fragment d'image permettant de reconnaitre un service. Volontairement large :
@@ -73,7 +74,8 @@ class Found:
 
 def _docker(*args: str, timeout: int = 30) -> str:
     proc = subprocess.run(
-        ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False
+        ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False,
+        **sans_fenetre(),
     )
     return proc.stdout if proc.returncode == 0 else ""
 

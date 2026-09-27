@@ -29,6 +29,7 @@ import httpx
 from . import catalog, imageref
 from .i18n import t
 from .models import StackConfig
+from .runner import sans_fenetre
 
 #: Qualificatifs qui designent une image instable. Un tag qui en contient un
 #: n'est jamais propose comme mise a jour, sauf si le tag deploye en contient
@@ -256,7 +257,8 @@ def _bearer_token(client: httpx.Client, challenge: str, repo: str) -> str | None
 
 def _docker(*args: str, timeout: int = 60) -> tuple[int, str]:
     proc = subprocess.run(
-        ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False
+        ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False,
+        **sans_fenetre(),
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 

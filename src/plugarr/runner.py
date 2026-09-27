@@ -8,6 +8,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,24 @@ PULL_TENTATIVES = 3
 PULL_ATTENTE = 5
 
 
+#: `subprocess.CREATE_NO_WINDOW`, qui n'existe que sous Windows.
+CREATE_NO_WINDOW = 0x08000000
+
+
+def sans_fenetre() -> dict:
+    """Options qui empechent un programme console d'ouvrir sa propre fenetre.
+
+    `plugarr-admin.exe` est un executable fenetre, sans console. Sous Windows,
+    chaque programme console qu'il lance en recoit donc une neuve, qui s'ouvre
+    et se referme aussitot. Le gestionnaire interroge `docker` toutes les 4
+    secondes : en 0.11.0, l'ecran clignotait sans arret. Depuis un terminal,
+    l'option ne change rien a ce qu'on voit, la sortie etant captee.
+    """
+    if sys.platform == "win32":
+        return {"creationflags": CREATE_NO_WINDOW}
+    return {}
+
+
 def _run(args: list[str], cwd: Path | None = None, timeout: int = 600) -> subprocess.CompletedProcess:
     # `text=True` seul decode avec l'encodage local, soit cp1252 sous Windows.
     # Docker, lui, ecrit de l'UTF-8 : le journal de Gluetun contient un emoji, et
@@ -55,6 +74,7 @@ def _run(args: list[str], cwd: Path | None = None, timeout: int = 600) -> subpro
             errors="replace",
             timeout=timeout,
             check=False,
+            **sans_fenetre(),
         )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(

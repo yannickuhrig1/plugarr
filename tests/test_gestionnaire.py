@@ -677,3 +677,14 @@ def test_quitter_depuis_la_page_arrete_le_gestionnaire(gestion):
         assert client.post("/api/quitter").status_code == 200
 
     assert gestion.arret.wait(5)
+
+
+def test_la_fenetre_porte_l_icone_de_plugarr(gestion):
+    """Edge en mode application prend l'icone de la barre des taches dans la
+    page : sans elle, PlugArr Administration n'avait pas son logo."""
+    with httpx.Client(base_url=f"http://127.0.0.1:{gestion.serveur.server_port}") as client:
+        assert 'href="/favicon.svg"' in client.get("/").text
+        icone = client.get("/favicon.svg")
+    assert icone.status_code == 200
+    assert icone.headers["content-type"] == "image/svg+xml"
+    assert icone.content.lstrip().startswith(b"<svg")

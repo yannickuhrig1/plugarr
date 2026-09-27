@@ -18,6 +18,7 @@ Trois pieges traites ici :
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import socket
@@ -53,6 +54,22 @@ def _application_icons() -> dict[str, str]:
     """Logos autonomes déjà utilisés par le graphe, sans requête externe."""
     path = Path(__file__).parent / "data" / "connection_icons.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def plugarr_icon() -> str:
+    """Logo PlugArr en data URI SVG, celui de la barre laterale.
+
+    C'est aussi l'icone des pages : sans elle, un onglet montrait un globe, et
+    la fenetre de PlugArr Administration (Edge en mode application, qui prend
+    son icone dans la page) n'avait pas celle de PlugArr dans la barre des taches.
+    """
+    return _application_icons().get("plugarr", "")
+
+
+def plugarr_icon_svg() -> bytes:
+    """Le meme logo en SVG brut, pour `/favicon.svg`."""
+    entete, _, contenu = plugarr_icon().partition(",")
+    return base64.b64decode(contenu) if entete == "data:image/svg+xml;base64" else b""
 
 
 def _badge(spec) -> str:
@@ -451,6 +468,7 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_repo
         # inexistant.
         prochaine_etape=html.escape(" ".join(prochaine_etape(cfg))),
         version=__version__,
+        icone=html.escape(plugarr_icon(), quote=True),
         live_script=_LIVE_SCRIPT if live else "",
         title=t("Administration") if live else t("Acces"),
         # Le bouton « copier » change de libelle une seconde apres le clic.
@@ -536,6 +554,7 @@ _TEMPLATE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} — stack media</title>
+<link rel="icon" type="image/svg+xml" href="{icone}">
 <style>
   :root {{
     --bg: #f6f7f9; --panel: #fff; --text: #16181d; --muted: #6b7280;

@@ -672,16 +672,18 @@ class WizardState:
             ) from None
         if any(not cfg.enabled(sid) for sid in cfg.remote_access.services):
             raise ValueError("L’accès distant doit concerner des applications sélectionnées.")
-        if (
-            connection is not None
-            and not catalog.CONSOLE_IMAGE_TUNNEL_CLOUDFLARE
-            and (cfg.remote_access.mode == "cloudflare" or cfg.remote_access.names)
-        ):
-            raise ValueError(
-                "Sur un serveur SSH, le tunnel Cloudflare et les sous-domaines personnalisés "
-                "attendent une image d’administration PlugArr plus récente. Installez sur cet "
-                "ordinateur, ou choisissez un autre accès pour ce serveur."
-            )
+        if not remote_access.admin_image_ready(cfg.remote_access):
+            if connection is not None:
+                raise ValueError(
+                    "Sur un serveur SSH, le tunnel Cloudflare et les sous-domaines personnalisés "
+                    "attendent une image d’administration PlugArr plus récente. Installez sur cet "
+                    "ordinateur, ou choisissez un autre accès pour ce serveur."
+                )
+            if cfg.console_enabled:
+                raise ValueError(
+                    "La console en conteneur ne connaît pas encore le tunnel Cloudflare ni les "
+                    "sous-domaines personnalisés. Désactivez-la, ou choisissez un autre accès."
+                )
         cfg.project_dir = self.remote_project_dir if connection is not None else self.project_dir
         return cfg
 
@@ -2147,6 +2149,10 @@ class WizardHandler(BaseHTTPRequestHandler):
             "/remote.js": ("remote.js", "text/javascript; charset=utf-8"),
             "/graph.css": ("graph.css", "text/css; charset=utf-8"),
         }
+        if route == "/favicon.svg":
+            if self.allowed(authenticated=False):
+                self.respond(dashboard.plugarr_icon_svg(), content_type="image/svg+xml")
+            return
         preview_route = route.startswith("/access-preview/")
         if not self.allowed(authenticated=route not in assets and not preview_route):
             return

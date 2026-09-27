@@ -37,6 +37,16 @@ TUNNEL_CONNECTED = "Registered tunnel connection"
 TUNNEL_BAD_TOKEN = "Provided Tunnel token is not valid"
 
 
+def admin_image_ready(remote) -> bool:
+    """L'image d'administration epinglee sait-elle lire ce choix ?
+
+    Elle relit le vrai `stack.yml` sur un serveur SSH et dans la console en
+    conteneur. Une image qui ne connait ni le tunnel ni les noms refuserait
+    toute la pile ; la console, elle, redemarrerait en boucle.
+    """
+    return catalog.CONSOLE_IMAGE_TUNNEL_CLOUDFLARE or (remote.mode != "cloudflare" and not remote.names)
+
+
 def external_urls(cfg, address=""):
     result = {}
     for sid in SUPPORTED:

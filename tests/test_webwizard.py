@@ -1545,3 +1545,14 @@ def test_une_installation_locale_n_a_pas_besoin_de_proxy(server):
 
     assert client.get("/api/report").json()["access_help"] is None
 
+
+
+def test_la_page_porte_l_icone_de_plugarr(server):
+    """Sans icone, l'onglet montrait un globe generique."""
+    wizard, _client = server
+    with httpx.Client(base_url=wizard.origin, trust_env=False, timeout=10) as anonyme:
+        assert 'href="/favicon.svg"' in anonyme.get("/").text
+        icone = anonyme.get("/favicon.svg")
+    assert icone.status_code == 200
+    assert icone.headers["content-type"] == "image/svg+xml"
+    assert icone.content.lstrip().startswith(b"<svg") and b"<script" not in icone.content

@@ -2,6 +2,40 @@
 
 # Compatibility
 
+## Existing stack adoption report
+
+`plugarr scan` inventories services without writing. `plugarr adopt --dry-run`
+adds *arr* API access and version checks, then displays a plan without writing
+`stack.yml`, changing settings or touching containers. Its four evidence levels
+are:
+
+| Level | What the report can establish |
+|---|---|
+| **Observed** | Docker name, image and tag, state, published port, mounts, network mode and networks, and shared network namespace owner. An image tag is not a verified application version. |
+| **API verified** | A `system/status` response from selected *arr* services using their key and reported version; presence or absence of link records in the source API. This does not verify that the links work. |
+| **Incompatible** | A stopped container, missing required port or key, unverifiable *arr* API, or a PlugArr-managed container blocks that adoption. An API failure alone does not identify whether the cause is network, key or version. |
+| **Indeterminate** | Duplicate instances awaiting `--pick`, paths actually configured in apps, proposed links, hardlinks, VPN state and actual egress, and the version/API of non-*arr* clients. |
+
+The default plan contains only links absent according to an API read: *arr* to
+download client and Prowlarr to *arr*. An existing record is preserved, but its
+connection still needs testing. If the API read fails or entries have custom
+names, the link remains indeterminate and is not applied automatically, to
+avoid duplicates. UI settings, root folders,
+categories, RSS and service onboarding require
+an explicit `--only` selection. Before applying anything, the command lists the
+steps and asks for confirmation; `--yes` is explicit consent in unattended use.
+An existing link in an adopted stack is preserved without rewriting its credentials,
+address or priorities. Adoption does not restart adopted containers. `doctor`
+can test links afterwards; an API response during `adopt --dry-run` is not such
+a test.
+
+On Unraid, Gluetun may publish qBittorrent's WebUI port: the report shows the
+observed shared network namespace without claiming VPN protection. On Synology,
+UGREEN and other NAS devices, mounts and user IDs vary by installation. A shared
+host path proves neither the underlying filesystem nor actual hardlinks;
+read-only `doctor --deep-hardlinks` only looks for existing links in expected
+folders and can remain inconclusive.
+
 Except for entries explicitly marked **preview**, everything here has been
 **verified against a real instance**, not deduced from the documentation.
 Image tags are pinned in `src/plugarr/catalog.py`.

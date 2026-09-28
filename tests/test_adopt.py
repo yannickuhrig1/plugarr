@@ -112,6 +112,9 @@ def test_scan_follows_qbittorrent_port_published_by_gluetun(monkeypatch, tmp_pat
     assert len(entries) == 1
     assert entries[0].container == "qbittorrent"
     assert entries[0].host_port == 8090
+    assert entries[0].host_ip == "0.0.0.0"
+    assert entries[0].mounts["/config"] == str(tmp_path)
+    assert entries[0].network_mode == f"container:{gluetun_id}"
     assert entries[0].network_owner == "gluetun"
     assert entries[0].usable
     assert adopt.build_plan(entries).chosen["qbittorrent"] is entries[0]
@@ -259,6 +262,19 @@ def test_the_written_stack_says_it_is_adopted(tmp_path):
     assert "ADOPTEE" in text
     reloaded = StackConfig.model_validate(yaml.safe_load(text))
     assert reloaded.services["sonarr"].adopted
+
+
+def test_write_stack_never_replaces_a_preexisting_user_file(tmp_path):
+    cfg = adopt.config_from_plan(
+        adopt.build_plan([found()]), data_root="/srv/d", config_root="/opt/c",
+    )
+    path = tmp_path / "stack.yml"
+    path.write_text("user content", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        adopt.write_stack(cfg, tmp_path)
+    with pytest.raises(FileExistsError):
+        adopt.write_stack(cfg, tmp_path, replace=True)
+    assert path.read_text(encoding="utf-8") == "user content"
 
 
 # ------------------------------------------------------------- diagnostics
@@ -431,7 +447,7 @@ def test_dry_run_does_not_write_stack_or_apply_links(monkeypatch, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "sonarr/rootfolder/tv" in result.output
-    assert "sonarr 4.0.1" in result.output
+    assert "version 4.0.1" in result.output
     assert not project.exists()
 
 
@@ -499,3 +515,231 @@ def test_adopt_does_not_write_or_wire_when_api_check_fails(monkeypatch, tmp_path
     assert result.exit_code == 1, result.output
     assert "Adoption interrompue" in result.output
     assert not project.exists()
+
+
+def test_report_separates_docker_facts_api_evidence_and_unknowns():
+    arr = found(image="lscr.io/linuxserver/sonarr:latest")
+    arr.mounts = {"/config": "/mnt/user/appdata/sonarr", "/data": "/mnt/user/medias"}
+    arr.network_mode = "bridge"
+    arr.networks = ("media",)
+    client = found(service_id="qbittorrent", key=None, port=8090)
+    client.network_mode = "container:gluetun-id"
+    client.network_owner = "gluetun"
+    blocked = found(service_id="radarr", container="radarr-stop", port=7878)
+    blocked.running = False
+    plan = adopt.build_plan([arr, client, blocked])
+
+    details = adopt.compatibility_report(
+        [arr, client, blocked], plan, "/mnt/user/medias",
+        [{"service": "sonarr", "ok": True, "version": "4.0.1"}],
+        ["sonarr/downloadclient/qbittorrent"],
+    )
+
+    assert "version applicative non déduite" in details["observed"][0]
+    assert "/mnt/user/appdata/sonarr" in details["observed"][0]
+    assert "réseaux media" in details["observed"][0]
+    assert "version 4.0.1" in details["verified_api"][0]
+    assert any("radarr-stop" in line for line in details["incompatible"])
+    assert any("tunnel VPN et sortie effective non vérifiés" in line for line in details["indeterminate"])
+    assert any("Liaison sonarr/downloadclient/qbittorrent" in line for line in details["indeterminate"])
+    assert "a" * 32 not in str(details)
+
+
+def test_minimal_plan_excludes_settings_and_service_onboarding():
+    steps = [
+        "sonarr/acces-web", "sonarr/langue", "sonarr/rootfolder/tv",
+        "qbittorrent/rss", "qbittorrent/categories", "jellyfin/setup",
+        "sonarr/downloadclient/qbittorrent", "prowlarr/application/sonarr",
+    ]
+    assert adopt.minimal_steps(steps) == steps[-2:]
+
+
+def test_link_inventory_only_reads_existing_arr_records(monkeypatch):
+    entries = [found(), found(service_id="qbittorrent", key=None, port=8090)]
+    cfg = adopt.config_from_plan(adopt.build_plan(entries), data_root="/d", config_root="/c")
+    calls = []
+
+    class FakeClient:
+        def __init__(self, url, key, **_kwargs):
+            assert key == "a" * 32
+            calls.append(("connect", url))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, resource):
+            calls.append(("GET", resource))
+            return []
+
+    monkeypatch.setattr(adopt, "ArrClient", FakeClient)
+    result = adopt.link_inventory(cfg, ["sonarr/downloadclient/qbittorrent"])
+    assert result == [{"step": "sonarr/downloadclient/qbittorrent", "state": "absent"}]
+    assert calls[-1] == ("GET", "downloadclient")
+    assert "a" * 32 not in str(result)
+
+
+def test_custom_named_existing_link_is_not_treated_as_absent(monkeypatch):
+    entries = [found(), found(service_id="qbittorrent", key=None, port=8090)]
+    cfg = adopt.config_from_plan(adopt.build_plan(entries), data_root="/d", config_root="/c")
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, resource):
+            assert resource == "downloadclient"
+            return [{"name": "Mon client torrent"}]
+
+    monkeypatch.setattr(adopt, "ArrClient", FakeClient)
+    assert adopt.link_inventory(cfg, ["sonarr/downloadclient/qbittorrent"]) == [
+        {"step": "sonarr/downloadclient/qbittorrent", "state": "unknown"},
+    ]
+
+
+def test_adopted_existing_download_link_keeps_user_settings(monkeypatch):
+    from plugarr.wiring import Wirer
+
+    entries = [found(), found(service_id="qbittorrent", key=None, port=8090)]
+    cfg = adopt.config_from_plan(adopt.build_plan(entries), data_root="/d", config_root="/c")
+    cfg.services["qbittorrent"].username = "user"
+    cfg.services["qbittorrent"].password = "password"
+    wirer = Wirer(cfg, run_tests=False)
+
+    class Client:
+        def ensure_resource(self, *_args, **_kwargs):
+            return {"id": 7}, False, []
+
+        def find_by_name(self, *_args):
+            return {"id": 7}
+
+        def sync_fields(self, *_args):
+            raise AssertionError("existing adopted link modified")
+
+    monkeypatch.setattr(wirer, "arr", lambda _sid: Client())
+    monkeypatch.setattr(wirer, "_aligner_priorites", lambda *_args: (_ for _ in ()).throw(AssertionError("priority changed")))
+    result = wirer.step_download_client("sonarr", "qbittorrent")
+    assert result.ok
+    assert not result.created
+
+
+def test_adopted_client_is_never_restarted_to_clear_an_auth_ban(monkeypatch, tmp_path):
+    from plugarr.wiring import Wirer
+
+    cfg = adopt.config_from_plan(
+        adopt.build_plan([found(service_id="qbittorrent", key=None, port=8090)]),
+        data_root="/d", config_root="/c",
+    )
+    cfg.project_dir = tmp_path
+    assert Wirer(cfg)._unban_download_client("qbittorrent") is False
+
+
+def test_dry_run_reports_missing_download_password_without_writing(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from plugarr import cli
+
+    monkeypatch.setattr(cli.discovery, "scan", lambda: [
+        found(), found(service_id="qbittorrent", key=None, port=8090),
+    ])
+    monkeypatch.setattr(cli.adopt_mod, "api_inventory", lambda _cfg: [
+        {"service": "sonarr", "ok": True, "version": "4.0.1"},
+    ])
+    monkeypatch.setattr(cli.adopt_mod, "link_inventory", lambda _cfg, steps: [
+        {"step": step, "state": "absent"} for step in steps
+    ])
+    monkeypatch.setattr(cli.Wirer, "execute", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("wiring ran")))
+    project = tmp_path / "adopted"
+    args = [
+        "adopt", "--host", "192.168.1.10", "--data-root", "/mnt/user/medias",
+        "--config-root", "/mnt/user/appdata", "--project-dir", str(project),
+    ]
+    dry = CliRunner().invoke(cli.app, [*args, "--dry-run"])
+    apply = CliRunner().invoke(cli.app, [*args, "--yes"])
+    assert dry.exit_code == 0, dry.output
+    assert apply.exit_code == 1, apply.output
+    assert "mot de passe absent" in dry.output
+    assert "sonarr/downloadclient/qbittorrent" in dry.output
+    assert "sonarr/rootfolder/tv" not in dry.output
+    assert not project.exists()
+
+
+def test_default_plan_preserves_existing_api_link(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from plugarr import cli
+
+    monkeypatch.setattr(cli.discovery, "scan", lambda: [
+        found(), found(service_id="qbittorrent", key=None, port=8090),
+    ])
+    monkeypatch.setattr(cli.adopt_mod, "api_inventory", lambda _cfg: [
+        {"service": "sonarr", "ok": True, "version": "4.0.1"},
+    ])
+    monkeypatch.setattr(cli.adopt_mod, "link_inventory", lambda _cfg, steps: [
+        {"step": step, "state": "present"} for step in steps
+    ])
+    result = CliRunner().invoke(cli.app, [
+        "adopt", "--host", "192.168.1.10", "--data-root", "/mnt/user/medias",
+        "--config-root", "/mnt/user/appdata", "--project-dir", str(tmp_path / "project"),
+        "--dry-run",
+    ])
+    assert result.exit_code == 0, result.output
+    assert "entrée présente" in result.output
+    assert "0 étape(s) sélectionnée(s)" in result.output
+    assert "connexion non testée" in result.output
+
+
+def test_unreadable_link_blocks_automatic_apply(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
+    from plugarr import cli
+
+    monkeypatch.setattr(cli.discovery, "scan", lambda: [
+        found(), found(service_id="qbittorrent", key=None, port=8090),
+    ])
+    monkeypatch.setattr(cli.adopt_mod, "api_inventory", lambda _cfg: [
+        {"service": "sonarr", "ok": True, "version": "4.0.1"},
+    ])
+    monkeypatch.setattr(cli.adopt_mod, "link_inventory", lambda _cfg, steps: [
+        {"step": step, "state": "unknown"} for step in steps
+    ])
+    project = tmp_path / "project"
+    result = CliRunner().invoke(cli.app, [
+        "adopt", "--host", "192.168.1.10", "--data-root", "/mnt/user/medias",
+        "--config-root", "/mnt/user/appdata", "--project-dir", str(project), "--yes",
+    ])
+    assert result.exit_code == 1, result.output
+    assert "liaison non identifiable" in result.output
+    assert not project.exists()
+
+
+def test_adopted_existing_prowlarr_application_is_not_rewritten(monkeypatch):
+    from plugarr.wiring import Wirer
+
+    cfg = adopt.config_from_plan(adopt.build_plan([
+        found(), found(service_id="prowlarr", container="prowlarr", port=9696),
+    ]), data_root="/d", config_root="/c")
+    wirer = Wirer(cfg, run_tests=False)
+
+    class Client:
+        def ensure_resource(self, *_args, **_kwargs):
+            return {"id": 3}, False, []
+
+        def find_by_name(self, *_args):
+            return {"id": 3}
+
+        def sync_fields(self, *_args):
+            raise AssertionError("existing Prowlarr application modified")
+
+    monkeypatch.setattr(wirer, "arr", lambda _sid: Client())
+    result = wirer.step_prowlarr_application("sonarr")
+    assert result.ok
+    assert not result.created

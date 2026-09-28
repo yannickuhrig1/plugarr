@@ -16,11 +16,13 @@ dans le tunnel : le client de telechargement y est et perd son alias DNS.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from plugarr import compose, orchestrator, vpncheck
+from plugarr import compose, diagnostics, orchestrator, vpncheck
 from plugarr.models import Category, VpnConfig
+from plugarr.runner import Check
 
 
 def _cfg(*services, vpn=False):
@@ -712,6 +714,24 @@ def _cfg_adopte(nom="mon-qbittorrent-a-moi"):
     cfg.services["qbittorrent"].adopted = True
     cfg.services["qbittorrent"].container = nom
     return cfg
+
+
+def test_doctor_ne_synchronise_pas_le_port_d_un_client_adopte(monkeypatch):
+    monkeypatch.setattr(
+        vpncheck, "ports_entrants",
+        lambda _cfg: (_ for _ in ()).throw(AssertionError("adopted port inspected for repair")),
+    )
+    assert vpncheck.reparer_port(_cfg_adopte()) is None
+
+
+def test_doctor_ne_propose_pas_la_synchronisation_d_un_client_adopte():
+    cfg = _cfg_adopte()
+    findings = diagnostics._vpn_findings(
+        cfg, [Check(f"{vpncheck.PREFIXE_PORT} qbittorrent", False, "desynchronise")],
+        Path("."),
+    )
+    assert findings[0]["repair"] is None
+    assert "Client adopté" in findings[0]["fix"]
 
 
 def test_un_client_adopte_est_cherche_sous_son_vrai_nom():

@@ -313,6 +313,14 @@ class WizardState:
                 for s in catalog.CATALOG.values()
                 if not s.internal
             ],
+            "install_journeys": [
+                {
+                    "id": key,
+                    "name_i18n": i18n.bilingue(catalog.JOURNEY_LABELS[key]),
+                    "services": list(services),
+                }
+                for key, services in catalog.INSTALL_JOURNEYS.items()
+            ],
             "profiles": profiles,
             "providers": {
                 p: {
@@ -2334,6 +2342,13 @@ class WizardHandler(BaseHTTPRequestHandler):
                 preview = orchestrator.build_config(services=selected)
                 result = {
                     "services": resolved,
+                    "added": [
+                        {
+                            "id": sid,
+                            "name_i18n": i18n.bilingue(catalog.get(sid).display_name),
+                        }
+                        for sid in resolved if sid not in selected
+                    ],
                     "selected_count": len(set(selected)),
                     "effective_count": len(resolved),
                     "planned_links": orchestrator.planned_links(preview),

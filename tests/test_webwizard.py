@@ -716,6 +716,37 @@ def test_selection_reports_dependencies_and_planned_links(server):
     assert result["planned_links"] >= 1
 
 
+def test_install_journeys_match_catalog_and_final_configuration(server):
+    _, client = server
+    bootstrap = client.get("/api/bootstrap").json()
+    journeys = {item["id"]: item for item in bootstrap["install_journeys"]}
+    assert set(journeys) == set(catalog.INSTALL_JOURNEYS)
+    assert bootstrap["form"]["services"] == list(catalog.DEFAULT_SELECTION)
+    for key, journey in journeys.items():
+        selected = journey["services"]
+        assert selected == list(catalog.INSTALL_JOURNEYS[key])
+        assert journey["name_i18n"]["fr"] and journey["name_i18n"]["en"]
+        result = client.post("/api/selection", json={"services": selected}).json()
+        assert result["services"] == catalog.resolve_dependencies(selected)
+        assert [item["id"] for item in result["added"]] == [
+            sid for sid in result["services"] if sid not in selected
+        ]
+        for item in result["added"]:
+            assert item["name_i18n"]["fr"] and item["name_i18n"]["en"]
+        cfg = orchestrator.build_config(services=selected)
+        assert list(cfg.services) == result["services"]
+
+
+def test_web_selection_allows_editing_family_journey(server):
+    _, client = server
+    selected = list(catalog.INSTALL_JOURNEYS["family"])
+    selected.remove("seerr")
+    result = client.post("/api/selection", json={"services": selected}).json()
+    assert result["added"] == []
+    assert "seerr" not in result["services"]
+    assert "jellyfin" not in result["services"]
+
+
 def test_reset_is_only_executed_after_explicit_install_confirmation(tmp_path, monkeypatch):
     config = tmp_path / "config"
     (config / "qbittorrent").mkdir(parents=True)

@@ -16,3 +16,20 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+#install-journey {
+  display: block;
+  width: min(100%, 360px);
+  min-height: 44px;
+  margin: 9px 0 20px;
+  padding: 10px 12px;
+  color: #f4f0f8;
+  background: #171821;
+  border: 1px solid #514063;
+  border-radius: 8px;
+}
+
+#dependency-details:not(:empty) {
+  margin: -14px 0 20px;
+  color: #bde5d6;
+}

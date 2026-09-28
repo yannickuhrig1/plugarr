@@ -96,7 +96,7 @@ def phrases() -> dict[str, list[str]]:
                         noeud.value, ast.Constant
                     ):
                         retenir(fichier, str(noeud.value.value))
-                    elif nom_cible in ("CATEGORY_TITLES", "_ROTATIONS") and isinstance(
+                    elif nom_cible in ("CATEGORY_TITLES", "JOURNEY_LABELS", "_ROTATIONS") and isinstance(
                         noeud.value, ast.Dict
                     ):
                         # Les libelles vivent dans les valeurs : directement pour

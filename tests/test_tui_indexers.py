@@ -81,6 +81,18 @@ async def test_the_step_can_be_skipped(screen_app, appuyer):
 
 
 @pytest.mark.asyncio
+async def test_report_ignores_update_result_after_it_closes(screen_app):
+    async with screen_app.run_test() as pilot:
+        await pilot.app.push_screen(ReportScreen())
+        await pilot.pause()
+        report = pilot.app.screen
+        await report.query_one("#report-updates", Static).remove()
+        pilot.app.pop_screen()
+        await pilot.pause()
+        report._afficher_mises_a_jour("Resultat tardif")
+
+
+@pytest.mark.asyncio
 async def test_add_is_disabled_until_an_indexer_is_chosen(screen_app):
     async with screen_app.run_test() as pilot:
         await pilot.app.push_screen(IndexersScreen())

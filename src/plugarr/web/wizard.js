@@ -16,7 +16,7 @@ const EN = {
   consoleEnable:'Administer this machine remotely, through a container', consoleWarn:'For machines without systemd only (Unraid, Synology). This container gets the Docker socket: it can do anything on the machine, including creating a privileged container. On an ordinary Linux, prefer the system service, which does the same thing without a socket.', consolePort:'Console port', consoleShort:'Console in a container',
   setup:'INSTALLATION', local:'On your computer', localDescription:'Your settings stay in PlugArr.', tui:'Open terminal TUI', quit:'Close wizard', assistant:'Configuration assistant', demoNotice:'Demo mode — no real installation, no Docker calls.', existingNotice:'Existing installation detected: you can resume its settings or start fresh before confirming.', loading:'Loading your assistant…',
   step1:'STEP 01 / 06', step2:'STEP 02 / 06', step3:'STEP 03 / 06', step4:'STEP 04 / 06', step5:'STEP 05 / 06', step6:'STEP 06 / 06',
-  servicesTitle:'Your stack, your way.', servicesIntro:'Check Docker, use the backup tools if needed, then choose your applications. PlugArr will add their dependencies.', selectionHelp:'Editable before installation',
+  servicesTitle:'Your stack, your way.', servicesIntro:'Check Docker, use the backup tools if needed, then choose your applications. PlugArr will add their dependencies.', selectionHelp:'Editable before installation', journeyTitle:'Installation journey', dependencyDetails:'Added automatically (prerequisites): {names}',
   dockerCheck:'Docker availability', dockerChecking:'Checking…', refresh:'Refresh',
   backupTitle:'Back up an installation', backupHelp:'Includes the project, application settings and Docker volumes, never media.', backupSource:'Installation folder', backupDestination:'Destination archive', backupLive:'Live backup (risk of inconsistent databases)', backupRun:'Create backup',
   restoreTitle:'Restore a backup', restoreHelp:'Enter a local archive path. Its manifest is shown before anything is written.', restoreArchive:'PlugArr archive', restoreTarget:'New settings folder (optional)', restoreInspect:'Inspect archive', restoreConfirm:'I confirm restoration of this archive.', restoreRun:'Restore now',
@@ -52,6 +52,7 @@ const FR = {
   sshReady:'Connexion SSH prête.', sshExisting:'Pile PlugArr trouvée sur le serveur : ses réglages sont repris.', sshPrivateHost:'L’adresse SSH n’appartient pas au serveur (IP publique traduite) : adresse de la machine réglée sur {host}.',
   sshRemoteBadge:'SSH DISTANT', qbUiShort:'Interface de qBittorrent', veilleShort:'Veille', veilleOn:'Installée', consoleShort:'Console en conteneur',
   services:'Applications', folders:'Dossiers', vpn:'VPN', quality:'Qualité', review:'Vérification', installation:'Installation', arr:'Automatisation', download:'Téléchargements', media:'Médiathèques', ui:'Interfaces', selected:'applications sélectionnées', dependencies:'dépendances', plannedLinks:'liens à configurer', defaultProfile:'Défaut PlugArr', profile:'Profil',
+  journeyTitle:'Parcours d’installation', dependencyDetails:'Ajoutées automatiquement (prérequis) : {names}',
   checking:'Vérification de la configuration…', install:'Confirmer et installer', simulate:'Lancer la simulation', blocked:'Résolvez les contrôles bloquants avant de continuer.', demoCheck:'Les contrôles sont simulés. La disponibilité de Docker n’a pas été vérifiée.', ready:'Prêt pour confirmation', running:'Installation en cours…', done:'Installation terminée', partial:'Installation terminée avec des erreurs de câblage', error:'Installation interrompue', demoDone:'Simulation terminée — rien n’a été installé.', idle:'En attente de lancement',
   checkingTemplates:'Chargement des profils disponibles…', noTemplates:'Impossible de charger les profils. Conservez les profils par défaut ou réessayez.', templatesReady:'Profils disponibles chargés.', bundledProfiles:'Catalogue complet embarqué dans cette démo.', saving:'Enregistrement du choix…', sessionMissing:'Session absente. Ouvrez le lien complet affiché dans le terminal.', networkError:'Connexion perdue. Gardez le terminal PlugArr ouvert, puis réessayez.', noSelection:'Choisissez au moins une application.', dockerRequired:'Docker doit être disponible avant l’installation.', switched:'Retournez au terminal : le TUI s’ouvre. Les saisies web non enregistrées ne sont pas transférées.', retryWarning:'Relisez les réglages et relancez les vérifications avant de réessayer.', unavailable:'Indisponible', vpnOn:'Activé', vpnOff:'Désactivé', simulation:'SIMULATION', localBadge:'LOCAL', profile:'Profil', notInstalled:'La console de démonstration s’ouvre dans un nouvel onglet. Aucun service n’a été installé.', progressError:'Progression momentanément indisponible. Reconnexion…', optional:'facultatif', qualityInherited:'Profil existant', sizeEstimate:'Taille indicative', movie2h:'film de 2 h', episode45:'épisode de 45 min',
   dockerReady:'Docker est prêt.', dockerBlocked:'Docker est indisponible. Corrigez le problème indiqué, puis actualisez.', checkingAction:'Contrôle en cours…', pathOk:'Le dossier et les liens physiques fonctionnent.', pathFailed:'Le dossier est accessible, mais les liens physiques ne sont pas disponibles.', backupWorking:'Sauvegarde en cours… Gardez cette page ouverte.', backupDone:'Sauvegarde créée', restoreReading:'Lecture de l’archive…', restoreWorking:'Restauration en cours… Gardez cette page ouverte.', restoreDone:'Restauration terminée. Rechargement de l’assistant…', hotBackup:'Cette archive a été créée à chaud ; ses bases peuvent être incohérentes.', servicesInArchive:'services dans l’archive',
@@ -79,6 +80,7 @@ let bootstrap;
 let form;
 let effective = [];
 let selectionMeta = {};
+let journeyId = 'films_series';
 let plan = null;
 let busy = false;
 let startupReady = false;
@@ -214,6 +216,7 @@ function translate() {
   if (graphSnapshot) displayGraph(graphSnapshot);
   if (bootstrap) {
     renderSteps();
+    renderJourneys();
     renderServices();
     updateConditional();
     updatePlatformInfo();
@@ -298,6 +301,12 @@ function refreshProfileEstimate(service) {
 }
 function refreshProfileEstimates() { for (const service of ['sonarr','radarr']) refreshProfileEstimate(service); }
 
+function renderJourneys() {
+  const select = $('install-journey');
+  select.replaceChildren(...bootstrap.install_journeys.map(journey => new Option(pick(journey.name_i18n, journey.id), journey.id)));
+  select.value = journeyId;
+}
+
 function renderServices() {
   const target = $('services');
   target.replaceChildren();
@@ -316,6 +325,8 @@ function renderServices() {
       const input = E('input'); input.type = 'checkbox'; input.value = service.id; input.checked = form.services.includes(service.id); input.setAttribute('aria-label', service.name);
       input.addEventListener('change', async () => {
         form.services = [...target.querySelectorAll('input:checked')].map(element => element.value);
+        journeyId = 'custom';
+        $('install-journey').value = journeyId;
         plan = null;
         await refreshSelection();
         updateConditional();
@@ -332,8 +343,10 @@ function renderServices() {
 
 function updateSelection() {
   $('selection-count').textContent = `${form.services.length} ${tr('selected')}`;
-  const dependencies = Math.max(0, (selectionMeta.effective_count || effective.length) - form.services.length);
+  const dependencies = selectionMeta.added?.length || 0;
   $('dependency-count').textContent = `${dependencies} ${tr('dependencies')} · ${selectionMeta.planned_links || 0} ${tr('plannedLinks')}`;
+  const names = (selectionMeta.added || []).map(service => pick(service.name_i18n, service.id));
+  $('dependency-details').textContent = names.length ? tr('dependencyDetails').replace('{names}', names.join(', ')) : '';
 }
 
 async function refreshSelection() {
@@ -482,6 +495,8 @@ function applyRemoteExisting(existing, reprendre = true) {
     form[key] = structuredClone(existing[key]);
   }
   form.vpn = {...structuredClone(bootstrap.form.vpn), ...structuredClone(existing.vpn)};
+  journeyId = 'custom';
+  renderJourneys();
   form.reprendre = reprendre;
   for (const id of ['project_name','username','timezone','language']) $(id).value = form[id];
   $('vpn-enabled').checked = form.vpn.enabled;
@@ -1368,6 +1383,16 @@ $('close-wizard').addEventListener('click', closeWizard);
 $('retry').addEventListener('click', async () => { try { await api('/api/reload', {}); installed = false; location.reload(); } catch (failure) { error(failure.message); } });
 $('tui').addEventListener('click', async () => { try { await api('/api/tui', {}); $('wizard').hidden = true; $('loading').hidden = false; $('loading').textContent = tr('switched'); $('tui').hidden = true; } catch (failure) { error(failure.message); } });
 for (const choice of document.querySelectorAll('input[name="ssh-existing"]')) choice.addEventListener('change', event => chooseExisting(event.target.value));
+$('install-journey').addEventListener('change', async event => {
+  journeyId = event.target.value;
+  form.services = [...bootstrap.install_journeys.find(journey => journey.id === journeyId).services];
+  selectionMeta = {};
+  effective = [...form.services];
+  plan = null;
+  renderServices();
+  try { await refreshSelection(); updateConditional(); scheduleGraph(); }
+  catch (failure) { error(failure.message); }
+});
 for (const choice of document.querySelectorAll('input[name="resume"]')) choice.addEventListener('change', async event => { form.reprendre = event.target.value === 'yes'; form.reset_config = false; await validate(); });
 for (const choice of document.querySelectorAll('input[name="reset"]')) choice.addEventListener('change', async event => { form.reset_config = event.target.value === 'delete'; await validate(); });
 window.addEventListener('beforeunload', event => { if (installed && lastProgress?.status === 'running') { event.preventDefault(); event.returnValue = ''; } });
@@ -1377,6 +1402,7 @@ async function boot() {
     if (!token) throw new Error(tr('sessionMissing'));
     bootstrap = await api('/api/bootstrap');
     form = structuredClone(bootstrap.form);
+    journeyId = bootstrap.existing ? 'custom' : 'films_series';
     globalThis.PlugArrRemote?.init(bootstrap, form, api, renderReport, () => lang);
     lang = form.ui_language;
     $('ui-language').value = lang;

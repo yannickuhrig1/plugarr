@@ -73,6 +73,10 @@ EN: dict[str, str] = {
     "Examiner l'archive": "Inspect the archive",
     # -- selection des services ----------------------------------------------
     "Etape 1/3 - Quels services installer ?": "Step 1/3 - Which services to install?",
+    "Parcours d’installation": "Installation journey",
+    "Films et séries": "Movies and TV shows",
+    "Serveur familial": "Family server",
+    "Personnalisé": "Custom",
     "Mediatheque": "Media library",
     "Telechargement": "Downloads",
     "Serveur media": "Media server",

@@ -493,6 +493,21 @@ DOWNLOAD_CLIENTS = (*TORRENT_CLIENTS, "sabnzbd")
 #: qualite telecharge, mais telecharge mal.
 DEFAULT_SELECTION = ("prowlarr", "sonarr", "radarr", "transmission", "jellyfin", "recyclarr")
 
+# Parcours de depart uniquement. Les choix restent des services cochables du
+# catalogue ; resolve_dependencies ajoute ensuite les prerequis necessaires.
+INSTALL_JOURNEYS = {
+    "films_series": DEFAULT_SELECTION,
+    "music": ("prowlarr", "lidarr", "transmission", "jellyfin"),
+    "family": ("prowlarr", "sonarr", "radarr", "transmission", "seerr", "audiobookshelf", "recyclarr"),
+    "custom": (),
+}
+JOURNEY_LABELS = {
+    "films_series": "Films et séries",
+    "music": "Musique",
+    "family": "Serveur familial",
+    "custom": "Personnalisé",
+}
+
 
 def get(service_id: str) -> ServiceSpec:
     try:

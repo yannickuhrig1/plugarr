@@ -7,7 +7,7 @@ est la derniere etape ou rien n'est encore ecrit.
 from __future__ import annotations
 
 import pytest
-from textual.widgets import Button, Checkbox, Input, RadioButton, Static
+from textual.widgets import Button, Checkbox, Input, RadioButton, Select, Static
 
 from plugarr import catalog
 from plugarr.models import PlatformProfile
@@ -62,6 +62,27 @@ async def test_default_selection_is_prechecked(app):
     async with app.run_test() as pilot:
         screen = await _goto_services(pilot)
         assert set(screen.selection()) == set(catalog.DEFAULT_SELECTION)
+
+
+@pytest.mark.asyncio
+async def test_install_journeys_remain_editable_and_show_added_dependencies(app, attendre):
+    async with app.run_test() as pilot:
+        screen = await _goto_services(pilot)
+        journey = screen.query_one("#install-journey", Select)
+        for key in ("music", "family", "films_series"):
+            journey.value = key
+            expected = set(catalog.INSTALL_JOURNEYS[key])
+            assert await attendre(pilot, lambda expected=expected: set(screen.selection()) == expected)
+        journey.value = "family"
+        assert await attendre(pilot, lambda: "Jellyfin" in str(screen.query_one("#selection-summary", Static).content))
+        screen.query_one("#svc-seerr", Checkbox).value = False
+        assert await attendre(pilot, lambda: journey.value == "custom")
+        assert "Jellyfin" not in str(screen.query_one("#selection-summary", Static).content)
+        journey.value = "music"
+        assert await attendre(pilot, lambda: set(screen.selection()) == set(catalog.INSTALL_JOURNEYS["music"]))
+        journey.value = "custom"
+        assert await attendre(pilot, lambda: screen.selection() == [])
+        assert screen.query_one("#next", Button).disabled
 
 
 @pytest.mark.asyncio

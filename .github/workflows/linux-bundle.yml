@@ -40,7 +40,7 @@ jobs:
         run: |
           VERSION=$(python -c 'import plugarr; print(plugarr.__version__)')
           tar -C dist-linux -czf "dist-linux/PlugArr-linux-x86_64.tar.gz" PlugArr
-          sha256sum "dist-linux/PlugArr-linux-x86_64.tar.gz" > "dist-linux/PlugArr-linux-x86_64.SHA256SUMS"
+          (cd dist-linux && sha256sum PlugArr-linux-x86_64.tar.gz > PlugArr-linux-x86_64.SHA256SUMS && sha256sum -c PlugArr-linux-x86_64.SHA256SUMS)
           packaging/linux/build-deb.sh "dist-linux/PlugArr" "$VERSION" dist-linux
           tar -tzf "dist-linux/PlugArr-linux-x86_64.tar.gz" | grep '^PlugArr/plugarr-admin$' > /dev/null
           dpkg-deb --info "dist-linux/plugarr_${VERSION}_amd64.deb"

@@ -12,6 +12,7 @@ from pathlib import Path
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import (
     Footer,
@@ -537,6 +538,7 @@ class ServicesScreen(WizardScreen):
             if precedente is not None
             else set(catalog.DEFAULT_SELECTION)
         )
+        self._current_journey = "custom" if precedente is not None else "films_series"
         if precedente is not None:
             yield Static(
                 t(
@@ -547,6 +549,13 @@ class ServicesScreen(WizardScreen):
                 ),
                 id="services-reprise",
             )
+        yield Label("Parcours d’installation", classes="group-title")
+        yield Select(
+            [(t(catalog.JOURNEY_LABELS[key]), key) for key in catalog.INSTALL_JOURNEYS],
+            value=self._current_journey,
+            allow_blank=False,
+            id="install-journey",
+        )
         with Horizontal(id="services"):
             for index, categories in enumerate(self.COLUMNS):
                 with VerticalScroll(classes="service-column", id=f"column-{index}"):
@@ -575,6 +584,27 @@ class ServicesScreen(WizardScreen):
 
     @on(Checkbox.Changed)
     def _on_toggle(self) -> None:
+        journey = self.query_one("#install-journey", Select)
+        if (
+            isinstance(journey.value, str)
+            and journey.value != "custom"
+            and set(self.selection()) != set(catalog.INSTALL_JOURNEYS[journey.value])
+        ):
+            self._custom_from_edit = True
+            journey.value = "custom"
+        self._refresh_summary()
+
+    @on(Select.Changed, "#install-journey")
+    def _on_journey(self, event: Select.Changed) -> None:
+        if not isinstance(event.value, str) or event.value == self._current_journey:
+            return
+        self._current_journey = event.value
+        if event.value == "custom" and getattr(self, "_custom_from_edit", False):
+            self._custom_from_edit = False
+            return
+        selected = set(catalog.INSTALL_JOURNEYS[event.value])
+        for box in self.query(Checkbox):
+            box.value = box.id.removeprefix("svc-") in selected
         self._refresh_summary()
 
     def selection(self) -> list[str]:
@@ -2150,7 +2180,14 @@ class ReportScreen(WizardScreen):
                 texte = t("[b]Mises a jour disponibles[/b]  toutes les applications sont dans leur derniere version.")
             if donnees["unchecked"]:
                 texte += "\n" + t("[dim]Non verifiees : {noms}[/dim]", noms=", ".join(donnees["unchecked"]))
-        self.app.call_from_thread(self.query_one("#report-updates", Static).update, texte)
+        self.app.call_from_thread(self._afficher_mises_a_jour, texte)
+
+    def _afficher_mises_a_jour(self, texte: str) -> None:
+        # Le rapport peut avoir ete ferme pendant la requete du worker.
+        try:
+            self.query_one("#report-updates", Static).update(texte)
+        except NoMatches:
+            pass
 
     @on(Button.Pressed, "#phone")
     def open_phone(self) -> None:

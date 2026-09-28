@@ -34,6 +34,8 @@ from .runner import (
     check_docker,
     check_hardlinks,
     check_port_free,
+    check_present,
+    check_same_filesystem,
     check_writable,
     remove_volume,
     running_project_dir,
@@ -334,8 +336,12 @@ def _donnees_en_lecture_seule_voulue(data_root: str) -> bool:
 
 
 def diagnostic(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
-    """Les controles de `preflight`, lus pour une installation EXISTANTE."""
-    controles = preflight(cfg, project_dir)
+    """Les controles de `preflight`, lus pour une installation EXISTANTE.
+
+    En lecture seule : `doctor` sans `--repair` ne cree ni fichier ni dossier
+    d'essai, meme aussitot retire. Voir `preflight(lecture_seule=True)`.
+    """
+    controles = preflight(cfg, project_dir, lecture_seule=True)
     if not _donnees_en_lecture_seule_voulue(cfg.data_root):
         return controles
     non_applicables = {t("racine des donnees"), "hardlinks /data"}
@@ -409,7 +415,17 @@ def controles_hote(cfg: StackConfig) -> list[Check]:
     return controles
 
 
-def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
+def preflight(
+    cfg: StackConfig, project_dir: Path | None = None, *, lecture_seule: bool = False
+) -> list[Check]:
+    """Controles d'avant installation, ou d'une pile installee (`lecture_seule`).
+
+    Avant d'installer, on ESSAIE : un fichier et un hardlink d'essai, retires
+    aussitot, sont la seule preuve que PlugArr pourra ecrire. Sur une pile
+    installee, `doctor` ne doit rien ecrire du tout ; ces deux essais cedent la
+    place a des constats (racines presentes et montees en ecriture, torrents/
+    et media/ sur un meme systeme de fichiers, config.xml des *arr presents).
+    """
     checks = check_docker()
     nos_ports = our_published_ports(cfg, project_dir)
     for sid in catalog.STARTUP_ORDER:
@@ -439,6 +455,18 @@ def preflight(cfg: StackConfig, project_dir: Path | None = None) -> list[Check]:
     # declarent libre. Il se voit en comparant le plan a lui-meme.
     checks.extend(check_port_doublons(cfg))
     checks.extend(controles_hote(cfg))
+    if lecture_seule:
+        checks.append(check_present(cfg.data_root, t("racine des donnees")))
+        checks.append(check_present(cfg.config_root, t("racine des configurations")))
+        checks.append(check_disk_space(cfg.data_root))
+        checks.extend(check_same_filesystem(cfg.data_root))
+        configurations = check_arr_configs(cfg)
+        if configurations is not None:
+            checks.append(configurations)
+        # Ni « configuration existante » ni « nom de projet » : ce sont des
+        # avertissements pour qui s'apprete a installer. Sur une pile en
+        # marche, les deux decrivent la situation normale.
+        return checks
     # AVANT l'espace disque et les hardlinks, et surtout avant toute ecriture :
     # les deux racines doivent etre inscriptibles. C'est le controle qui
     # manquait. Sans lui, un chemin impossible ne se signalait qu'en
@@ -486,6 +514,48 @@ def existing_configs(cfg: StackConfig) -> list[str]:
         if directory.is_dir() and any(directory.iterdir()):
             present.append(sid)
     return present
+
+
+def check_arr_configs(cfg: StackConfig) -> Check | None:
+    """Les *arr installes par PlugArr ont-ils encore leur config.xml ? LECTURE SEULE.
+
+    `seed_all` l'ecrit sous CONFIG_ROOT avant le premier demarrage, avec la cle
+    API que le cablage utilise. Sur une pile installee, son absence veut dire
+    que CONFIG_ROOT n'est pas le dossier que voient les conteneurs : partage
+    non monte, disque remplace, chemin change. Au prochain demarrage, le
+    service repartirait d'une configuration vierge, avec une autre cle.
+
+    Les services adoptes gardent leur configuration ailleurs : exclus. None
+    quand aucun *arr n'est concerne.
+    """
+    concernes = [
+        sid
+        for sid in seeded_services(cfg)
+        if catalog.get(sid).api_family == "arr" and not cfg.services[sid].adopted
+    ]
+    if not concernes:
+        return None
+    absents = [
+        sid for sid in concernes if not (Path(cfg.config_path(sid)) / "config.xml").is_file()
+    ]
+    if absents:
+        return Check(
+            t("configurations *arr"),
+            False,
+            t(
+                "config.xml absent pour {services} sous {racine} : ce dossier n'est "
+                "peut-etre pas celui que voient les conteneurs.",
+                services=", ".join(absents),
+                racine=cfg.config_root,
+            ),
+            blocking=False,
+        )
+    return Check(
+        t("configurations *arr"),
+        True,
+        t("config.xml present pour {services}", services=", ".join(concernes)),
+        blocking=False,
+    )
 
 
 def check_existing_config(cfg: StackConfig) -> Check:

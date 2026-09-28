@@ -11,6 +11,7 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from rich.markup import escape
 
 from . import (
     __version__,
@@ -19,7 +20,6 @@ from . import (
     autoupdate,
     catalog,
     compose,
-    connections,
     dashboard,
     diagnostics,
     discovery,
@@ -31,7 +31,6 @@ from . import (
     pack,
     report,
     sauvegarde,
-    vpncheck,
 )
 from . import adopt as adopt_mod
 from . import autostart as autostart_mod
@@ -39,7 +38,6 @@ from . import (
     reprise as reprise_mod,
 )
 from .clients import recyclarr as recyclarr_cfg
-from .clients.arr import ArrClient
 from .i18n import t
 from .interface import Interface
 from .layout import create_tree, default_profile, path_warning
@@ -1495,11 +1493,20 @@ def doctor(
     repair: bool = typer.Option(False, "--repair", help=t("Proposer les correctifs un par un.")),
     deep_hardlinks: bool = typer.Option(False, "--deep-hardlinks", help=t("Examiner en lecture seule un echantillon de hardlinks existants.")),
 ) -> None:
-    """Diagnostique une installation existante."""
+    """Diagnostique une installation existante.
+
+    Sans `--repair`, rien n'est ecrit : ni fichier d'essai, ni liaison, ni port.
+    Le rapport se lit en deux temps : les controles bruts, puis les constats
+    qui comptent, chacun avec sa consequence, ses preuves et sa correction.
+
+    Avec `--repair`, seules les deux corrections que `doctor` a toujours
+    proposees existent : reappliquer UNE liaison *arr, et rejouer la
+    synchronisation du port Gluetun. Chacune est confirmee a part, et son
+    verdict vient de la relecture de la condition, pas de l'ecriture.
+    """
     cfg = _load_config(project_dir)
     _annoncer_nouvelle_version()
-    if not report.print_checks(orchestrator.diagnostic(cfg, project_dir)):
-        console.print("[red]Des controles bloquants ont echoue.[/red]")
+    audit = None
     if deep_hardlinks:
         audit = diagnostics.existing_hardlinks(cfg.data_root)
         if not audit["available"]:
@@ -1509,64 +1516,45 @@ def doctor(
             if not audit["matched"]:
                 console.print(t("Aucun lien commun trouve : resultat indetermine, pas une preuve que les imports sont casses."))
 
-    # La protection du trafic torrent AVANT l'etat des conteneurs : c'est la
-    # reponse la plus attendue de ce diagnostic.
-    fuites = vpncheck.verifier(cfg)
-    if fuites:
-        console.print("\nProtection VPN du trafic torrent :")
-        report.print_checks(fuites)
+    charge = admin.doctor_payload(
+        cfg, project_dir, Compose(project_dir, cfg.project_name), hardlink_audit=audit
+    )
+    if not report.print_diagnostic(charge["checks"]):
+        console.print("[red]Des controles bloquants ont echoue.[/red]")
+    report.print_findings(charge["findings"], charge["labels"])
 
-        if any(c for c in fuites if not c.ok and c.name.startswith(vpncheck.PREFIXE_PORT)):
-            console.print(t("[yellow]Port entrant desynchronise : le partage peut etre limite.[/yellow]"))
-            console.print(t("Correctif propose : rejouer la synchronisation du port Gluetun."))
-            if repair and typer.confirm(t("Appliquer ce correctif ?"), default=False):
-                remise = vpncheck.reparer_port(cfg)
-                if remise is not None:
-                    report.print_checks([remise])
+    offertes = diagnostics.repairs(charge["findings"])
+    if not offertes:
+        return
+    if not repair:
+        console.print(
+            t(
+                "[dim]{nombre} correction(s) applicable(s) apres confirmation : "
+                "`plugarr doctor --repair`. Ce diagnostic n'a rien modifie.[/dim]",
+                nombre=len(offertes),
+            )
+        )
+        return
 
-    console.print("\nEtat des conteneurs :")
-    console.print(Compose(project_dir, cfg.project_name).ps())
-
-    console.print("Joignabilite des API :")
-    for sid, inst in orchestrator.iter_selected(cfg):
-        spec = catalog.get(sid)
-        if spec.api_family != "arr":
+    bilan = {True: 0, False: 0, None: 0}
+    for offre in offertes:
+        console.print(f"\n[bold]{escape(offre['title'])}[/bold] - {escape(offre['label'])}")
+        if not typer.confirm(t("Appliquer ce correctif ?"), default=False):
+            console.print(t("  Correction ignoree ; rien n'a ete modifie."))
+            bilan[None] += 1
             continue
-        try:
-            with ArrClient(
-                inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version, name=sid
-            ) as client:
-                console.print(f"  [green]OK[/green] {sid} {client.version}")
-        except Exception as exc:  # noqa: BLE001
-            console.print(f"  [red]ECHEC[/red] {sid} : {exc}")
-
-    console.print(t("\nLiaisons inter-services :"))
-    edges = {edge["id"]: edge for edge in connections.entries(cfg)}
-    for check in diagnostics.connection_checks(cfg):
-        label = "[green]OK[/green]" if check["ok"] else "[red]ECHEC[/red]"
-        console.print(f"  {label} {check['name']} : {check['detail']}")
-        if check["ok"]:
-            continue
-        console.print(f"    {check['next_step']}")
-        edge = edges[check["edge_id"]]
-        if repair and not cfg.services[edge["source"]].adopted and typer.confirm(
-            t("Reappliquer uniquement {liaison} ?", liaison=edge["id"]), default=False
-        ):
-            try:
-                ok = connections.repair(cfg, edge)
-                result = connections.test(cfg, edge) if ok else None
-            except Exception:  # noqa: BLE001 - un correctif echoue ne doit pas interrompre le diagnostic
-                ok, result = False, None
-            if result is not None:
-                console.print(t("    Liaison retestee : {etat}", etat=result["state"]))
-            else:
-                console.print(t("    Reparation echouee ; aucune autre liaison n'a ete rejouee."))
-
-    drift = diagnostics.compose_drift(cfg, project_dir)
-    if drift is not None:
-        console.print(t("\nConfiguration Compose : ") + drift["detail"])
-        if not drift["ok"]:
-            console.print("  " + drift["next_step"])
+        resultat = diagnostics.apply_repair(cfg, offre["id"])
+        report.print_repair(resultat)
+        bilan[resultat["verified"]] += 1
+    console.print(
+        t(
+            "\nReparations : {corrigees} corrigee(s) a la relecture, {echecs} toujours "
+            "en echec, {autres} non appliquee(s).",
+            corrigees=bilan[True],
+            echecs=bilan[False],
+            autres=bilan[None],
+        )
+    )
 
 
 @app.command(help=t("Arrete la stack. Ne touche JAMAIS a DATA_ROOT."))

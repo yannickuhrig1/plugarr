@@ -534,10 +534,33 @@ Avant tout câblage, `adopt` interroge en lecture seule les API des services *ar
 retenus : il affiche leur version et s'arrête sans écrire si une API ne répond
 pas ou refuse sa clé. Le mode `--dry-run` vérifie aussi les API, sans écrire.
 
-`plugarr doctor` contrôle aussi les liaisons *arr* et signale une divergence entre
-`docker-compose.yml` et `stack.yml` sans afficher les secrets. Il explique les
-correctifs. `plugarr doctor --repair` propose de les appliquer un par un, après
-confirmation ; le diagnostic simple ne modifie pas la pile.
+`plugarr doctor` affiche d'abord ses contrôles bruts, puis des **constats
+orientés conséquences**. Chacun donne le constat, la conséquence pour vous, les
+preuves relevées et la correction proposée :
+
+| Constat | Exemple de preuve |
+|---|---|
+| Client BitTorrent potentiellement hors VPN | mode réseau du conteneur, sortie vue depuis le tunnel |
+| Volume ou disque suspect | racine absente, montée en lecture seule, `config.xml` des *arr* introuvable, espace libre |
+| Service indisponible | état Docker, API qui ne répond pas, liaisons devenues invérifiables |
+| Liaison inter-service cassée | test réel lancé par l'API du service source |
+| Import non hardlinké | `torrents/` et `media/` sur deux systèmes de fichiers, échantillon `--deep-hardlinks` |
+| Dérive de configuration | services, sections et noms de variables `.env` qui diffèrent, jamais leurs valeurs |
+| Port entrant désynchronisé | port annoncé par Gluetun, port écouté par le client |
+
+Une cause masque ses symptômes : un Sonarr arrêté est signalé une fois, avec les
+liaisons qu'il rend invérifiables, plutôt que comme trois liaisons cassées.
+Aucun secret ne sort du diagnostic : les clés et mots de passe connus, et les
+paramètres d'URL qui en portent, sont masqués. La console affiche les mêmes
+constats dans **Maintenance**.
+
+Sans `--repair`, le diagnostic est entièrement en lecture seule : il n'écrit ni
+fichier ni hardlink d'essai (le test de création reste réservé à l'installation),
+ne rejoue aucune liaison et ne touche à aucun port. `plugarr doctor --repair`
+ne propose que deux corrections bornées, confirmées une par une : réappliquer
+**une** liaison *arr* d'un service géré par PlugArr, et rejouer la
+synchronisation du port Gluetun. Après chacune, la condition est relue, et le
+verdict affiché (`CORRIGE`, `TOUJOURS EN ECHEC`) vient de cette relecture.
 `plugarr doctor --deep-hardlinks` parcourt en lecture seule jusqu'à 20 000
 fichiers sous `torrents/` et `media/` et confirme les liens partageant le même
 inode. Zéro correspondance reste indéterminé, pas un verdict d'échec.

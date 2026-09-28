@@ -54,10 +54,20 @@ together the installations of one computer.
 
 ## Diagnose and adopt an existing stack (local work, 25 September)
 
-- [x] `doctor` checks *arr* APIs, testable links, VPN routing, hardlink creation,
-  free disk space, and drift in `docker-compose.yml`/`.env`.
+- [x] `doctor` checks *arr* APIs, testable links, VPN routing, whether
+  `torrents/` and `media/` share a filesystem, free disk space, and drift in
+  `docker-compose.yml`/`.env`.
 - [x] `doctor --repair` explains connection and incoming-port fixes and asks
   before applying each one. A plain diagnosis does not apply changes.
+- [x] `doctor` turns its checks into consequence-oriented findings (finding,
+  what it means for you, evidence, proposed fix): service unavailable, broken
+  connection, import not hardlinked, BitTorrent client possibly outside the
+  VPN, suspicious volume or disk, configuration drift. Same findings in the
+  console, secrets masked.
+- [x] Without `--repair`, `doctor` is strictly read-only: the test file and
+  test hardlink give way to observations (roots present and writable-mounted,
+  `torrents/` and `media/` on one filesystem, *arr* `config.xml` present). Each
+  repair is read back, and the verdict comes from that read-back.
 - [x] `adopt --dry-run` shows containers, images, ports, mounts, and operations.
   `--only` limits application to chosen steps after confirmation.
 - [x] `doctor --deep-hardlinks` confirms existing hardlinks by inode, using a

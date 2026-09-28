@@ -179,27 +179,27 @@ def _silo_next_step(runner: Compose) -> str:
     except (OSError, AttributeError):
         logs = ""
     if "password authentication failed" in logs or "authentication failed for user" in logs:
-        return (
+        return t(
             "La base conserve probablement un autre mot de passe que le .env. "
             "Sauvegardez d'abord, puis restaurez le couple .env/volume d'origine "
             "ou utilisez la remise a zero Silo en acceptant la perte de sa seule base."
         )
     if "database files are incompatible" in logs or "database version mismatch" in logs:
-        return (
+        return t(
             "La version PostgreSQL ne correspond pas au volume. Ne supprimez pas la base : "
             "restaurez l'image precedente ou migrez le volume apres sauvegarde."
         )
     if "migration" in logs and any(word in logs for word in ("failed", "fatal", "error")):
-        return (
+        return t(
             "Une migration Silo a echoue. Ne redemarrez pas en boucle et ne supprimez pas "
             "le volume : conservez la sauvegarde et revenez a l'image precedente."
         )
     if "connection refused" in logs and any(word in logs for word in ("postgres", "redis")):
-        return (
+        return t(
             "Silo n'atteint pas PostgreSQL ou Redis. Verifiez d'abord l'etat de ces deux "
             "dependances dans ce diagnostic."
         )
-    return (
+    return t(
         "Consultez `docker compose logs --tail 100 silo silo-postgres silo-redis`. "
         "Sauvegardez avant toute remise a zero ; le diagnostic ne supprime rien."
     )
@@ -212,14 +212,19 @@ def _runtime_checks(cfg: StackConfig, runner: Compose) -> tuple[list[dict], set[
     except OSError as exc:
         return [
             {
-                "name": "Etat Docker",
+                "name": t("Etat Docker"),
                 "ok": False,
-                "detail": f"Docker Compose est injoignable : {str(exc).splitlines()[0][:200]}",
+                "detail": t(
+                    "Docker Compose est injoignable : {erreur}",
+                    erreur=str(exc).splitlines()[0][:200],
+                ),
                 "blocking": False,
                 "partage": False,
-                "next_step": "Demarrez Docker, puis relancez le diagnostic.",
+                "next_step": t("Demarrez Docker, puis relancez le diagnostic."),
+                "service": "docker",
+                "probe": "state",
             }
-        ], set(cfg.services)
+        ], {*cfg.services, "docker"}
 
     checks: list[dict] = []
     unavailable: set[str] = set()
@@ -235,38 +240,48 @@ def _runtime_checks(cfg: StackConfig, runner: Compose) -> tuple[list[dict], set[
         if ok:
             detail = state.status
             if state.health:
-                detail += f" ; sante {state.health}"
-            next_step = "Aucune action necessaire."
+                detail += t(" ; sante {sante}", sante=state.health)
+            next_step = t("Aucune action necessaire.")
         else:
             unavailable.add(sid)
             if state is None:
-                detail = "conteneur absent de cette pile Docker"
+                detail = t("conteneur absent de cette pile Docker")
             else:
-                detail = state.status or state.state or "etat Docker inconnu"
+                detail = state.status or state.state or t("etat Docker inconnu")
                 if state.health:
-                    detail += f" ; sante {state.health}"
+                    detail += t(" ; sante {sante}", sante=state.health)
             next_step = (
                 _silo_next_step(runner)
                 if sid in ("silo", "silo-postgres", "silo-redis")
-                else f"Consultez `docker compose logs --tail 100 {sid}`, corrigez la cause puis redemarrez ce service."
+                else t(
+                    "Consultez `docker compose logs --tail 100 {service}`, corrigez "
+                    "la cause puis redemarrez ce service.",
+                    service=sid,
+                )
             )
         checks.append(
             {
-                "name": f"Etat {name}",
+                "name": t("Etat {service}", service=name),
                 "ok": ok,
                 "detail": detail,
                 "blocking": False,
                 "partage": False,
                 "next_step": next_step,
+                "service": sid,
+                "probe": "state",
             }
         )
     return checks, unavailable
 
 
 def doctor_payload(
-    cfg: StackConfig, project_dir: Path, runner: Compose | None = None
+    cfg: StackConfig,
+    project_dir: Path,
+    runner: Compose | None = None,
+    *,
+    hardlink_audit: dict | None = None,
 ) -> dict:
-    """Le meme diagnostic que `plugarr doctor`, rendu depuis la console.
+    """Le diagnostic de `plugarr doctor`, pour la console ET la ligne de commande.
 
     Demande a l'usage : « un bouton pour lancer plugarr doctor ». Il n'existait
     qu'en ligne de commande, ce qui allait contre la regle du projet — tout ce
@@ -274,19 +289,29 @@ def doctor_payload(
 
     On reutilise `preflight` plutot que d'ecrire un second diagnostic : deux
     verifications du meme systeme finiraient par ne plus dire la meme chose.
+    Pour la meme raison, `plugarr doctor` rend desormais CETTE charge.
+
+    Lecture seule, de bout en bout. `checks` garde chaque controle brut ;
+    `findings` en tire les constats qui comptent, avec leur consequence, leurs
+    preuves et la correction proposee. Aucun secret n'y figure.
     """
+    avant_installation = {*_AVANT_INSTALLATION, *(t(n) for n in _AVANT_INSTALLATION)}
+    preliminaires = [
+        c for c in orchestrator.diagnostic(cfg, project_dir) if c.name not in avant_installation
+    ]
     controles: list[dict] = [
         {"name": c.name, "ok": c.ok, "detail": c.detail, "blocking": c.blocking, "partage": False}
-        for c in orchestrator.diagnostic(cfg, project_dir)
-        if c.name not in _AVANT_INSTALLATION
+        for c in preliminaires
     ]
     indisponibles: set[str] = set()
+    runtime: list[dict] = []
     if runner is not None:
         runtime, indisponibles = _runtime_checks(cfg, runner)
         controles += runtime
 
     # La joignabilite reelle des API : un conteneur qui tourne n'est pas un
     # service qui repond, et c'est la distinction que `doctor` apporte.
+    api: list[dict] = []
     for sid, inst in orchestrator.iter_selected(cfg):
         spec = catalog.get(sid)
         if sid in indisponibles or spec.api_family not in ("arr", "sabnzbd", "silo"):
@@ -296,42 +321,52 @@ def doctor_payload(
                 with ArrClient(
                     inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version, name=sid
                 ) as client:
-                    detail = f"repond, version {client.version}"
+                    detail = t("repond, version {version}", version=client.version)
             elif spec.api_family == "sabnzbd":
                 with SabnzbdClient(inst.url(cfg.host), inst.api_key or inst.password or "") as client:
-                    detail = f"repond, version {client.version}"
+                    detail = t("repond, version {version}", version=client.version)
             else:
                 with SiloClient(inst.url(cfg.host)) as client:
                     # Endpoint eprouve contre la version epinglee : il prouve
                     # que l'API applicative repond, pas seulement que le port est ouvert.
                     _ = client.needs_setup
-                    detail = "repond"
-            controles.append(
+                    detail = t("repond")
+            api.append(
                 {
-                    "name": f"API {spec.display_name}",
+                    "name": t("API {service}", service=spec.display_name),
                     "ok": True,
                     "detail": detail,
                     "blocking": False,
                     "partage": False,
-                    "next_step": "Aucune action necessaire.",
+                    "next_step": t("Aucune action necessaire."),
+                    "service": sid,
+                    "probe": "api",
                 }
             )
         except Exception as exc:  # noqa: BLE001
-            controles.append(
+            api.append(
                 {
-                    "name": f"API {spec.display_name}",
+                    "name": t("API {service}", service=spec.display_name),
                     "ok": False,
-                    "detail": str(exc).splitlines()[0],
+                    "detail": (str(exc).splitlines() or [type(exc).__name__])[0],
                     "blocking": False,
                     "partage": False,
                     "next_step": (
                         _silo_next_step(runner)
                         if sid == "silo" and runner is not None
-                        else f"Verifiez que {spec.display_name} repond sur {inst.url(cfg.host)}, puis relancez le diagnostic."
+                        else t(
+                            "Verifiez que {service} repond sur {adresse}, puis relancez le diagnostic.",
+                            service=spec.display_name,
+                            adresse=inst.url(cfg.host),
+                        )
                     ),
+                    "service": sid,
+                    "probe": "api",
                 }
             )
-    controles += diagnostics.connection_checks(cfg)
+    controles += api
+    liaisons = diagnostics.connection_checks(cfg)
+    controles += liaisons
     drift = diagnostics.compose_drift(cfg, project_dir)
     if drift is not None:
         controles.append(drift)
@@ -344,6 +379,7 @@ def doctor_payload(
     # l'annoncer comme « controle en echec » a cote d'un tunnel tombe ferait
     # craindre une fuite la ou il n'y en a aucune. L'installation faisait deja
     # cette distinction, la console non — meme systeme, deux verdicts differents.
+    vpn = vpncheck.verifier(cfg)
     controles += [
         {
             "name": c.name,
@@ -352,11 +388,28 @@ def doctor_payload(
             "blocking": c.blocking,
             "partage": c.name.startswith(vpncheck.PREFIXE_PORT),
         }
-        for c in vpncheck.verifier(cfg)
+        for c in vpn
     ]
+    diagnostics.redact_checks(controles, cfg)
+    findings = diagnostics.build_findings(
+        cfg,
+        project_dir,
+        preflight=preliminaires,
+        services=runtime + api,
+        links=liaisons,
+        drift=drift,
+        vpn=vpn,
+        hardlink_audit=hardlink_audit,
+    )
     echecs = sum(1 for c in controles if not c["ok"] and not c["partage"])
     partage = sum(1 for c in controles if not c["ok"] and c["partage"])
-    return {"checks": controles, "failed": echecs, "partage": partage}
+    return {
+        "checks": controles,
+        "failed": echecs,
+        "partage": partage,
+        "findings": findings,
+        "labels": diagnostics.labels(),
+    }
 
 
 def apply_update(
@@ -642,8 +695,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif route == "/api/doctor":
             result = doctor_payload(self.cfg, self.project_dir, self.compose)
             self.maintenance.event('diagnostic', result['failed'] == 0)
+            # Les consequences vivent dans `findings`, une par constat reel :
+            # une phrase generique collee a chaque controle n'apprenait rien.
             for check in result['checks']:
-                check['consequence'] = 'Controle reussi.' if check['ok'] else 'Ce controle peut empecher le bon fonctionnement de l’installation.'
                 check.setdefault('next_step', 'Aucune action necessaire.' if check['ok'] else 'Verifier le detail ci-dessous, puis relancer le diagnostic. La cause exacte reste a confirmer.')
                 if 'vpn' in check['name'].lower():
                     self.maintenance.alert('vpn:' + check['name'], not check['ok'], check['name'])

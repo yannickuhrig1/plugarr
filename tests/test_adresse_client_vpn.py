@@ -147,4 +147,4 @@ def test_une_entree_adoptee_garde_son_adresse(monkeypatch):
 
     wirer.step_download_client("sonarr", "qbittorrent")
 
-    assert "host" not in alignes[0]
+    assert alignes == []  # Aucun champ existant de la pile adoptee n'est reecrit.

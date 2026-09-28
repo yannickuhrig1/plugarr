@@ -558,6 +558,9 @@ def _vpn_findings(cfg: StackConfig, vpn: list[Check], project_dir: Path) -> list
             )
         )
     if decales:
+        adopted_client = any(
+            cfg.services[sid].adopted for sid in vpncheck.clients_proteges(cfg)
+        )
         findings.append(
             _finding(
                 "port", "port", "warning",
@@ -565,8 +568,9 @@ def _vpn_findings(cfg: StackConfig, vpn: list[Check], project_dir: Path) -> list
                 t("Le port ouvert par le VPN n'est pas celui qu'ecoute le client."),
                 consequence,
                 [_preuve(c.name, c.detail) for c in decales],
-                t("Rejouer la synchronisation du port Gluetun, puis relire le port ecoute par chaque client."),
-                {"id": PORT_SYNC, "label": t("Rejouer la synchronisation du port Gluetun")},
+                t("Client adopté : synchronisez son port dans votre propre configuration VPN.")
+                if adopted_client else t("Rejouer la synchronisation du port Gluetun, puis relire le port ecoute par chaque client."),
+                None if adopted_client else {"id": PORT_SYNC, "label": t("Rejouer la synchronisation du port Gluetun")},
             )
         )
     return findings

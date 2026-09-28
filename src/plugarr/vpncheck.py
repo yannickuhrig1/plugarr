@@ -335,6 +335,11 @@ def reparer_port(cfg: StackConfig) -> Check | None:
     """
     from .compose import PORT_SYNC
 
+    # The Gluetun script updates every protected client, so it cannot be used
+    # when one of those clients belongs to the user.
+    if any(cfg.services[sid].adopted for sid in clients_proteges(cfg)):
+        return None
+
     releve = ports_entrants(cfg)
     annonce = releve.get("annonce", 0)
     if not annonce:

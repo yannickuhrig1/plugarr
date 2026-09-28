@@ -57,7 +57,7 @@ function list(){
 function detail(){
   const box=$('map-detail');box.replaceChildren();const edge=data?.connections.find(e=>e.id===selected);
   if(!edge){
-    box.append(html('h3','',focused?name(focused):'Explorez votre câblage'),html('p','',focused?'Sélectionnez une de ses liaisons pour voir son dernier test.':'Sélectionnez un service ou un câble. Le même graphe que dans l’assistant affiche ici les états de votre installation.'));
+    box.append(html('h3','',focused?name(focused):'Explorez votre câblage'),html('p','',focused?'Sélectionnez une de ses liaisons pour voir son dernier test. Cliquez de nouveau sur le service pour revoir toutes les liaisons.':'Sélectionnez un service ou un câble. Le même graphe que dans l’assistant affiche ici les états de votre installation.'));
     return;
   }
   box.append(html('div','map-kicker',edge.label+' · '+edge.basis),html('h3','',name(edge.source)+' → '+name(edge.target)),html('p','',edge.description));
@@ -79,8 +79,10 @@ function detail(){
   }
   if(!edge.repairable)box.append(html('p','map-kicker','Service adopté : réparation automatique désactivée.'));
 }
-function chooseEdge(id,moveFocus=false){selected=id;focused=null;draw();detail();list();if(moveFocus)$('map-detail').focus();}
-function chooseNode(id){focused=id;selected=null;draw();detail();list();}
+// Un second clic sur le service ou le cable deja choisi revient a toutes les liaisons :
+// c'etait le role de l'ancien bouton de remise a zero, retire. Le bouton « Voir » de la liste choisit toujours.
+function chooseEdge(id,moveFocus=false){selected=selected===id&&!moveFocus?null:id;focused=null;draw();detail();list();if(moveFocus)$('map-detail').focus();}
+function chooseNode(id){focused=focused===id?null:id;selected=null;draw();detail();list();}
 async function load(apiCall,changed){
   api=apiCall;afterChange=changed;const version=++request;clearTimeout(timer);
   try{
@@ -98,6 +100,5 @@ async function load(apiCall,changed){
     $('wiring-graph').classList.add('disconnected');draw();detail();$('map-count').textContent='Connexion à la console interrompue. Nouvelle tentative dans 5 secondes.';
   }finally{if(version===request)timer=setTimeout(()=>load(apiCall,changed),5000);}
 }
-$('map-reset').onclick=()=>{selected=null;focused=null;draw();detail();if(data)list();};
 return {load,updateStatus,snapshot};
 })();

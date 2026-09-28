@@ -55,10 +55,21 @@ installations d'un même poste.
 
 ## Diagnostic et reprise d'une pile existante (travail local du 25 septembre)
 
-- [x] `doctor` vérifie les API *arr*, les liaisons testables, le VPN, la capacité
-  de créer un hardlink, l'espace libre et la dérive de `docker-compose.yml`/`.env`.
+- [x] `doctor` vérifie les API *arr*, les liaisons testables, le VPN, que
+  `torrents/` et `media/` partagent un système de fichiers, l'espace libre et la
+  dérive de `docker-compose.yml`/`.env`.
 - [x] `doctor --repair` explique les corrections de liaison et de port entrant,
   puis demande confirmation pour chacune. Le diagnostic simple n'applique rien.
+- [x] `doctor` traduit ses contrôles en constats orientés conséquences (constat,
+  conséquence pour vous, preuves, correction proposée) : service indisponible,
+  liaison cassée, import non hardlinké, client BitTorrent potentiellement hors
+  VPN, volume ou disque suspect, dérive de configuration. Mêmes constats dans
+  la console, secrets masqués.
+- [x] Sans `--repair`, `doctor` est strictement en lecture seule : le fichier et
+  le hardlink d'essai cèdent la place à des constats (racines présentes et
+  montées en écriture, `torrents/` et `media/` sur un même système de fichiers,
+  `config.xml` des *arr* présents). Chaque réparation est relue, et le verdict
+  vient de cette relecture.
 - [x] `adopt --dry-run` expose conteneurs, images, ports, montages et opérations.
   `--only` limite l'application à des étapes choisies après confirmation.
 - [x] `doctor --deep-hardlinks` confirme les hardlinks déjà présents par inode,

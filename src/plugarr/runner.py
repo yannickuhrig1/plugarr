@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import shutil
@@ -412,9 +413,140 @@ def check_hardlinks(data_root: str | Path) -> Check:
     return Check("hardlinks /data", ok, detail, blocking=False)
 
 
-def check_disk_space(path: str | Path, min_gb: int = 20) -> Check:
+def monte_en_lecture_seule(path: str | Path) -> bool | None:
+    """Le systeme de fichiers qui porte `path` est-il monte en lecture seule ?
+
+    None quand on ne peut pas le savoir : Windows n'a pas `statvfs`. Aucune
+    ecriture d'essai : c'est le pendant que `doctor` peut se permettre.
+    """
+    if not hasattr(os, "statvfs"):
+        return None
     try:
-        usage = shutil.disk_usage(Path(path).anchor or str(path))
+        return bool(os.statvfs(path).f_flag & os.ST_RDONLY)
+    except OSError:
+        return None
+
+
+def check_present(path: str | Path, label: str) -> Check:
+    """Pendant en LECTURE SEULE de `check_writable`, pour une pile installee.
+
+    `doctor` sans `--repair` ne doit rien ecrire, pas meme un fichier d'essai
+    aussitot retire. On ne prouve donc plus l'ecriture, on constate ce qui se
+    lit : le dossier existe, c'en est un, et son systeme de fichiers n'est pas
+    monte en lecture seule. Sur une pile deja installee, une racine absente est
+    le symptome d'un disque ou d'un partage qui n'est pas monte.
+    """
+    cible = Path(path).expanduser()
+    if not cible.exists():
+        return Check(
+            label,
+            False,
+            t(
+                "{chemin} est introuvable : le disque ou le partage qui le porte "
+                "n'est peut-etre pas monte.",
+                chemin=cible,
+            ),
+        )
+    if not cible.is_dir():
+        return Check(label, False, t("{chemin} existe mais n'est pas un dossier.", chemin=cible))
+    if monte_en_lecture_seule(cible):
+        return Check(
+            label,
+            False,
+            t("{chemin} est monte en lecture seule : aucune ecriture n'y reussira.", chemin=cible),
+        )
+    return Check(label, True, t("present ; constate sans ecriture d'essai"))
+
+
+def _peripherique(path: Path) -> int:
+    """Identifiant du systeme de fichiers d'un chemin. Isole pour les tests."""
+    return path.stat().st_dev
+
+
+def check_same_filesystem(data_root: str | Path) -> list[Check]:
+    """Pendant en LECTURE SEULE de `check_hardlinks`, pour une pile installee.
+
+    Un hardlink ne traverse jamais deux systemes de fichiers : le noyau refuse,
+    et les *arr se rabattent sans bruit sur une copie. Comparer l'identifiant
+    de systeme de fichiers de torrents/ et de media/ le montre sans rien creer.
+
+    L'inverse n'est pas une preuve : un meme systeme de fichiers peut refuser
+    les hardlinks. Le detail le dit, et `--deep-hardlinks` cherche des liens
+    reels. torrents/ ou media/ absent d'une pile installee n'est pas un
+    probleme de hardlink mais d'arborescence : controle distinct, pour que le
+    diagnostic ne se trompe pas de cause.
+    """
+    racine = Path(data_root)
+    sources, cibles = racine / "torrents", racine / "media"
+    absents = [f"{p.name}/" for p in (sources, cibles) if not p.is_dir()]
+    if absents:
+        return [
+            Check(
+                t("arborescence des donnees"),
+                False,
+                t(
+                    "{dossiers} absent de {racine} : volume non monte, ou "
+                    "arborescence deplacee. Hardlinks non verifiables.",
+                    dossiers=", ".join(absents),
+                    racine=racine,
+                ),
+                blocking=False,
+            )
+        ]
+    try:
+        memes = _peripherique(sources) == _peripherique(cibles)
+    except OSError as exc:
+        return [
+            Check(
+                "hardlinks /data",
+                False,
+                t("lecture impossible de torrents/ ou media/ ({erreur}).", erreur=type(exc).__name__),
+                blocking=False,
+            )
+        ]
+    if not memes:
+        return [
+            Check(
+                "hardlinks /data",
+                False,
+                t(
+                    "torrents/ et media/ sont sur deux systemes de fichiers "
+                    "differents : aucun hardlink n'est possible entre eux."
+                ),
+                blocking=False,
+            )
+        ]
+    return [
+        Check(
+            "hardlinks /data",
+            True,
+            t(
+                "torrents/ et media/ sur le meme systeme de fichiers ; constate "
+                "sans ecriture d'essai"
+            ),
+            blocking=False,
+        )
+    ]
+
+
+def _premier_existant(path: Path) -> Path:
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return path
+
+
+def check_disk_space(path: str | Path, min_gb: int = 20) -> Check:
+    """Espace libre sur le disque qui porte REELLEMENT `path`.
+
+    On mesure le premier ancetre existant du chemin, pas sa racine. Sous Linux,
+    la racine d'un chemin absolu est `/` : la mesurer annoncait l'espace du
+    disque SYSTEME, alors que DATA_ROOT est souvent un disque monte a part
+    (`/mnt/user/data` sur Unraid, `/volume1/data` sur Synology). A
+    l'installation le dossier n'existe pas encore, d'ou l'ancetre. Sous
+    Windows, un chemin dont rien n'existe remonte jusqu'a `C:\\`, comme avant.
+    """
+    try:
+        usage = shutil.disk_usage(_premier_existant(Path(path)))
     except OSError as exc:
         return Check(
             t("espace disque"),

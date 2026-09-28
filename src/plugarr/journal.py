@@ -50,6 +50,15 @@ def _caviarder(texte: str) -> str:
     return _SECRET_EN_URL.sub(lambda m: f"{m.group(1)}<masque>", texte)
 
 
+def caviarder(texte: str) -> str:
+    """La meme regle de forme, pour un texte qui ne passe pas par le journal.
+
+    Le diagnostic rend ses preuves a l'ecran et a la console : elles doivent
+    etre aussi propres que le fichier qu'on joint a un rapport de bug.
+    """
+    return _caviarder(texte)
+
+
 class _Formatter(logging.Formatter):
     """Masque aussi la TRACE, pas seulement le message.
 

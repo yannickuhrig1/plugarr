@@ -166,6 +166,8 @@ def test_console_embeds_shared_renderer_and_admin_adapter():
     assert page.count('id="wiring-graph"') == 1
     assert 'id="map-expand"' not in page
     assert 'function draw(){\n  svg.replaceChildren()' not in page
+    # « Tout afficher » retire a la demande : un second clic sur la selection la defait.
+    assert 'map-reset' not in page and 'Tout afficher' not in page
 
 
 def test_torrent_interfaces_are_in_downloads_in_both_graphs():

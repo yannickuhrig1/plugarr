@@ -54,7 +54,7 @@ def test_le_diagnostic_rend_les_memes_controles_que_preflight(monkeypatch):
     """Deux diagnostics du meme systeme finiraient par diverger : la console
     rejoue `preflight`, elle n'en ecrit pas un second."""
     temoin = [admin.orchestrator.Check("bidon", True, "detail", blocking=False)]
-    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: temoin)
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d, **_k: temoin)
     monkeypatch.setattr(admin.orchestrator, "iter_selected", lambda cfg: [])
 
     charge = admin.doctor_payload(_cfg(), Path("."))
@@ -70,7 +70,7 @@ def test_le_diagnostic_compte_les_echecs(monkeypatch):
         admin.orchestrator.Check("un", True, "", blocking=False),
         admin.orchestrator.Check("deux", False, "casse", blocking=False),
     ]
-    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: controles)
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d, **_k: controles)
     monkeypatch.setattr(admin.orchestrator, "iter_selected", lambda cfg: [])
 
     assert admin.doctor_payload(_cfg(), Path("."))["failed"] == 1
@@ -82,7 +82,7 @@ def test_le_diagnostic_compte_sabnzbd_et_silo_hors_service(monkeypatch):
     cfg = orchestrator.build_config(
         services=["sabnzbd", "silo"], config_root="/c", data_root="/d"
     )
-    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: [])
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d, **_k: [])
 
     class ComposeEnPanne:
         def ps_json(self):
@@ -106,7 +106,7 @@ def test_le_diagnostic_compte_sabnzbd_et_silo_hors_service(monkeypatch):
 
 
 def test_docker_injoignable_ne_peut_pas_donner_tout_est_en_ordre(monkeypatch):
-    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: [])
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d, **_k: [])
 
     class ComposeMuet:
         def ps_json(self):
@@ -121,7 +121,7 @@ def test_docker_injoignable_ne_peut_pas_donner_tout_est_en_ordre(monkeypatch):
 def test_une_api_muette_est_un_echec_lisible(monkeypatch):
     """Un conteneur qui tourne n'est pas un service qui repond. C'est toute la
     valeur ajoutee du diagnostic par rapport a la liste des conteneurs."""
-    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: [])
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d, **_k: [])
 
     cfg = _cfg()
     monkeypatch.setattr(
@@ -172,7 +172,7 @@ def test_le_diagnostic_tait_les_controles_d_avant_installation(monkeypatch):
         admin.orchestrator.Check("configuration existante", False, "deja la", blocking=False),
         admin.orchestrator.Check("nom de projet", False, "ailleurs", blocking=False),
     ]
-    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: controles)
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d, **_k: controles)
     monkeypatch.setattr(admin.orchestrator, "iter_selected", lambda cfg: [])
 
     charge = admin.doctor_payload(_cfg(), Path("."))
@@ -195,7 +195,7 @@ def _cfg_vpn():
 
 
 def _sans_preflight(monkeypatch):
-    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d: [])
+    monkeypatch.setattr(admin.orchestrator, "preflight", lambda cfg, d, **_k: [])
     monkeypatch.setattr(admin.orchestrator, "iter_selected", lambda cfg: [])
 
 

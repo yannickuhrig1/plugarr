@@ -33,8 +33,8 @@ jobs:
           test -x dist-linux/PlugArr/plugarr-admin
           test -d dist-linux/PlugArr/_internal
           dist-linux/PlugArr/plugarr --version
-          dist-linux/PlugArr/plugarr list | grep -q sonarr
-          dist-linux/PlugArr/plugarr manager --help | grep -q quitter
+          dist-linux/PlugArr/plugarr list | grep sonarr > /dev/null
+          dist-linux/PlugArr/plugarr manager --help | grep quitter > /dev/null
 
       - name: Create portable archive and checksum
         run: |
@@ -42,13 +42,14 @@ jobs:
           tar -C dist-linux -czf "dist-linux/PlugArr-linux-x86_64.tar.gz" PlugArr
           sha256sum "dist-linux/PlugArr-linux-x86_64.tar.gz" > "dist-linux/PlugArr-linux-x86_64.SHA256SUMS"
           packaging/linux/build-deb.sh "dist-linux/PlugArr" "$VERSION" dist-linux
-          tar -tzf "dist-linux/PlugArr-linux-x86_64.tar.gz" | grep -q '^PlugArr/plugarr-admin$'
+          tar -tzf "dist-linux/PlugArr-linux-x86_64.tar.gz" | grep '^PlugArr/plugarr-admin$' > /dev/null
           dpkg-deb --info "dist-linux/plugarr_${VERSION}_amd64.deb"
-          dpkg-deb --contents "dist-linux/plugarr_${VERSION}_amd64.deb" | grep -q 'usr/bin/plugarr$'
-          dpkg-deb --contents "dist-linux/plugarr_${VERSION}_amd64.deb" | grep -q 'usr/bin/plugarr-admin$'
+          dpkg-deb --extract "dist-linux/plugarr_${VERSION}_amd64.deb" "$RUNNER_TEMP/plugarr-package"
+          test "$(readlink "$RUNNER_TEMP/plugarr-package/usr/bin/plugarr")" = /opt/plugarr/plugarr
+          test "$(readlink "$RUNNER_TEMP/plugarr-package/usr/bin/plugarr-admin")" = /opt/plugarr/plugarr-admin
           sudo apt-get install -y "./dist-linux/plugarr_${VERSION}_amd64.deb"
           plugarr --version
-          plugarr list | grep -q sonarr
+          plugarr list | grep sonarr > /dev/null
           test -x /opt/plugarr/plugarr-admin
 
       - uses: actions/upload-artifact@v4

@@ -144,6 +144,6 @@ def test_l_executable_a_une_icone():
     icone = racine / "assets" / "plugarr.ico"
 
     assert icone.is_file(), "assets/plugarr.ico manquant"
-    assert 'icon=str(ROOT / "assets" / "plugarr.ico")' in (
-        racine / "packaging" / "plugarr.spec"
-    ).read_text(encoding="utf-8")
+    spec = (racine / "packaging" / "plugarr.spec").read_text(encoding="utf-8")
+    assert 'OPTIONS_ICONE = {"icon": str(ROOT / "assets" / "plugarr.ico")}' in spec
+    assert "sys.platform == \"win32\"" in spec

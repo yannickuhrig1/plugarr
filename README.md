@@ -204,6 +204,29 @@ ensuite.
 
 L'exécutable portable se met à jour seul à sa fermeture, comme avant.
 
+### Linux x86_64 : archive portable ou paquet Debian
+
+La [dernière version](https://github.com/yannickuhrig1/plugarr/releases) contient
+deux livraisons Linux x86_64, sans Python à installer :
+
+- `PlugArr-linux-x86_64.tar.gz` contient `plugarr`, `plugarr-admin` et leur
+  runtime partagé. Extrayez-le, puis lancez `./PlugArr/plugarr` dans un terminal
+  ou `./PlugArr/plugarr-admin` pour ouvrir le gestionnaire ;
+- `plugarr_x.y.z_amd64.deb` installe les deux mêmes programmes sous
+  `/opt/plugarr`, les commandes `plugarr` et `plugarr-admin` dans le PATH, et
+  l'entrée « PlugArr Administration » dans le menu des bureaux compatibles.
+
+Sur Debian ou Ubuntu :
+
+```bash
+sudo apt install ./plugarr_x.y.z_amd64.deb
+```
+
+L'installation du paquet ne crée ni ne déplace de pile, de média ou de secret.
+Docker doit déjà être utilisable par votre compte. Les mises à jour automatiques
+restent, pour le moment, spécifiques aux exécutables Windows : sous Linux, installez
+la nouvelle archive ou le nouveau paquet après avoir vérifié sa somme SHA-256.
+
 ### Installer sur un serveur ou un NAS depuis Windows
 
 Le premier écran de l'assistant web propose **Sur cet ordinateur** ou **Sur un

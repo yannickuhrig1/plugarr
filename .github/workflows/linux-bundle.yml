@@ -1,0 +1,72 @@
+name: Linux bundle
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and verify Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install . pyinstaller
+
+      - name: Build the shared two-program bundle
+        env:
+          PLUGARR_ONEDIR: "1"
+          PLUGARR_RELEASE_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+        run: pyinstaller packaging/plugarr.spec --noconfirm --distpath dist-linux --workpath build-linux
+
+      - name: Verify the executables and their shared runtime
+        run: |
+          test -x dist-linux/PlugArr/plugarr
+          test -x dist-linux/PlugArr/plugarr-admin
+          test -d dist-linux/PlugArr/_internal
+          dist-linux/PlugArr/plugarr --version
+          dist-linux/PlugArr/plugarr list | grep sonarr > /dev/null
+          dist-linux/PlugArr/plugarr manager --help | grep quitter > /dev/null
+
+      - name: Create portable archive and checksum
+        run: |
+          VERSION=$(python -c 'import plugarr; print(plugarr.__version__)')
+          tar -C dist-linux -czf "dist-linux/PlugArr-linux-x86_64.tar.gz" PlugArr
+          sha256sum "dist-linux/PlugArr-linux-x86_64.tar.gz" > "dist-linux/PlugArr-linux-x86_64.SHA256SUMS"
+          packaging/linux/build-deb.sh "dist-linux/PlugArr" "$VERSION" dist-linux
+          tar -tzf "dist-linux/PlugArr-linux-x86_64.tar.gz" | grep '^PlugArr/plugarr-admin$' > /dev/null
+          dpkg-deb --info "dist-linux/plugarr_${VERSION}_amd64.deb"
+          dpkg-deb --extract "dist-linux/plugarr_${VERSION}_amd64.deb" "$RUNNER_TEMP/plugarr-package"
+          test "$(readlink "$RUNNER_TEMP/plugarr-package/usr/bin/plugarr")" = /opt/plugarr/plugarr
+          test "$(readlink "$RUNNER_TEMP/plugarr-package/usr/bin/plugarr-admin")" = /opt/plugarr/plugarr-admin
+          sudo apt-get install -y "./dist-linux/plugarr_${VERSION}_amd64.deb"
+          plugarr --version
+          plugarr list | grep sonarr > /dev/null
+          test -x /opt/plugarr/plugarr-admin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugarr-linux-x86_64
+          path: |
+            dist-linux/PlugArr-linux-x86_64.tar.gz
+            dist-linux/PlugArr-linux-x86_64.SHA256SUMS
+            dist-linux/plugarr_*_amd64.deb
+          if-no-files-found: error
+
+      - name: Publish the Linux assets on the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            dist-linux/PlugArr-linux-x86_64.tar.gz \
+            dist-linux/PlugArr-linux-x86_64.SHA256SUMS \
+            dist-linux/plugarr_*_amd64.deb --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

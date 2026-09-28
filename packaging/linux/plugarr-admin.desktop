@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PlugArr Administration
+Comment=Manage local and remote PlugArr installations
+Exec=/opt/plugarr/plugarr-admin
+Icon=plugarr
+Terminal=false
+Categories=Utility;System;
+StartupNotify=true

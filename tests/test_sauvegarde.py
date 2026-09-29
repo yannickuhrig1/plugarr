@@ -40,6 +40,9 @@ class _FauxCompose:
     def up(self):
         return True, ""
 
+    def ps_json(self):
+        return []
+
 
 @pytest.fixture
 def projet(tmp_path, monkeypatch):
@@ -98,6 +101,60 @@ def test_les_secrets_generes_sont_dedans(projet, tmp_path):
     assert "projet/stack.yml" in noms
     assert "projet/.env" in noms
     assert "projet/docker-compose.yml" in noms
+
+
+def test_strict_backup_rejects_missing_secret_file(projet, tmp_path):
+    cfg, dossier, _ = projet
+    (dossier / ".env").unlink()
+    archive = tmp_path / "incomplete.zip"
+    with pytest.raises(OSError, match="manquant"):
+        sauvegarde.sauvegarder(cfg, dossier, archive, strict=True)
+    assert not archive.exists()
+
+
+def test_strict_backup_rejects_missing_service_config(projet, tmp_path):
+    cfg, dossier, config = projet
+    (config / "prowlarr" / "prowlarr.db").unlink()
+    (config / "prowlarr").rmdir()
+    archive = tmp_path / "missing-config.zip"
+    with pytest.raises(OSError, match="prowlarr"):
+        sauvegarde.sauvegarder(cfg, dossier, archive, strict=True)
+    assert not archive.exists()
+
+
+def test_strict_backup_rejects_missing_named_volume(projet, tmp_path, monkeypatch):
+    from plugarr import orchestrator
+
+    cfg, dossier, _ = projet
+    monkeypatch.setattr(orchestrator, "volumes_nommes",
+                        lambda *_args: ["plugarr-state"])
+    archive = tmp_path / "missing-volume.zip"
+    with pytest.raises(OSError, match="Volume"):
+        sauvegarde.sauvegarder(cfg, dossier, archive, strict=True)
+    assert not archive.exists()
+
+
+def test_strict_backup_refuses_a_still_running_service(projet, tmp_path, monkeypatch):
+    cfg, dossier, _ = projet
+    monkeypatch.setattr(
+        _FauxCompose, "ps_json",
+        lambda _self: [{"Service": "sonarr", "State": "running"}],
+    )
+    archive = tmp_path / "active.zip"
+    with pytest.raises(OSError, match="actifs"):
+        sauvegarde.sauvegarder(cfg, dossier, archive, strict=True)
+    assert not archive.exists()
+
+
+def test_archive_integrity_is_checked_before_update(projet, tmp_path):
+    cfg, dossier, _ = projet
+    archive = tmp_path / "valid.zip"
+    sauvegarde.sauvegarder(cfg, dossier, archive, strict=True)
+    sauvegarde.verifier_archive(archive, cfg, [])
+    with archive.open("r+b") as stream:
+        stream.truncate(100)
+    with pytest.raises((ValueError, zipfile.BadZipFile)):
+        sauvegarde.verifier_archive(archive, cfg, [])
 
 
 def test_les_journaux_et_les_caches_sont_exclus(projet, tmp_path):
@@ -423,4 +480,3 @@ def test_compose_stop_exclut_les_services_demandes(tmp_path, monkeypatch):
     arret = next(c for c in commandes if "stop" in c)
     assert arret[-2:] == ["sonarr", "veille"]
     assert "console" not in arret
-

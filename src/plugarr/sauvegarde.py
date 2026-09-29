@@ -39,6 +39,7 @@ import json
 import os
 import re
 import shutil
+import tarfile
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from . import catalog
 from . import compose as compose_mod
 from .i18n import t
 from .models import StackConfig
@@ -113,10 +115,14 @@ def _exclu(chemin: Path, racine: Path) -> bool:
     return any(f"/{relatif}/".find(f"/{motif}/") >= 0 for motif in EXCLUS)
 
 
-def _fichiers_config(racine: Path, dire: Callable[[str], None]):
+def _fichiers_config(
+    racine: Path, dire: Callable[[str], None], *, strict: bool = False
+):
     """Parcourt CONFIG_ROOT sans qu'un dossier Windows verrouille tout le ZIP."""
 
     def inaccessible(exc: OSError) -> None:
+        if strict:
+            raise exc
         dire(f"ignore (inaccessible) : {exc.filename or exc}")
 
     for dossier, sous_dossiers, noms in os.walk(racine, onerror=inaccessible):
@@ -142,7 +148,7 @@ def volumes_du_projet(cfg: StackConfig) -> list[str]:
 
     return [
         nom
-        for sid in cfg.services
+        for sid, inst in cfg.services.items() if not inst.adopted
         for nom in volumes_nommes(cfg, sid)
         if volume_exists(nom)
     ]
@@ -189,10 +195,13 @@ def sauvegarder(
     destination: Path,
     *,
     live: bool = False,
+    strict: bool = False,
     on_progress: Callable[[str], None] | None = None,
 ) -> Rapport:
-    """Ecrit une archive complete. Renvoie ce qu'elle contient reellement."""
+    """Ecrit une archive. En mode strict, aucune omission n'est acceptable."""
     dire = on_progress or (lambda _m: None)
+    if strict and live:
+        raise ValueError(t("Sauvegarde stricte impossible a chaud"))
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -207,15 +216,44 @@ def sauvegarder(
     temporaires = destination.parent / f".{destination.stem}-volumes"
     complete = False
     try:
+        if strict:
+            active = [
+                entry.get("Service", "")
+                for entry in runner.ps_json()
+                if entry.get("State", "").lower() == "running"
+                and entry.get("Service") != "console"
+            ]
+            if active:
+                raise OSError(t("Services encore actifs pendant la sauvegarde"))
         volumes = volumes_du_projet(cfg)
+        if strict:
+            from .orchestrator import volumes_nommes
+
+            expected = {
+                nom
+                for sid, inst in cfg.services.items() if not inst.adopted
+                for nom in volumes_nommes(cfg, sid)
+            }
+            missing = expected - set(volumes)
+            if missing:
+                raise OSError(t("Volume de configuration introuvable"))
         archives_volumes: dict[str, Path] = {}
         for nom in volumes:
             dire(f"volume {nom}")
             cible = temporaires / f"{nom}.tar.gz"
             if _sauver_volume(nom, cible):
                 archives_volumes[nom] = cible
+            elif strict:
+                raise OSError(t("Volume non sauvegarde : {volume}", volume=nom))
 
         config_root = Path(cfg.config_root)
+        if strict and not config_root.is_dir():
+            raise OSError(t("Dossier de configuration introuvable"))
+        if strict:
+            for sid, inst in cfg.services.items():
+                config_dir = catalog.get(sid).config_dir
+                if not inst.adopted and config_dir and not (config_root / config_dir).is_dir():
+                    raise OSError(t("Configuration de service introuvable : {service}", service=sid))
         fichiers = 0
         octets = 0
         # Des images de conteneurs posent parfois des fichiers dates de l'epoch
@@ -236,10 +274,12 @@ def sauvegarder(
                     zf.write(source, f"{DOSSIER_PROJET}/{nom_fichier}")
                     fichiers += 1
                     octets += source.stat().st_size
+                elif strict and nom_fichier in ("stack.yml", ".env", "docker-compose.yml"):
+                    raise OSError(t("Fichier de projet manquant : {fichier}", fichier=nom_fichier))
 
             if config_root.is_dir():
                 dire(f"configuration : {config_root}")
-                for chemin in _fichiers_config(config_root, dire):
+                for chemin in _fichiers_config(config_root, dire, strict=strict):
                     relatif = chemin.relative_to(config_root).as_posix()
                     try:
                         if not chemin.is_file():
@@ -249,6 +289,8 @@ def sauvegarder(
                     except OSError:
                         # Un fichier verrouille ne doit pas faire echouer toute
                         # la sauvegarde : on le note et on continue.
+                        if strict:
+                            raise OSError(t("Fichier de configuration illisible : {fichier}", fichier=relatif))
                         dire(f"ignore (verrouille) : {relatif}")
                         continue
                     fichiers += 1
@@ -296,6 +338,12 @@ def sauvegarder(
                 )
 
     compose_mod._restrict(destination)
+    if strict:
+        try:
+            verifier_archive(destination, cfg, volumes)
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
     return Rapport(
         archive=destination,
         services=sorted(cfg.services),
@@ -304,6 +352,28 @@ def sauvegarder(
         volumes=sorted(archives_volumes),
         arret=arrete,
     )
+
+
+def verifier_archive(archive: Path, cfg: StackConfig, volumes: list[str]) -> None:
+    """Relit l'archive et ses volumes sans extraire de secret sur le disque."""
+    manifeste = lire_manifeste(archive)
+    if manifeste["project_name"] != cfg.project_name or manifeste["a_chaud"]:
+        raise ValueError(t("Sauvegarde incompatible ou faite a chaud"))
+    if sorted(manifeste["volumes"]) != sorted(volumes):
+        raise ValueError(t("Volumes absents de la sauvegarde"))
+    with zipfile.ZipFile(archive) as zf:
+        names = set(zf.namelist())
+        required = {f"projet/{name}" for name in ("stack.yml", ".env", "docker-compose.yml")}
+        required.update(f"volumes/{name}.tar.gz" for name in volumes)
+        if not required <= names or zf.testzip() is not None:
+            raise ValueError(t("Sauvegarde incomplete ou corrompue"))
+        for name in volumes:
+            with zf.open(f"volumes/{name}.tar.gz") as source, tarfile.open(
+                fileobj=source, mode="r|gz"
+            ) as tar:
+                for member in tar:
+                    if member.isfile():
+                        tar.extractfile(member).read()
 
 
 def lire_manifeste(archive: Path) -> dict:

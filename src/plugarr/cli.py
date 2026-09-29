@@ -7,6 +7,7 @@ les memes fonctions, ce qui garantit qu'ils ne divergeront pas.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -31,6 +32,7 @@ from . import (
     pack,
     report,
     sauvegarde,
+    update_operation,
     vpncheck,
 )
 from . import adopt as adopt_mod
@@ -1076,39 +1078,74 @@ def upgrade(
     for raison in ecartes:
         console.print(f"[dim]{t('ignore')} : {raison}[/dim]")
 
+    impacts = update_operation.affected_services(cfg) if retenus or not skip_wire else []
+    plan = update_operation.plan(
+        cfg, impacts, wiring=not skip_wire, recreate=[e.service for e in retenus]
+    )
+    console.print(t("Pré-rapport de compatibilité"))
+    console.print(plan["impact"])
+    console.print(plan["recreation_detail"])
+    for key in ("interruption", "compatibility", "backup", "checks", "rollback"):
+        console.print(f"  {plan[key]}")
+    if not skip_wire:
+        console.print(t("Le câblage sera rejoué ; il peut modifier les réglages applicatifs."))
+        if any(inst.adopted for inst in cfg.services.values()):
+            console.print(t(
+                "[red]Câblage bloqué : des services adoptés ont une configuration externe "
+                "non sauvegardée. Utilisez --skip-wire pour ne mettre à jour que les "
+                "services gérés par PlugArr.[/red]"
+            ))
+            raise typer.Exit(2)
+
+    if dry_run:
+        console.print(t("[cyan]--dry-run : rien n'a ete ecrit.[/cyan]"))
+        raise typer.Exit(0)
+
     if not retenus:
         if skip_wire:
             console.print(t("[dim]Rien a faire.[/dim]"))
             raise typer.Exit(0)
         console.print(t("[dim]Le cablage est rejoue quand meme : il est idempotent.[/dim]"))
 
-    if dry_run:
-        console.print(t("[cyan]--dry-run : rien n'a ete ecrit.[/cyan]"))
-        raise typer.Exit(0)
-
-    if retenus and not yes and not typer.confirm(
-        t("Appliquer ces {nombre} mise(s) a jour ?", nombre=len(retenus)), default=True
-    ):
+    question = (
+        t("Appliquer ces {nombre} mise(s) a jour ?", nombre=len(retenus))
+        if retenus else t("Rejouer le câblage ?")
+    )
+    if impacts and not yes and not typer.confirm(question, default=True):
         raise typer.Exit(1)
 
     chemin_journal = journal.start(project_dir, "upgrade")
     journal.config(cfg)
 
     runner = Compose(project_dir, cfg.project_name)
+    if retenus or not skip_wire:
+        destination = project_dir / "backups" / (
+            "plugarr-pre-upgrade-" + datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f") + ".zip"
+        )
+        try:
+            sauvegarde.sauvegarder(cfg, project_dir, destination, strict=True)
+        except Exception as exc:
+            journal.LOGGER.error("sauvegarde avant upgrade : %s", type(exc).__name__)
+            console.print(t("[red]Sauvegarde non vérifiée : mise à jour annulée ({cause}).[/red]", cause=type(exc).__name__))
+            raise typer.Exit(2) from exc
+        console.print(t("Sauvegarde vérifiée : {archive}", archive=destination))
     if retenus:
-        pack.appliquer(cfg, retenus)
-        compose.write_artifacts(cfg, project_dir)
         for ecart in retenus:
+            previous = cfg.services[ecart.service].image
+            pack.appliquer(cfg, [ecart])
+            compose.write_artifacts(cfg, project_dir)
             ok, message = runner.pull(ecart.service)
             if not ok:
+                cfg.services[ecart.service].image = previous
+                compose.write_artifacts(cfg, project_dir)
                 console.print(
                     t(
                         "[red]{service} : telechargement echoue[/red]",
                         service=ecart.service,
                     )
                 )
-                console.print(f"[dim]{message[:300]}[/dim]")
-                continue
+                console.print(f"[dim]{_safe_update_error(cfg, project_dir, message)}[/dim]")
+                raise typer.Exit(2)
             ok, message = runner.recreate(ecart.service)
             marque = "[green]OK[/green]" if ok else "[red]" + t("ECHEC") + "[/red]"
             console.print(
@@ -1116,9 +1153,15 @@ def upgrade(
                 f"{ecart.tag_installe} -> {ecart.tag_catalogue}"
             )
             if not ok:
-                console.print(f"[dim]{message[:300]}[/dim]")
+                console.print(f"[dim]{_safe_update_error(cfg, project_dir, message)}[/dim]")
+                raise typer.Exit(2)
 
     if skip_wire:
+        if retenus:
+            validation = update_operation.verify(cfg, project_dir, runner, impacts)
+            _print_update_validation(validation)
+            if not validation["ok"]:
+                raise typer.Exit(2)
         console.print(t("[dim]Journal detaille : {chemin}[/dim]", chemin=chemin_journal))
         raise typer.Exit(0)
 
@@ -1129,13 +1172,35 @@ def upgrade(
     console.print(t("[dim]Rejeu du cablage...[/dim]"))
     cfg.project_dir = project_dir
     wirer = Wirer(cfg)
+    wire_error = False
     try:
         results = wirer.run(on_step=report.print_step)
+    except Exception as exc:  # noqa: BLE001 - report failure, then still probe live health
+        journal.LOGGER.error("cablage apres upgrade : %s", type(exc).__name__)
+        console.print(t("[red]Câblage interrompu : {cause}[/red]", cause=type(exc).__name__))
+        wire_error = True
+        results = []
     finally:
         wirer.close()
-    report.print_final(cfg, results)
+    if not wire_error:
+        report.print_final(cfg, results)
+    validation = update_operation.verify(cfg, project_dir, runner, impacts)
+    _print_update_validation(validation)
     console.print(t("[dim]Journal detaille : {chemin}[/dim]", chemin=chemin_journal))
-    raise typer.Exit(0 if all(r.ok for r in results) else 2)
+    raise typer.Exit(0 if not wire_error and all(r.ok for r in results) and validation["ok"] else 2)
+
+
+def _print_update_validation(validation: dict) -> None:
+    for check in validation["checks"]:
+        console.print(f"  {'OK' if check['ok'] else t('ECHEC')} : {check['name']}")
+    if not validation["ok"]:
+        console.print(t("[red]Contrôles après mise à jour en échec. Aucun retour automatique.[/red]"))
+
+
+def _safe_update_error(cfg: StackConfig, project_dir: Path, message: str) -> str:
+    return admin.Maintenance(cfg, project_dir, persistent=False).safe_error(
+        RuntimeError(message)
+    )
 
 
 @app.command(help=t("Page d'administration : etat des services, demarrer / arreter / redemarrer."))

@@ -321,7 +321,8 @@ def test_silo_is_backed_up_before_its_update(server, cfg, monkeypatch):
     cfg.services.update(silo.services)
     calls = []
 
-    def backup(_maintenance):
+    def backup(_maintenance, *, strict=False):
+        assert strict
         calls.append("backup")
 
     def update(*_args):
@@ -330,6 +331,8 @@ def test_silo_is_backed_up_before_its_update(server, cfg, monkeypatch):
 
     monkeypatch.setattr(admin.Maintenance, "backup", backup)
     monkeypatch.setattr(admin, "apply_update", update)
+    monkeypatch.setattr(admin.update_operation, "verify",
+                        lambda *_args: {"ok": True, "checks": [{"name": "Etat Silo", "ok": True}]})
 
     status, body, _headers = call(
         base + "/api/update",
@@ -342,29 +345,31 @@ def test_silo_is_backed_up_before_its_update(server, cfg, monkeypatch):
     assert calls == ["backup", "update"]
 
 
-def test_regular_update_runs_without_backup_when_not_requested(server, monkeypatch):
+def test_regular_update_requires_backup_even_when_not_requested(server, monkeypatch):
     base, _ = server
     calls = []
     monkeypatch.setattr(
         admin.Maintenance,
         "backup",
-        lambda _maintenance: pytest.fail("no backup was requested"),
+        lambda _maintenance, *, strict: calls.append(("backup", strict)),
     )
     monkeypatch.setattr(
         admin,
         "apply_update",
         lambda *_args: (calls.append("update") or True, "updated"),
     )
+    monkeypatch.setattr(admin.update_operation, "verify",
+                        lambda *_args: {"ok": True, "checks": [{"name": "Etat Sonarr", "ok": True}]})
 
     status, body, _headers = call(
         base + "/api/update",
         method="POST",
-        payload={"service": "sonarr", "target": "4.0.20", "backup_first": False},
+        payload={"service": "sonarr", "target": "4.0.21", "backup_first": False},
     )
 
     assert status == 200
     assert json.loads(body)["ok"] is True
-    assert calls == ["update"]
+    assert calls == [("backup", True), "update"]
 
 
 def test_update_reports_the_backup_cause_and_never_pulls_after_failure(
@@ -374,7 +379,7 @@ def test_update_reports_the_backup_cause_and_never_pulls_after_failure(
     monkeypatch.setattr(
         admin.Maintenance,
         "backup",
-        lambda _maintenance: (_ for _ in ()).throw(
+        lambda _maintenance, *, strict: (_ for _ in ()).throw(
             ValueError("ZIP does not support timestamps before 1980")
         ),
     )
@@ -387,10 +392,63 @@ def test_update_reports_the_backup_cause_and_never_pulls_after_failure(
     status, body, _headers = call(
         base + "/api/update",
         method="POST",
-        payload={"service": "sonarr", "target": "4.0.20", "backup_first": True},
+        payload={"service": "sonarr", "target": "4.0.21", "backup_first": True},
     )
 
     assert status == 500
     error = json.loads(body)["error"]
     assert "Mise a jour annulee" in error
     assert "timestamps before 1980" in error
+
+
+def test_update_preview_does_not_start_backup_or_update(server, monkeypatch):
+    base, _ = server
+    monkeypatch.setattr(admin.Maintenance, "backup",
+                        lambda *_args, **_kwargs: pytest.fail("preview wrote a backup"))
+    monkeypatch.setattr(admin, "apply_update",
+                        lambda *_args: pytest.fail("preview updated a service"))
+    status, body, _ = call(base + "/api/update-plan?service=sonarr&target=4.0.21")
+    plan = json.loads(body)
+    assert status == 200
+    assert set(plan["services"]) == {"sonarr", "prowlarr", "qbittorrent"}
+    assert plan["recreation"] == ["sonarr"]
+    assert plan["rollback"]
+
+
+def test_update_refuses_downgrade_before_backup(server, monkeypatch):
+    base, _ = server
+    monkeypatch.setattr(admin.Maintenance, "backup",
+                        lambda *_args, **_kwargs: pytest.fail("downgrade started backup"))
+    for route, method, payload in [
+        ("/api/update-plan?service=sonarr&target=4.0.19", "GET", None),
+        ("/api/update", "POST", {"service": "sonarr", "target": "4.0.19"}),
+    ]:
+        status, _body, _ = call(base + route, method=method, payload=payload)
+        assert status == 400
+
+
+def test_update_returns_failure_when_post_checks_fail(server, monkeypatch):
+    base, _ = server
+    monkeypatch.setattr(admin.Maintenance, "backup", lambda _m, *, strict: None)
+    monkeypatch.setattr(admin, "apply_update", lambda *_args: (True, "updated"))
+    monkeypatch.setattr(admin.update_operation, "verify",
+                        lambda *_args: {"ok": False, "checks": [{"name": "Etat Sonarr", "ok": False}]})
+    status, body, _ = call(base + "/api/update", method="POST",
+                           payload={"service": "sonarr", "target": "4.0.21"})
+    assert status == 500
+    assert json.loads(body)["validation"]["checks"][0]["ok"] is False
+
+
+def test_update_failure_does_not_expose_known_secret(server, cfg, monkeypatch):
+    base, _ = server
+    secret = cfg.services["sonarr"].api_key
+    monkeypatch.setattr(admin.Maintenance, "backup", lambda _m, *, strict: None)
+    monkeypatch.setattr(
+        admin, "apply_update",
+        lambda *_args: (False, f"pull failed token={secret}"),
+    )
+    status, body, _ = call(base + "/api/update", method="POST",
+                           payload={"service": "sonarr", "target": "4.0.21"})
+    assert status == 500
+    assert secret not in body
+    assert "<masque>" in body

@@ -36,7 +36,8 @@ def test_la_console_porte_les_deux_boutons():
     assert page.index('<header>') < page.index('id="overview"') < page.index('id="services"')
     assert "installee : " in page and "cible : " in page
     assert "c.next_step" in page
-    assert "backup_first: s.id === 'silo'" in page
+    assert "/api/update-plan" in page
+    assert "backup_first: true" in page
     assert "last_backup_error" in page
 
 

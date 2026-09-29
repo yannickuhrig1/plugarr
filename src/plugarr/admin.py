@@ -45,6 +45,7 @@ from . import (
     imageref,
     journal,
     orchestrator,
+    update_operation,
     updates,
     vpncheck,
 )
@@ -160,6 +161,19 @@ def updates_payload(cfg: StackConfig) -> dict:
             "problem": sortie.probleme,
         },
     }
+
+
+def update_target_valid(cfg: StackConfig, service: str, target: str | None) -> bool:
+    if not cfg.enabled(service) or cfg.services[service].adopted:
+        return False
+    if target is None:
+        return True  # Re-pull of the same, possibly rebuilt, image.
+    current = imageref.tag(cfg.services[service].image or catalog.get(service).image)
+    proposed, installed = updates.parse_version(target), updates.parse_version(current)
+    return bool(
+        proposed is not None and installed is not None
+        and updates._same_shape(target, current) and proposed > installed
+    )
 
 
 #: Controles qui n'ont de sens qu'AVANT d'installer, et qu'un diagnostic ne
@@ -321,7 +335,7 @@ def doctor_payload(
                 {
                     "name": f"API {spec.display_name}",
                     "ok": False,
-                    "detail": str(exc).splitlines()[0],
+                    "detail": Maintenance(cfg, project_dir, persistent=False).safe_error(exc),
                     "blocking": False,
                     "partage": False,
                     "next_step": (
@@ -639,6 +653,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(result)
         elif route == "/api/updates":
             self._json(updates_payload(self.cfg))
+        elif route == "/api/update-plan":
+            query = parse_qs(urlparse(self.path).query)
+            service = query.get("service", [""])[0]
+            target = query.get("target", [""])[0]
+            if not update_target_valid(self.cfg, service, target or None):
+                self._json({"error": "mise a jour invalide"}, HTTPStatus.BAD_REQUEST)
+            else:
+                self._json(update_operation.plan(
+                    self.cfg, update_operation.affected_services(self.cfg),
+                    wiring=False, recreate=[service],
+                ))
         elif route == "/api/doctor":
             result = doctor_payload(self.cfg, self.project_dir, self.compose)
             self.maintenance.event('diagnostic', result['failed'] == 0)
@@ -762,7 +787,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"service inconnu: {service}"}, HTTPStatus.BAD_REQUEST)
                 return
             target = payload.get("target")
-            if target is not None and updates.parse_version(str(target)) is None:
+            if target is not None and not update_target_valid(self.cfg, service, str(target)):
                 # Le tag finit dans une image Docker : il doit ressembler a une
                 # version, jamais a ce que le client veut bien envoyer.
                 self._json(
@@ -772,16 +797,16 @@ class _Handler(BaseHTTPRequestHandler):
             if self.cfg.services[service].adopted:
                 self._json({'error': 'Service adopte : mise a jour externe requise.'}, HTTPStatus.BAD_REQUEST)
                 return
-            # Silo est encore en pre-version et ses mises a jour peuvent lancer
-            # des migrations de base. Sa sauvegarde est donc obligatoire, meme
-            # si la case generale a ete decochee dans la console.
-            backup_first = service == "silo" or bool(payload.get('backup_first'))
+            # Une migration peut aussi etre introduite par un autre service.
+            # L'API ne permet pas de contourner cette barriere.
+            backup_first = True
             if backup_first:
                 try:
-                    self.maintenance.backup()
+                    self.maintenance.backup(strict=True)
                 except Exception as exc:  # noqa: BLE001 - keep failures contained and secrets out of responses
-                    journal.LOGGER.exception(
-                        "sauvegarde avant mise a jour de %s", service
+                    journal.LOGGER.error(
+                        "sauvegarde avant mise a jour de %s : %s",
+                        service, type(exc).__name__,
                     )
                     detail = self.maintenance.safe_error(exc)
                     self._json(
@@ -798,6 +823,16 @@ class _Handler(BaseHTTPRequestHandler):
                 self.cfg, self.compose, self.project_dir, service,
                 str(target) if target else None,
             )
+            if not ok:
+                message = self.maintenance.safe_error(RuntimeError(message))
+            validation = (
+                update_operation.verify(
+                    self.cfg, self.project_dir, self.compose,
+                    update_operation.affected_services(self.cfg),
+                )
+                if ok else {"ok": False, "checks": []}
+            )
+            ok = ok and validation["ok"]
             self.maintenance.event('mise a jour service', ok, service)
             self._json(
                 {
@@ -805,6 +840,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "service": service,
                     "message": message,
                     "backup_first": backup_first,
+                    "validation": validation,
                 },
                 HTTPStatus.OK if ok else HTTPStatus.INTERNAL_SERVER_ERROR,
             )

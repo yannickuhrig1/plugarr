@@ -425,6 +425,28 @@ regenerate `docker-compose.yml` and `.env`, then replay the wiring. The wiring
 comes last because a step added since may depend on a newer image; never the
 other way round.
 
+Before changing anything, the command shows a compatibility pre-report:
+affected services, possible recreation and interruption, compatibility limits,
+the proposed backup, and planned checks. The --dry-run preview creates no
+archive or container and rewrites no files. Execution makes a cold backup of
+the project, CONFIG_ROOT, and volumes, then reads the archive back and checks
+its integrity. A missing file or volume, an unreadable archive, or a failed
+restart blocks the update. The archive contains secrets and excludes media
+under DATA_ROOT and adopted-service configurations, which remain under their
+external installation's control.
+When the stack includes adopted services, wiring replay is blocked because it
+could change their configuration without a backup. Use --skip-wire to update
+only PlugArr-managed services.
+
+After recreation, PlugArr reads live Docker state and health, probes available
+APIs, and tests essential connections. A failed check marks the operation as
+failed even when the new image started. The administration console shows the
+same pre-report before confirmation and requires a verified backup for every
+service. Automatic rollback is not promised: database migrations or data
+written since the update may be incompatible with the old state. Keep the
+archive and review the diagnosis before restoring manually to an isolated
+installation.
+
 **It never moves a version backwards.** The deployed tag lives in `stack.yml`
 and not in the code, precisely so you can update Sonarr without waiting for a
 new PlugArr, or deliberately stay on an older version. So `upgrade` only offers

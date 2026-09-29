@@ -63,6 +63,9 @@ def ecarts(cfg: StackConfig) -> tuple[list[Ecart], list[str]]:
     for sid in catalog.STARTUP_ORDER:
         if not cfg.enabled(sid):
             continue
+        if cfg.services[sid].adopted:
+            ecartes.append(t("{service} : service adopte, mise a jour externe", service=sid))
+            continue
         installee = cfg.services[sid].image
         referme = catalog.get(sid).image
         if not installee or installee == referme:

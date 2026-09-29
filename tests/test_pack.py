@@ -112,6 +112,14 @@ def test_un_service_absent_de_l_installation_est_ignore():
     assert all(cfg.enabled(e.service) for e in retenus)
 
 
+def test_un_service_adopte_n_est_pas_recree_par_upgrade():
+    cfg = _cfg(sonarr="lscr.io/linuxserver/sonarr:3.0.10")
+    cfg.services["sonarr"].adopted = True
+    retenus, ecartes = pack.ecarts(cfg)
+    assert not any(e.service == "sonarr" for e in retenus)
+    assert any("sonarr" in reason and "adopte" in reason for reason in ecartes)
+
+
 # ------------------------------------------------------------------ ce qu'on ecrit
 
 

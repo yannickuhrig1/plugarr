@@ -120,7 +120,7 @@ class Maintenance:
         )
         return f"{type(exc).__name__} : {detail}"[:300]
 
-    def backup(self):
+    def backup(self, *, strict=False):
         """Archive la pile. L'ecriture se fait HORS du verrou d'etat.
 
         Panne mesuree : `do_GET` et `do_POST` s'executaient tous les deux sous
@@ -139,7 +139,10 @@ class Maintenance:
                 self.save()
             self.arret_pour_sauvegarde.set()
             try:
-                report = sauvegarde.sauvegarder(self.cfg, self.project_dir, destination)
+                options = {"strict": True} if strict else {}
+                report = sauvegarde.sauvegarder(
+                    self.cfg, self.project_dir, destination, **options
+                )
             except Exception as exc:
                 with self.lock:
                     self.state['last_backup_error'] = self.safe_error(exc)
@@ -153,7 +156,11 @@ class Maintenance:
                 self.state['last_backup'] = stamp()
                 self.state['last_backup_error'] = None
                 self.state['archives'].append(destination.name)
-                expired = self.state['archives'][:-self.state['schedule']['keep']]
+                # A pre-update backup must not prune earlier recovery points.
+                expired = (
+                    [] if strict
+                    else self.state['archives'][:-self.state['schedule']['keep']]
+                )
                 for name in expired:
                     old = directory / name
                     if old.parent.resolve() == directory.resolve() and old.name.startswith('plugarr-'):

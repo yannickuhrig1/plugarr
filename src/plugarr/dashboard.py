@@ -469,7 +469,7 @@ def render(cfg: StackConfig, *, failed: int = 0, live: bool = False, remote_repo
         prochaine_etape=html.escape(" ".join(prochaine_etape(cfg))),
         version=__version__,
         icone=html.escape(plugarr_icon(), quote=True),
-        live_script=_LIVE_SCRIPT if live else "",
+        live_script=_live_script() if live else "",
         title=t("Administration") if live else t("Acces"),
         # Le bouton « copier » change de libelle une seconde apres le clic.
         copie=t("copie"),
@@ -956,13 +956,20 @@ _LIVE_SCRIPT = """<script>
   }
 
   function lancerMaj(s, zone) {
-    var quoi = s.latest ? ('passer de ' + s.current + ' a ' + s.latest) : 'retirer la meme version';
-    var question = s.name + ' : ' + quoi + ' ?'
-      + '\\n\\nLe conteneur sera recree. Les autres services ne bougent pas.';
-    if (s.id === 'silo') {
-      question += '\\n\\nUne sauvegarde complete sera creee avant la mise a jour de Silo.';
-    }
-    if (!confirm(question)) return;
+    fetch('/api/update-plan?service=' + encodeURIComponent(s.id)
+      + '&target=' + encodeURIComponent(s.latest || ''), {credentials: 'same-origin'})
+      .then(function (r) { if (!r.ok) throw new Error('aperçu indisponible'); return r.json(); })
+      .then(function (plan) {
+        var question = s.name + ' : ' + (s.latest || s.current)
+          + '\\n\\n' + plan.impact + '\\n' + plan.recreation_detail
+          + '\\n' + plan.interruption + '\\n' + plan.compatibility
+          + '\\n\\n' + plan.backup + '\\n' + plan.checks
+          + '\\n\\n' + plan.rollback;
+        if (confirm(question)) appliquerMaj(s, zone);
+      }).catch(function () { alert(__UPDATE_PREVIEW_ERROR__); });
+  }
+
+  function appliquerMaj(s, zone) {
     zone.innerHTML = '<span class="tag">mise a jour…</span>';
     fetch('/api/update', {
       method: 'POST', credentials: 'same-origin',
@@ -970,7 +977,7 @@ _LIVE_SCRIPT = """<script>
       body: JSON.stringify({
         service: s.id,
         target: s.latest || null,
-        backup_first: s.id === 'silo'
+        backup_first: true
       })
     }).then(function (r) { return r.json(); })
       .then(function (d) {
@@ -978,10 +985,14 @@ _LIVE_SCRIPT = """<script>
         var resultat = document.createElement('span');
         resultat.className = 'tag';
         resultat.textContent = d.ok
-          ? (d.backup_first ? 'sauvegarde creee · ' : '') + 'fait : ' + d.message
-          : 'echec';
+          ? __UPDATE_SUCCESS__ + d.message
+          : __UPDATE_FAILURE__;
         zone.appendChild(resultat);
-        if (!d.ok) { alert(s.name + ' : ' + (d.message || d.error)); }
+        if (!d.ok) {
+          var failures = ((d.validation || {}).checks || []).filter(function (c) { return !c.ok; })
+            .map(function (c) { return c.name; }).join(', ');
+          alert(s.name + ' : ' + (d.message || d.error) + (failures ? '\\n' + failures : ''));
+        }
         setTimeout(function () { rafraichir(); verifierMaj(); }, 1500);
       })
       .catch(function () { zone.innerHTML = '<span class="tag">serveur injoignable</span>'; });
@@ -1109,6 +1120,18 @@ _LIVE_SCRIPT = """<script>
   }
 </script>
 """
+
+
+def _live_script() -> str:
+    replacements = {
+        "__UPDATE_PREVIEW_ERROR__": t("Pré-rapport indisponible. Mise à jour annulée."),
+        "__UPDATE_SUCCESS__": t("Sauvegarde vérifiée, services et liaisons vérifiés : "),
+        "__UPDATE_FAILURE__": t("Échec ou contrôle après mise à jour en échec."),
+    }
+    script = _LIVE_SCRIPT
+    for token, label in replacements.items():
+        script = script.replace(token, json.dumps(label, ensure_ascii=False))
+    return script
 
 
 #: Nom du lanceur ecrit a cote des artefacts, selon la plateforme.

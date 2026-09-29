@@ -438,6 +438,28 @@ cette version, régénérer `docker-compose.yml` et `.env`, puis rejouer le
 câblage. Le câblage passe en dernier parce qu'une étape ajoutée depuis peut
 dépendre d'une image plus récente ; l'inverse, jamais.
 
+Avant toute modification, la commande affiche un pré-rapport : services touchés,
+recréations et interruption possible, limites de compatibilité, sauvegarde et
+contrôles prévus. L'aperçu avec --dry-run ne crée ni archive ni conteneur et ne
+réécrit aucun fichier. L'exécution crée une sauvegarde à froid du projet, de
+CONFIG_ROOT et des volumes, puis relit l'archive et contrôle son intégrité.
+Un fichier ou volume manquant, une archive illisible ou un échec de redémarrage
+bloque la mise à jour. L'archive contient des secrets et exclut les médias de
+DATA_ROOT ainsi que les configurations des services adoptés, qui restent sous
+la responsabilité de leur installation externe.
+Si la pile inclut des services adoptés, le rejeu du câblage est bloqué car il
+pourrait modifier leur configuration sans sauvegarde. Utilisez --skip-wire
+pour mettre à jour uniquement les services gérés par PlugArr.
+
+Après recréation, PlugArr lit l'état et la santé Docker, sonde les API
+disponibles et teste les liaisons essentielles. Un échec est signalé comme un
+échec de l'opération, même si la nouvelle image a démarré. La console montre
+le même pré-rapport avant confirmation et impose la sauvegarde vérifiée pour
+chaque service. Aucun retour automatique n'est promis : une migration de base
+ou des données écrites depuis la mise à jour peuvent rendre l'ancien état
+incompatible. Conservez l'archive et examinez le diagnostic avant une
+restauration manuelle sur une installation isolée.
+
 **Elle ne redescend jamais une version.** Le tag déployé vit dans `stack.yml`
 et non dans le code, précisément pour que vous puissiez mettre Sonarr à jour
 sans attendre une version de PlugArr, ou rester délibérément sur une version

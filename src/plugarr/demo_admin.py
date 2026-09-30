@@ -146,9 +146,22 @@ class DemoHandler(BaseHTTPRequestHandler):
                     ],
                 }
             elif route == '/api/doctor':
-                data = {'failed': 0, 'checks': [{'name': 'Diagnostic fictif', 'ok': True,
+                # Un constat fictif plutot qu'une liste vide : la console
+                # afficherait sinon « aucun probleme detecte », ce qu'une
+                # demonstration n'a pas verifie.
+                data = {'failed': 0, 'partage': 0, 'checks': [{'name': 'Diagnostic fictif', 'ok': True,
                         'detail': 'Aucun contrôle réel effectué.', 'blocking': False,
-                        'next_step': 'Essayez les commandes simulées.'}]}
+                        'next_step': 'Essayez les commandes simulées.'}],
+                        'findings': [{'kind': 'service', 'subject': 'demo', 'severity': 'info',
+                                      'title': 'Diagnostic fictif',
+                                      'finding': 'Aucun contrôle réel effectué.',
+                                      'consequence': 'Démonstration : rien n’est vérifié ni modifié.',
+                                      'evidence': ['Réponse simulée par la démonstration'],
+                                      'fix': 'Lancez plugarr doctor sur une vraie pile.',
+                                      'repair': None}],
+                        'labels': {'finding': 'Constat', 'consequence': 'Conséquence pour vous',
+                                   'evidence': 'Preuves', 'fix': 'Correction proposée',
+                                   'repair': 'Réparation possible', 'info': 'À SAVOIR'}}
             else:
                 self.send({'error': 'Route inconnue'}, 404)
                 return

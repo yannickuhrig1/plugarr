@@ -540,10 +540,33 @@ Before wiring, `adopt` reads the selected *arr* APIs and reports their versions;
 it stops without writing if an API is unreachable or rejects its key. `--dry-run`
 also checks the APIs without writing.
 
-`plugarr doctor` also checks *arr connections and reports divergence between
-`docker-compose.yml` and `stack.yml` without displaying secrets. It explains
-the proposed fixes. `plugarr doctor --repair` offers them one at a time and
-asks before applying each; a plain diagnosis does not change the stack.
+`plugarr doctor` first prints its raw checks, then **consequence-oriented
+findings**. Each one gives the finding, what it means for you, the evidence
+gathered and a proposed fix:
+
+| Finding | Example evidence |
+|---|---|
+| BitTorrent client possibly outside the VPN | container network mode, exit seen from inside the tunnel |
+| Suspicious volume or disk | missing root, read-only mount, missing *arr* `config.xml`, free space |
+| Service unavailable | Docker state, unresponsive API, connections that can no longer be checked |
+| Broken inter-service connection | real test run through the source service's API |
+| Import not hardlinked | `torrents/` and `media/` on two filesystems, `--deep-hardlinks` sample |
+| Configuration drift | differing services, sections and `.env` variable names, never their values |
+| Incoming port out of sync | port announced by Gluetun, port the client listens on |
+
+A root cause hides its symptoms: a stopped Sonarr is reported once, with the
+connections it makes uncheckable, rather than as three broken connections. No
+secret leaves the diagnosis: known keys and passwords, and URL parameters that
+carry one, are masked. The console shows the same findings under
+**Maintenance**.
+
+Without `--repair`, the diagnosis is entirely read-only: it writes no test file
+or test hardlink (the creation test stays with installation), replays no
+connection and touches no port. `plugarr doctor --repair` offers only two
+bounded fixes, confirmed one at a time: reapplying **one** *arr connection of a
+service PlugArr manages, and rerunning the Gluetun port synchronization. After
+each, the condition is read back, and the verdict shown (`FIXED`,
+`STILL FAILING`) comes from that read-back.
 `plugarr doctor --deep-hardlinks` inspects up to 20,000 existing files under
 `torrents/` and `media/` without changing them, confirming links that share an
 inode. No match is inconclusive, not proof of a broken import.

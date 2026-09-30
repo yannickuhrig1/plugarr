@@ -12,6 +12,7 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from rich.markup import escape
 
 from . import (
     __version__,
@@ -20,7 +21,6 @@ from . import (
     autoupdate,
     catalog,
     compose,
-    connections,
     dashboard,
     diagnostics,
     discovery,
@@ -33,7 +33,6 @@ from . import (
     report,
     sauvegarde,
     update_operation,
-    vpncheck,
 )
 from . import adopt as adopt_mod
 from . import autostart as autostart_mod
@@ -41,7 +40,6 @@ from . import (
     reprise as reprise_mod,
 )
 from .clients import recyclarr as recyclarr_cfg
-from .clients.arr import ArrClient
 from .i18n import t
 from .interface import Interface
 from .layout import create_tree, default_profile, path_warning
@@ -776,6 +774,22 @@ def install(
     raise typer.Exit(0 if not echecs else 2)
 
 
+def _print_adopt_compatibility(details: dict[str, list[str]]) -> None:
+    from rich.markup import escape
+
+    for key, label, color in (
+        ("observed", t("Observé dans Docker et les fichiers locaux"), "cyan"),
+        ("verified_api", t("Vérifié via API"), "green"),
+        ("incompatible", t("Incompatible avec l'adoption actuelle"), "red"),
+        ("indeterminate", t("Indéterminé ou à vérifier"), "yellow"),
+    ):
+        console.print(f"[{color}]{label}[/{color}]")
+        for line in details[key]:
+            console.print("  " + escape(line))
+        if not details[key]:
+            console.print()
+
+
 @app.command(help=t("Liste les services deja installes sur cette machine. N'ecrit rien."))
 def scan(include_stopped: bool = typer.Option(False, "--all", help=t("Inclure les arretes."))) -> None:
     """Liste les services deja installes sur cette machine. N'ecrit rien."""
@@ -793,7 +807,7 @@ def scan(include_stopped: bool = typer.Option(False, "--all", help=t("Inclure le
         if discovery.looks_like_plugarr(entry):
             state = "[dim]gere par plugarr[/dim]"
         elif entry.usable:
-            state = "[green]adoptable[/green]"
+            state = "[green]" + t("candidat à vérifier") + "[/green]"
         else:
             state = "[yellow]" + (entry.problems[0] if entry.problems else "inutilisable") + "[/yellow]"
         table.add_row(
@@ -819,6 +833,9 @@ def scan(include_stopped: bool = typer.Option(False, "--all", help=t("Inclure le
                 identifiant=service_id,
             )
         )
+    _print_adopt_compatibility(
+        adopt_mod.compatibility_report(found, adopt_mod.build_plan(found), "")
+    )
 
 
 @app.command(help=t("Cable une stack DEJA installee, sans la recreer."))
@@ -874,7 +891,8 @@ def adopt(
         host = detected
         console.print(t("[dim]Adresse retenue pour le cablage : {hote}[/dim]", hote=host))
 
-    plan = adopt_mod.build_plan(discovery.scan(), picks)
+    found = discovery.scan()
+    plan = adopt_mod.build_plan(found, picks)
 
     for entry, why in plan.skipped:
         console.print(f"[dim]ignore  {entry.container} ({why})[/dim]")
@@ -889,9 +907,11 @@ def adopt(
             )
         )
     if not plan.chosen:
+        _print_adopt_compatibility(adopt_mod.compatibility_report(found, plan, data_root))
         console.print("[red]Rien d'adoptable. Lancez `plugarr scan` pour comprendre.[/red]")
         raise typer.Exit(1)
     if plan.ambiguous:
+        _print_adopt_compatibility(adopt_mod.compatibility_report(found, plan, data_root))
         raise typer.Exit(1)
 
     cfg = adopt_mod.config_from_plan(
@@ -901,11 +921,6 @@ def adopt(
         if cfg.enabled(sid) and (dl_user or dl_pass):
             cfg.services[sid].username = dl_user or ""
             cfg.services[sid].password = dl_pass or ""
-    for note in adopt_mod.missing_for_wiring(cfg):
-        console.print(f"[yellow]{note}[/yellow]")
-    for note in adopt_mod.compatibility_notes(plan, data_root):
-        console.print(f"[yellow]{note}[/yellow]")
-
     wirer = Wirer(cfg)
     try:
         planned_steps = [step.name for step in wirer.build_plan()]
@@ -914,42 +929,57 @@ def adopt(
     unknown = set(only) - set(planned_steps)
     if unknown:
         raise typer.BadParameter(t("etape(s) inconnue(s) : {etapes}", etapes=", ".join(sorted(unknown))))
-    selected_steps = set(only) if only else None
-
     console.print()
     report.print_summary(cfg, adopted_sources=plan.chosen)
-    console.print(t("Inventaire des conteneurs retenus :"))
-    for sid, entry in plan.chosen.items():
-        mounts = ", ".join(f"{target}={source}" for target, source in sorted(entry.data_mounts.items())) or t("montages media non identifies")
-        console.print(t("  {service} : {conteneur}, image {image}, port {port}, {montages}", service=sid, conteneur=entry.container, image=entry.image, port=entry.host_port, montages=mounts))
-    console.print(t("Operations proposees :"))
-    for step in planned_steps:
-        if selected_steps is None or step in selected_steps:
-            console.print(f"  {step}")
-    console.print(
-        t(
-            "[cyan]{nombre} operation(s) seraient appliquees sur ces conteneurs "
-            "existants. Aucun ne sera recree.[/cyan]",
-            nombre=len(selected_steps) if selected_steps is not None else len(planned_steps),
-        )
-    )
-
     if not dry_run and (project_dir / "stack.yml").exists():
         console.print(t("[red]Ce dossier contient deja stack.yml. Choisissez un autre dossier pour adopter cette pile, ou utilisez doctor pour l'installation existante.[/red]"))
         raise typer.Exit(1)
     api_results = adopt_mod.api_inventory(cfg)
-    console.print(t("Versions et acces API verifies avant adoption :"))
-    for item in api_results:
-        if item["ok"]:
-            console.print(f"  [green]OK[/green] {item['service']} {item['version']}")
-        else:
-            console.print(t("  [red]ECHEC[/red] {service} : API injoignable, cle refusee ou version absente.", service=item["service"]))
+    link_results = adopt_mod.link_inventory(
+        cfg, adopt_mod.minimal_steps(planned_steps),
+    ) if all(item["ok"] for item in api_results) else []
+    selected_steps = set(only) if only else {
+        item["step"] for item in link_results if item["state"] == "absent"
+    }
+    unknown_links = any(item["state"] == "unknown" for item in link_results)
+    missing_passwords = {
+        step.split("/")[-1] for step in selected_steps
+        if "/downloadclient/" in step
+        and not cfg.services[step.split("/")[-1]].password
+    }
+    details = adopt_mod.compatibility_report(
+        found, plan, data_root, api_results,
+        [step for step in planned_steps if step in selected_steps],
+        link_results,
+    )
+    for sid in sorted(missing_passwords):
+        details["incompatible"].append(t(
+            "{service} : mot de passe absent pour le câblage proposé ; passez --dl-user et --dl-pass.",
+            service=sid,
+        ))
+    _print_adopt_compatibility(details)
+    for note in adopt_mod.missing_for_wiring(cfg):
+        console.print(f"[yellow]{note}[/yellow]")
+    console.print(t("Operations proposees :"))
+    for step in planned_steps:
+        if step in selected_steps:
+            console.print(f"  {step}")
+    console.print(t(
+        "{nombre} étape(s) sélectionnée(s) ; aucun conteneur ne sera recréé. "
+        "Les autres étapes exigent --only.", nombre=len(selected_steps),
+    ))
     if any(not item["ok"] for item in api_results):
         console.print(t("[red]Adoption interrompue : corrigez les API avant le cablage. Aucun fichier n'a ete ecrit.[/red]"))
         raise typer.Exit(1)
     if dry_run:
         raise typer.Exit(0)
-    if not yes and not typer.confirm(t("Appliquer les operations affichees ?"), default=False):
+    if missing_passwords or (unknown_links and not only):
+        raise typer.Exit(1)
+    if not yes and not typer.confirm(t(
+        "Écrire {chemin} puis appliquer uniquement ces {nombre} étape(s) sur les "
+        "réglages existants ?", chemin=project_dir / "stack.yml",
+        nombre=len(selected_steps),
+    ), default=False):
         raise typer.Exit(0)
 
     adopt_mod.write_stack(cfg, project_dir)
@@ -958,7 +988,7 @@ def adopt(
         results = wirer.execute(on_step=report.print_step, selected_steps=selected_steps)
     finally:
         wirer.close()
-    adopt_mod.write_stack(cfg, project_dir)
+    adopt_mod.write_stack(cfg, project_dir, replace=True)
     report.print_final(cfg, results)
     raise typer.Exit(0 if all(r.ok for r in results) else 2)
 
@@ -1560,11 +1590,20 @@ def doctor(
     repair: bool = typer.Option(False, "--repair", help=t("Proposer les correctifs un par un.")),
     deep_hardlinks: bool = typer.Option(False, "--deep-hardlinks", help=t("Examiner en lecture seule un echantillon de hardlinks existants.")),
 ) -> None:
-    """Diagnostique une installation existante."""
+    """Diagnostique une installation existante.
+
+    Sans `--repair`, rien n'est ecrit : ni fichier d'essai, ni liaison, ni port.
+    Le rapport se lit en deux temps : les controles bruts, puis les constats
+    qui comptent, chacun avec sa consequence, ses preuves et sa correction.
+
+    Avec `--repair`, seules les deux corrections que `doctor` a toujours
+    proposees existent : reappliquer UNE liaison *arr, et rejouer la
+    synchronisation du port Gluetun. Chacune est confirmee a part, et son
+    verdict vient de la relecture de la condition, pas de l'ecriture.
+    """
     cfg = _load_config(project_dir)
     _annoncer_nouvelle_version()
-    if not report.print_checks(orchestrator.diagnostic(cfg, project_dir)):
-        console.print("[red]Des controles bloquants ont echoue.[/red]")
+    audit = None
     if deep_hardlinks:
         audit = diagnostics.existing_hardlinks(cfg.data_root)
         if not audit["available"]:
@@ -1574,64 +1613,45 @@ def doctor(
             if not audit["matched"]:
                 console.print(t("Aucun lien commun trouve : resultat indetermine, pas une preuve que les imports sont casses."))
 
-    # La protection du trafic torrent AVANT l'etat des conteneurs : c'est la
-    # reponse la plus attendue de ce diagnostic.
-    fuites = vpncheck.verifier(cfg)
-    if fuites:
-        console.print("\nProtection VPN du trafic torrent :")
-        report.print_checks(fuites)
+    charge = admin.doctor_payload(
+        cfg, project_dir, Compose(project_dir, cfg.project_name), hardlink_audit=audit
+    )
+    if not report.print_diagnostic(charge["checks"]):
+        console.print("[red]Des controles bloquants ont echoue.[/red]")
+    report.print_findings(charge["findings"], charge["labels"])
 
-        if any(c for c in fuites if not c.ok and c.name.startswith(vpncheck.PREFIXE_PORT)):
-            console.print(t("[yellow]Port entrant desynchronise : le partage peut etre limite.[/yellow]"))
-            console.print(t("Correctif propose : rejouer la synchronisation du port Gluetun."))
-            if repair and typer.confirm(t("Appliquer ce correctif ?"), default=False):
-                remise = vpncheck.reparer_port(cfg)
-                if remise is not None:
-                    report.print_checks([remise])
+    offertes = diagnostics.repairs(charge["findings"])
+    if not offertes:
+        return
+    if not repair:
+        console.print(
+            t(
+                "[dim]{nombre} correction(s) applicable(s) apres confirmation : "
+                "`plugarr doctor --repair`. Ce diagnostic n'a rien modifie.[/dim]",
+                nombre=len(offertes),
+            )
+        )
+        return
 
-    console.print("\nEtat des conteneurs :")
-    console.print(Compose(project_dir, cfg.project_name).ps())
-
-    console.print("Joignabilite des API :")
-    for sid, inst in orchestrator.iter_selected(cfg):
-        spec = catalog.get(sid)
-        if spec.api_family != "arr":
+    bilan = {True: 0, False: 0, None: 0}
+    for offre in offertes:
+        console.print(f"\n[bold]{escape(offre['title'])}[/bold] - {escape(offre['label'])}")
+        if not typer.confirm(t("Appliquer ce correctif ?"), default=False):
+            console.print(t("  Correction ignoree ; rien n'a ete modifie."))
+            bilan[None] += 1
             continue
-        try:
-            with ArrClient(
-                inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version, name=sid
-            ) as client:
-                console.print(f"  [green]OK[/green] {sid} {client.version}")
-        except Exception as exc:  # noqa: BLE001
-            console.print(f"  [red]ECHEC[/red] {sid} : {exc}")
-
-    console.print(t("\nLiaisons inter-services :"))
-    edges = {edge["id"]: edge for edge in connections.entries(cfg)}
-    for check in diagnostics.connection_checks(cfg):
-        label = "[green]OK[/green]" if check["ok"] else "[red]ECHEC[/red]"
-        console.print(f"  {label} {check['name']} : {check['detail']}")
-        if check["ok"]:
-            continue
-        console.print(f"    {check['next_step']}")
-        edge = edges[check["edge_id"]]
-        if repair and not cfg.services[edge["source"]].adopted and typer.confirm(
-            t("Reappliquer uniquement {liaison} ?", liaison=edge["id"]), default=False
-        ):
-            try:
-                ok = connections.repair(cfg, edge)
-                result = connections.test(cfg, edge) if ok else None
-            except Exception:  # noqa: BLE001 - un correctif echoue ne doit pas interrompre le diagnostic
-                ok, result = False, None
-            if result is not None:
-                console.print(t("    Liaison retestee : {etat}", etat=result["state"]))
-            else:
-                console.print(t("    Reparation echouee ; aucune autre liaison n'a ete rejouee."))
-
-    drift = diagnostics.compose_drift(cfg, project_dir)
-    if drift is not None:
-        console.print(t("\nConfiguration Compose : ") + drift["detail"])
-        if not drift["ok"]:
-            console.print("  " + drift["next_step"])
+        resultat = diagnostics.apply_repair(cfg, offre["id"])
+        report.print_repair(resultat)
+        bilan[resultat["verified"]] += 1
+    console.print(
+        t(
+            "\nReparations : {corrigees} corrigee(s) a la relecture, {echecs} toujours "
+            "en echec, {autres} non appliquee(s).",
+            corrigees=bilan[True],
+            echecs=bilan[False],
+            autres=bilan[None],
+        )
+    )
 
 
 @app.command(help=t("Arrete la stack. Ne touche JAMAIS a DATA_ROOT."))

@@ -53,6 +53,91 @@ def print_checks(checks: list[Check]) -> bool:
     return not blocked
 
 
+def print_diagnostic(checks: list[dict]) -> bool:
+    """Controles bruts de `doctor`. Renvoie False si un controle BLOQUANT a echoue.
+
+    Meme lecture que `print_checks`, plus la marque PORT : un port entrant
+    desynchronise coute du partage, pas de l'exposition, et ne doit pas se lire
+    comme un ECHEC a cote d'un tunnel tombe.
+    """
+    table = Table(title=t("Controles du diagnostic"), show_lines=False)
+    table.add_column(t("Controle"), style="bold")
+    table.add_column("")
+    table.add_column(t("Detail"), overflow="fold")
+    blocked = False
+    for check in checks:
+        if check["ok"]:
+            mark, style = "OK", "green"
+        elif check.get("partage"):
+            mark, style = "PORT", "yellow"
+        elif check.get("blocking"):
+            mark, style, blocked = t("ECHEC"), "red", True
+        else:
+            mark, style = t("ATTENTION"), "yellow"
+        table.add_row(escape(check["name"]), f"[{style}]{mark}[/{style}]", escape(check["detail"]))
+    console.print(table)
+    return not blocked
+
+
+_STYLES_GRAVITE = {"critical": "red", "error": "red", "warning": "yellow", "info": "cyan"}
+
+
+def print_findings(findings: list[dict], labels: dict[str, str]) -> None:
+    """Constats de `doctor` : ce qui est observe, ce que cela coute, les
+    preuves et la correction proposee. Le texte est deja sans secret."""
+    if not findings:
+        console.print(
+            Panel(
+                t("Aucun probleme detecte par les controles ci-dessus."),
+                title=t("Diagnostic de la pile"),
+                border_style="green",
+            )
+        )
+        return
+
+    def rubrique(cle: str) -> str:
+        return "[bold]" + escape(t("{libelle} :", libelle=labels[cle])) + "[/bold] "
+
+    for item in findings:
+        lignes = [
+            rubrique("finding") + escape(item["finding"]),
+            rubrique("consequence") + escape(item["consequence"]),
+        ]
+        if item["evidence"]:
+            lignes.append(rubrique("evidence").rstrip())
+            lignes += [f"  - {escape(preuve)}" for preuve in item["evidence"]]
+        lignes.append(rubrique("fix") + escape(item["fix"]))
+        if item["repair"]:
+            lignes.append(rubrique("repair") + escape(item["repair"]["label"]) + " (--repair)")
+        console.print(
+            Panel(
+                "\n".join(lignes),
+                title=f"{labels[item['severity']]} - {escape(item['title'])}",
+                title_align="left",
+                border_style=_STYLES_GRAVITE[item["severity"]],
+            )
+        )
+    infos = sum(1 for item in findings if item["severity"] == "info")
+    console.print(
+        t(
+            "{problemes} probleme(s), {infos} information(s).",
+            problemes=len(findings) - infos,
+            infos=infos,
+        )
+    )
+
+
+def print_repair(result: dict) -> None:
+    """Verdict d'une reparation, tel que la RELECTURE l'a etabli."""
+    if result["verified"] is True:
+        mark = f"[green]{t('CORRIGE')}[/green]"
+    elif result["verified"] is False:
+        mark = f"[red]{t('TOUJOURS EN ECHEC')}[/red]"
+    else:
+        mark = f"[yellow]{t('NON APPLIQUE')}[/yellow]"
+    console.print(f"  {mark} {escape(result['detail'])}")
+
+
 def print_summary(cfg: StackConfig, adopted_sources: dict[str, Found] | None = None) -> None:
     table = Table(title=t("Recapitulatif - rien n'a encore ete ecrit"))
     for col in ("Service", "Image", "URL", "Config"):

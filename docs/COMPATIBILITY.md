@@ -2,6 +2,42 @@
 
 # Compatibilité
 
+## Rapport de reprise d'une pile existante
+
+`plugarr scan` établit un inventaire en lecture seule. `plugarr adopt --dry-run`
+ajoute les vérifications de version et d'accès des API *arr*, puis montre un plan
+sans écrire `stack.yml`, sans changer les réglages et sans toucher aux conteneurs.
+Le rapport sépare quatre niveaux de preuve :
+
+| Niveau | Ce que le rapport peut affirmer |
+|---|---|
+| **Observé** | Nom, image et tag Docker, état, port publié, montages, mode et réseaux Docker, propriétaire d'un espace réseau partagé. Le tag d'image n'est pas une version applicative vérifiée. |
+| **Vérifié via API** | Réponse de `system/status` des *arr* retenus avec leur clé et version renvoyée ; présence ou absence des entrées de liaison dans l'API source. Cela ne valide pas le fonctionnement de ces liaisons. |
+| **Incompatible** | Conteneur arrêté, port ou clé nécessaire manquant, API *arr* non vérifiable, ou conteneur déjà géré par PlugArr : l'adoption concernée est bloquée. Un échec API ne précise pas à lui seul si la cause est le réseau, la clé ou la version. |
+| **Indéterminé** | Doublons en attente de `--pick`, chemins réellement utilisés dans les applications, liaisons proposées, hardlinks, état du VPN et sortie effective, version/API des clients non *arr*. |
+
+Le plan proposé par défaut contient seulement les liaisons absentes d'après
+une lecture API : *arr ↔ client de téléchargement et Prowlarr → *arr. Une
+entrée présente est conservée, mais sa connexion reste à tester. Si la lecture
+échoue ou si des entrées portent d'autres noms, la liaison demeure indéterminée
+et n'est pas appliquée automatiquement, afin d'éviter un doublon.
+Les réglages d'interface, dossiers racine,
+catégories, RSS et accueil des services exigent une sélection `--only` explicite.
+Avant toute application, la commande affiche les étapes et demande confirmation ;
+`--yes` constitue un accord explicite en mode non interactif. Un lien déjà
+présent dans une pile adoptée est conservé sans réaligner ses identifiants, son
+adresse ou ses priorités. Aucun conteneur adopté n'est redémarré par la reprise.
+`doctor` permet ensuite de tester les liaisons ; une réponse API pendant
+`adopt --dry-run` ne doit pas être interprétée comme ce test.
+
+Sur Unraid, le port WebUI de qBittorrent peut être publié par Gluetun : le
+rapport montre alors le partage d'espace réseau observé, sans conclure que le
+VPN protège le trafic. Sur Synology/UGREEN ou d'autres NAS, les montages et
+identifiants sont propres à l'installation. La présence d'un même chemin hôte
+ne prouve ni le système de fichiers réel ni l'existence de hardlinks ; la
+vérification en lecture seule `doctor --deep-hardlinks` cherche seulement des
+liens existants dans les dossiers attendus et peut rester indéterminée.
+
 Sauf les entrées explicitement marquées **avant-première**, tout ce qui figure
 ici a été **vérifié contre une instance réelle**, pas déduit de la documentation.
 Les tags d'image sont épinglés dans `src/plugarr/catalog.py`.

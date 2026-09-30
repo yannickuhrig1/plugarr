@@ -114,7 +114,7 @@ def config_from_plan(
     return cfg
 
 
-def write_stack(cfg: StackConfig, project_dir: Path) -> Path:
+def write_stack(cfg: StackConfig, project_dir: Path, *, replace: bool = False) -> Path:
     """Ecrit stack.yml SEUL.
 
     Surtout pas de docker-compose.yml : ces conteneurs ne nous appartiennent pas,
@@ -125,18 +125,27 @@ def write_stack(cfg: StackConfig, project_dir: Path) -> Path:
 
     project_dir.mkdir(parents=True, exist_ok=True)
     path = project_dir / "stack.yml"
-    # Une stack adoptee se retrouve comme les autres : c'est ce qui permet de la
-    # reprendre quand l'executable est relance depuis un autre dossier.
-    registre.enregistrer(project_dir, cfg.config_root, cfg.project_name)
-    path.write_text(
+    if path.is_symlink():
+        raise FileExistsError(path)
+    if replace and not path.read_text(encoding="utf-8").startswith(
+        ("# Stack ADOPTEE", "# ADOPTED stack")
+    ):
+        raise FileExistsError(path)
+    content = (
         t(
             "# Stack ADOPTEE : plugarr cable ces services mais ne les gere pas.\n"
             "# Aucun docker-compose.yml n'est genere, `uninstall` ne s'y "
             "applique pas.\n"
         )
-        + yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False),
-        encoding="utf-8",
+        + yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False)
     )
+    # Exclusive creation protects a stack written by someone else between the
+    # CLI preflight and this operation.
+    with path.open("w" if replace else "x", encoding="utf-8") as handle:
+        handle.write(content)
+    # Une stack adoptee se retrouve comme les autres : c'est ce qui permet de la
+    # reprendre quand l'executable est relance depuis un autre dossier.
+    registre.enregistrer(project_dir, cfg.config_root, cfg.project_name)
     try:
         path.chmod(0o600)
     except (OSError, NotImplementedError):
@@ -212,6 +221,158 @@ def compatibility_notes(plan: Plan, data_root: str) -> list[str]:
     if plan.ambiguous:
         notes.append(t("Instances en double : choisissez explicitement le conteneur a cabler."))
     return notes
+
+
+def minimal_steps(steps: list[str]) -> list[str]:
+    """Only inter-service links belong to the initial adoption proposal.
+
+    Root folders, UI settings, RSS, categories and service onboarding require
+    separate intent; they are never inferred from Docker metadata.
+    """
+    return [
+        step for step in steps
+        if "/downloadclient/" in step or "/application/" in step
+    ]
+
+
+def link_inventory(cfg: StackConfig, steps: list[str]) -> list[dict[str, str]]:
+    """GET existing *arr link records; presence is not a connection test."""
+    resources = {"downloadclient": "downloadclient", "application": "applications"}
+    results: list[dict[str, str]] = []
+    for step in steps:
+        source, kind, target = step.split("/")
+        spec, inst = catalog.get(source), cfg.services[source]
+        try:
+            with ArrClient(
+                inst.url(cfg.host), inst.api_key or "", api_version=spec.api_version,
+                name=source,
+            ) as client:
+                records = client.get(resources[kind])
+            if not isinstance(records, list):
+                state = "unknown"
+            elif any(
+                isinstance(record, dict)
+                and record.get("name") == catalog.get(target).display_name
+                for record in records
+            ):
+                state = "present"
+            else:
+                # A differently named existing entry may target the same app.
+                # Do not create a duplicate based on its name alone.
+                state = "unknown" if records else "absent"
+        except Exception:  # noqa: BLE001 - never expose API errors or credentials
+            state = "unknown"
+        results.append({"step": step, "state": state})
+    return results
+
+
+def compatibility_report(
+    found: list[Found], plan: Plan, data_root: str,
+    api_results: list[dict[str, str | bool]] | None = None,
+    steps: list[str] | None = None,
+    link_results: list[dict[str, str]] | None = None,
+) -> dict[str, list[str]]:
+    """Separate Docker facts, API evidence, blockers and untested hypotheses."""
+    result: dict[str, list[str]] = {
+        "observed": [], "verified_api": [], "incompatible": [], "indeterminate": [],
+    }
+    results_by_service = {str(item["service"]): item for item in api_results or []}
+    for entry in found:
+        mounts = ", ".join(
+            f"{target}={source}" for target, source in sorted(entry.mounts.items())
+        ) or t("aucun montage visible")
+        networks = ", ".join(entry.networks) or t("aucun réseau nommé observé")
+        result["observed"].append(
+            t(
+                "{service} ({conteneur}) : image {image} (version applicative non déduite du tag), "
+                "port hôte {port}{adresse}, état {etat}, montages {montages}, "
+                "mode réseau {mode}, réseaux {reseaux}{partage}.",
+                service=entry.service_id, conteneur=entry.container, image=entry.image,
+                port=entry.host_port or "-",
+                adresse=t(" sur {ip}", ip=entry.host_ip) if entry.host_ip else "",
+                etat=t("actif") if entry.running else t("arrêté"),
+                montages=mounts, mode=entry.network_mode or t("inconnu"),
+                reseaux=networks,
+                partage=t(", espace réseau de {conteneur}", conteneur=entry.network_owner)
+                if entry.network_owner else "",
+            )
+        )
+        if entry.managed_by_us:
+            result["incompatible"].append(
+                t("{conteneur} : déjà géré par PlugArr, exclu de l'adoption.",
+                  conteneur=entry.container)
+            )
+        elif not entry.usable:
+            reason = "; ".join(entry.problems) or (
+                t("conteneur arrêté") if not entry.running else t("port ou clé API manquant")
+            )
+            result["incompatible"].append(t(
+                "{conteneur} : adoption bloquée : {raison}.",
+                conteneur=entry.container, raison=reason,
+            ))
+        if entry.host_ip in ("127.0.0.1", "::1"):
+            result["indeterminate"].append(
+                t("{conteneur} : port publié sur la boucle locale ; accès via l'adresse LAN à vérifier.",
+                  conteneur=entry.container)
+            )
+        if entry.service_id in catalog.TORRENT_CLIENTS:
+            result["indeterminate"].append(
+                t("{conteneur} : topologie Docker observée ; tunnel VPN et sortie effective non vérifiés.",
+                  conteneur=entry.container)
+            )
+        if catalog.get(entry.service_id).api_family != "arr":
+            result["indeterminate"].append(
+                t("{conteneur} : version et accès applicatif non vérifiés via API.",
+                  conteneur=entry.container)
+            )
+    for sid, item in results_by_service.items():
+        entry = plan.chosen.get(sid)
+        if entry is None:
+            continue
+        if item["ok"]:
+            result["verified_api"].append(
+                t("{service} ({conteneur}) : API accessible avec la clé lue, version {version}.",
+                  service=sid, conteneur=entry.container, version=item["version"])
+            )
+        else:
+            result["incompatible"].append(
+                t("{service} ({conteneur}) : API ou version non vérifiable ; adoption bloquée.",
+                  service=sid, conteneur=entry.container)
+            )
+    for link in link_results or []:
+        step, state = link["step"], link["state"]
+        if state == "present":
+            result["verified_api"].append(t(
+                "{etape} : entrée présente dans l'API source ; connexion non testée.",
+                etape=step,
+            ))
+        elif state == "absent":
+            result["verified_api"].append(t(
+                "{etape} : aucune entrée de ce nom dans l'API source.", etape=step,
+            ))
+        else:
+            result["indeterminate"].append(t(
+                "{etape} : liaison non identifiable (lecture impossible ou nom personnalisé) ; "
+                "aucune application automatique.",
+                etape=step,
+            ))
+    for sid, entries in plan.ambiguous.items():
+        result["indeterminate"].append(
+            t("{service} : plusieurs instances ({conteneurs}) ; --pick requis.",
+              service=sid, conteneurs=", ".join(e.container for e in entries))
+        )
+    if data_root:
+        result["indeterminate"].extend(compatibility_notes(plan, data_root))
+    if steps:
+        result["indeterminate"].extend(
+            t("Liaison {etape} : proposée, état réel non vérifié avant le câblage.",
+              etape=step)
+            for step in steps
+        )
+    result["indeterminate"].append(
+        t("Montages seuls : chemins actifs, système de fichiers et hardlinks non prouvés.")
+    )
+    return result
 
 
 def api_inventory(cfg: StackConfig) -> list[dict[str, str | bool]]:

@@ -90,6 +90,12 @@ topo.connections[0].testable=true;topo.connections[0].state='verifiee';live.serv
   const actualNode=collect(canvas,e=>e.attrs['data-service']==='s')[0];
   actualNode.listeners.keydown({key:'Enter',preventDefault:()=>{}});
   assert(actualNode.classList.contains('selected'));
+  // Plus de bouton « Tout afficher » : un second choix du meme service revient a toutes les liaisons.
+  actualNode.listeners.keydown({key:'Enter',preventDefault:()=>{}});
+  assert(!actualNode.classList.contains('selected'));
+  assert(elements['map-list-title'].textContent.startsWith('Toutes les liaisons'));
+  actualNode.listeners.keydown({key:'Enter',preventDefault:()=>{}});
+  assert(actualNode.classList.contains('selected'));
   const sameSvg=canvas.children[0];await map.load(async()=>topo,async()=>{});
   assert.equal(canvas.children[0],sameSvg); // polling preserves the SVG and focus
   map.updateStatus({engine_available:false});

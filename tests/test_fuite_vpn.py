@@ -16,11 +16,13 @@ dans le tunnel : le client de telechargement y est et perd son alias DNS.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from plugarr import compose, orchestrator, vpncheck
+from plugarr import compose, diagnostics, orchestrator, vpncheck
 from plugarr.models import Category, VpnConfig
+from plugarr.runner import Check
 
 
 def _cfg(*services, vpn=False):
@@ -714,6 +716,24 @@ def _cfg_adopte(nom="mon-qbittorrent-a-moi"):
     return cfg
 
 
+def test_doctor_ne_synchronise_pas_le_port_d_un_client_adopte(monkeypatch):
+    monkeypatch.setattr(
+        vpncheck, "ports_entrants",
+        lambda _cfg: (_ for _ in ()).throw(AssertionError("adopted port inspected for repair")),
+    )
+    assert vpncheck.reparer_port(_cfg_adopte()) is None
+
+
+def test_doctor_ne_propose_pas_la_synchronisation_d_un_client_adopte():
+    cfg = _cfg_adopte()
+    findings = diagnostics._vpn_findings(
+        cfg, [Check(f"{vpncheck.PREFIXE_PORT} qbittorrent", False, "desynchronise")],
+        Path("."),
+    )
+    assert findings[0]["repair"] is None
+    assert "Client adopté" in findings[0]["fix"]
+
+
 def test_un_client_adopte_est_cherche_sous_son_vrai_nom():
     cfg = _cfg_adopte()
 
@@ -894,21 +914,39 @@ def test_la_remise_ne_bloque_jamais(monkeypatch):
     assert vpncheck.reparer_port(_cfg_pf("qbittorrent")).blocking is False
 
 
-def test_doctor_repose_le_port_au_lieu_de_seulement_le_signaler():
-    """Le test porte sur la STRUCTURE : `doctor` doit appeler la remise, et
-    seulement quand un controle de port a echoue — sans cette condition, chaque
-    diagnostic relirait les ports une seconde fois pour rien."""
-    import ast
-    import inspect
-    import textwrap
+def test_doctor_repose_le_port_au_lieu_de_seulement_le_signaler(monkeypatch):
+    """`doctor --repair` doit pouvoir REPOSER le port, pas seulement le constater,
+    et ne le propose que si un controle de port a echoue : sans cette condition,
+    chaque diagnostic relirait les ports une seconde fois pour rien.
 
-    from plugarr import cli
+    Le test portait sur la structure de `cli.doctor`. La remise vit desormais
+    dans `diagnostics.apply_repair`, partagee : on verifie donc le comportement.
+    """
+    from pathlib import Path
 
-    source = textwrap.dedent(inspect.getsource(cli.doctor))
-    arbre = ast.parse(source)
-    appelle = any(
-        isinstance(n, ast.Attribute) and n.attr == "reparer_port" for n in ast.walk(arbre)
+    from plugarr import diagnostics
+    from plugarr.runner import Check
+
+    cfg = _cfg_pf("qbittorrent")
+
+    def offres(vpn):
+        constats = diagnostics.build_findings(
+            cfg, Path("."), preflight=[], services=[], links=[], drift=None, vpn=vpn
+        )
+        return [o["id"] for o in diagnostics.repairs(constats)]
+
+    decale = Check(f"{vpncheck.PREFIXE_PORT} qbittorrent", False, "desynchronise", blocking=False)
+    aligne = Check(f"{vpncheck.PREFIXE_PORT} qbittorrent", True, "ecoute sur 48406")
+    sans_port = Check(vpncheck.PREFIXE_PORT, False, "aucun port obtenu", blocking=False)
+    assert offres([decale]) == [diagnostics.PORT_SYNC]
+    assert offres([aligne]) == []
+    assert offres([sans_port]) == [], "rien a rejouer quand le VPN n'a ouvert aucun port"
+
+    appels = []
+    monkeypatch.setattr(
+        vpncheck,
+        "reparer_port",
+        lambda c: appels.append(c) or Check("Port entrant (remise en place)", True, "ok"),
     )
-
-    assert appelle, "doctor doit reposer le port, pas seulement le constater"
-    assert "PREFIXE_PORT" in source, "et seulement si un controle de port a echoue"
+    assert diagnostics.apply_repair(cfg, diagnostics.PORT_SYNC)["verified"] is True
+    assert appels == [cfg]

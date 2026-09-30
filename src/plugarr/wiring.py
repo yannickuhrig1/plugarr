@@ -383,7 +383,8 @@ class Wirer:
 
         from .runner import Compose
 
-        if dl_id != "qbittorrent" or self.cfg.project_dir is None:
+        if (dl_id != "qbittorrent" or self.cfg.project_dir is None
+                or self.cfg.services[dl_id].adopted):
             return False
         runner = Compose(Path(str(self.cfg.project_dir)), self.cfg.project_name)
         ok, _ = runner.control("restart", dl_id)
@@ -479,7 +480,7 @@ class Wirer:
         )
 
         etat = t("cree") if created else t("deja present")
-        if not created:
+        if not created and not dl.adopted:
             # Une entree existante garde les identifiants d'alors. Si le mot de
             # passe du client a change depuis — une reinstallation suffit — elle
             # reste en place et son test echoue, sans que rien ne l'explique. On
@@ -502,7 +503,8 @@ class Wirer:
             if modifies:
                 etat = t("identifiants mis a jour ({champs})", champs=", ".join(modifies))
 
-        etat += self._aligner_priorites(client, dl_id)
+        if not dl.adopted:
+            etat += self._aligner_priorites(client, dl_id)
         result = StepResult(
             f"{arr_id}: client de telechargement {dl_spec.display_name}",
             ok=client.find_by_name("downloadclient", dl_spec.display_name) is not None,
@@ -515,7 +517,7 @@ class Wirer:
             "downloadclient",
             dl_spec.display_name,
             result,
-            on_auth_failure=lambda: self._unban_download_client(dl_id),
+            on_auth_failure=None if dl.adopted else lambda: self._unban_download_client(dl_id),
         )
 
     def _aligner_priorites(self, client, dl_id: str) -> str:
@@ -686,7 +688,7 @@ class Wirer:
             else []
         )
         etat = t("cree") if created else t("deja present")
-        if not created:
+        if not created and not self.cfg.services["prowlarr"].adopted:
             # Prowlarr garde la cle API du *arr DANS son entree Application.
             # `ensure_resource` ne touche jamais a l'existant : apres une
             # rotation de cle, Prowlarr continuait donc a presenter l'ancienne
@@ -710,6 +712,12 @@ class Wirer:
         profile = profile_for(dl_id)
         dl_spec = catalog.get(dl_id)
         dl = self.cfg.services[dl_id]
+        if dl.adopted and not dl.password:
+            return StepResult(
+                f"prowlarr/downloadclient/{dl_id}", ok=False,
+                detail=t("identifiants inconnus"),
+                warnings=[t("Passez --dl-user et --dl-pass pour ce client adopte.")],
+            )
         hote, port = self.adresse_client(dl_id)
 
         obj, created, skipped = prowlarr.ensure_resource(
@@ -733,7 +741,7 @@ class Wirer:
         warnings = [f"champs ignores: {', '.join(skipped)}"] if skipped else []
 
         etat = t("cree") if created else t("deja present")
-        if not created:
+        if not created and not dl.adopted:
             # Meme raison que pour les *arr : une entree existante garde les
             # identifiants d'alors, et son test echoue apres un changement de mot
             # de passe. Prowlarr passe par une etape distincte, il avait donc
@@ -750,7 +758,8 @@ class Wirer:
             if modifies:
                 etat = t("identifiants mis a jour ({champs})", champs=", ".join(modifies))
 
-        etat += self._aligner_priorites(prowlarr, dl_id)
+        if not dl.adopted:
+            etat += self._aligner_priorites(prowlarr, dl_id)
         result = StepResult(
             f"prowlarr: client de telechargement {dl_spec.display_name}",
             ok=prowlarr.find_by_name("downloadclient", dl_spec.display_name) is not None,
@@ -763,7 +772,7 @@ class Wirer:
             "downloadclient",
             dl_spec.display_name,
             result,
-            on_auth_failure=lambda: self._unban_download_client(dl_id),
+            on_auth_failure=None if dl.adopted else lambda: self._unban_download_client(dl_id),
         )
 
     def step_jellyfin_notification(self, arr_id: str) -> StepResult:

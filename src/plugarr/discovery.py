@@ -56,6 +56,12 @@ class Found:
     url_base: str = ""
     #: Bind mounts relevant to media paths; destination -> host source.
     data_mounts: dict[str, str] = field(default_factory=dict)
+    #: All Docker mounts, including named volumes; destination -> source.
+    mounts: dict[str, str] = field(default_factory=dict)
+    network_mode: str = ""
+    networks: tuple[str, ...] = ()
+    host_ip: str | None = None
+    running: bool = True
     #: Docker network namespace owner, when NetworkMode is container:<id/name>.
     network_owner: str | None = None
     #: True quand le conteneur porte le marqueur pose par plugarr.
@@ -65,7 +71,7 @@ class Found:
     @property
     def usable(self) -> bool:
         """Utilisable pour le cablage : il faut un port ET, pour les *arr, une cle."""
-        if self.host_port is None:
+        if not self.running or self.host_port is None:
             return False
         if catalog.get(self.service_id).api_family == "arr":
             return bool(self.api_key)
@@ -107,6 +113,14 @@ def _published_port(container: dict, internal_port: int) -> int | None:
                 return int(bindings[0].get("HostPort"))
             except (TypeError, ValueError):
                 continue
+    return None
+
+
+def _published_ip(container: dict, internal_port: int) -> str | None:
+    ports = (container.get("NetworkSettings") or {}).get("Ports") or {}
+    for spec, bindings in ports.items():
+        if spec.startswith(f"{internal_port}/") and bindings:
+            return str(bindings[0].get("HostIp") or "") or None
     return None
 
 
@@ -162,6 +176,14 @@ def _data_mounts(container: dict) -> dict[str, str]:
     return result
 
 
+def _mounts(container: dict) -> dict[str, str]:
+    return {
+        str(mount["Destination"]): str(mount["Source"])
+        for mount in container.get("Mounts") or []
+        if mount.get("Destination") and mount.get("Source")
+    }
+
+
 def _read_url_base(config_xml: Path) -> str:
     """Un `UrlBase` non vide change toutes les URL du service : sans lui, le
     cablage viserait la racine et echouerait."""
@@ -208,6 +230,7 @@ def scan(*, include_stopped: bool = False) -> list[Found]:
         owner = _network_owner(container, containers)
         if host_port is None and owner is not None:
             host_port = _published_port(owner, internal_port)
+        port_container = owner if owner is not None and _published_port(container, internal_port) is None else container
 
         entry = Found(
             service_id=service_id,
@@ -216,6 +239,11 @@ def scan(*, include_stopped: bool = False) -> list[Found]:
             host_port=host_port,
             config_dir=config_dir,
             data_mounts=_data_mounts(container),
+            mounts=_mounts(container),
+            network_mode=str((container.get("HostConfig") or {}).get("NetworkMode") or ""),
+            networks=tuple(sorted(((container.get("NetworkSettings") or {}).get("Networks") or {}).keys())),
+            host_ip=_published_ip(port_container, internal_port),
+            running=bool((container.get("State") or {}).get("Running", True)),
             network_owner=(str(owner.get("Name") or "").lstrip("/") or None)
             if owner is not None else None,
             managed_by_us=_pose_par_nous(container),

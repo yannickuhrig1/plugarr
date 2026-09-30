@@ -154,6 +154,15 @@ def freeze_environment() -> None:
     # Le depot documente une installation Linux, c'est donc celle-la qu'on montre.
     screens.default_profile = lambda: PlatformProfile.GENERIC_LINUX  # type: ignore[assignment]
 
+    # Les chemins proposes suivent aussi la machine : sans droit sur `/srv`, le
+    # profil Linux propose le dossier personnel et l'explique dans une note. La
+    # capture montrerait alors `/home/runner/...` sur la CI et `/srv/data` chez
+    # un administrateur. Le depot documente le cas nominal, `/srv/data`.
+    from plugarr.layout import PROFILE_DEFAULTS
+
+    orchestrator.profile_defaults = lambda profile: PROFILE_DEFAULTS[profile]  # type: ignore[assignment]
+    screens.profile_defaults = lambda profile: PROFILE_DEFAULTS[profile]  # type: ignore[assignment]
+
     # La meme phrase que produit `resolve_ids` en vrai sur un Linux : une
     # capture qui montre autre chose que le produit ment sur le produit.
     fixed_ids = (1000, 1000, t("detecte ({origine})", origine=t("utilisateur courant")), True)

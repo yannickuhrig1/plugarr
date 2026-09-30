@@ -154,13 +154,13 @@ async def test_switching_platform_rewrites_the_default_paths(app):
     Proposer des chemins Linux a un utilisateur Windows le menait droit dans le
     piege : Docker Desktop les cree alors a la racine du disque courant.
     """
-    from plugarr.layout import PROFILE_DEFAULTS, default_profile
+    from plugarr.layout import default_profile, profile_defaults
 
     async with app.run_test() as pilot:
         await pilot.app.push_screen(PathsScreen())
         await pilot.pause()
         screen = pilot.app.screen
-        attendu = PROFILE_DEFAULTS[default_profile()].data_root
+        attendu = profile_defaults(default_profile()).data_root
         assert screen.query_one("#data-root", Input).value == attendu
 
         screen.query_one("#plat-synology", RadioButton).value = True

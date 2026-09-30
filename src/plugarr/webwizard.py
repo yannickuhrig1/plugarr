@@ -65,6 +65,7 @@ from .layout import (
     default_profile,
     hardlink_supported,
     path_warning,
+    profile_defaults,
     resolve_ids,
 )
 from .models import INTERFACES_QBITTORRENT, VPN_PROVIDERS, PlatformProfile, VpnConfig
@@ -250,7 +251,7 @@ class WizardState:
     def bootstrap(self):
         cfg = self.previous
         platform = cfg.platform if cfg else default_profile()
-        defaults = PROFILE_DEFAULTS[platform]
+        defaults = profile_defaults(platform)
         icons = json.loads((ASSETS.parent / "data/connection_icons.json").read_text("utf-8"))
         vpn = cfg.vpn.model_dump() if cfg else VpnConfig().model_dump()
         for key in ("wireguard_private_key", "openvpn_password", "openvpn_user"):
@@ -261,18 +262,19 @@ class WizardState:
         providers = [p for p in VPN_PROVIDERS if p not in VPN_ALIASES]
         providers.sort(key=lambda p: (not vpnservers.port_forward(p), p.casefold()))
         profiles = {}
-        for profile, profile_defaults in PROFILE_DEFAULTS.items():
+        for profile in PROFILE_DEFAULTS:
+            propres = profile_defaults(profile)
             uid, gid, source, certain = resolve_ids(profile)
             profiles[profile.value] = {
-                "config_root": profile_defaults.config_root,
-                "data_root": profile_defaults.data_root,
+                "config_root": propres.config_root,
+                "data_root": propres.data_root,
                 "puid": uid,
                 "pgid": gid,
                 "ids_source": i18n.t(source),
                 "ids_certain": certain,
                 # Ce que le profil ne peut pas deviner : une contrainte du
                 # systeme, ou le fait qu'il n'ait pas encore ete eprouve.
-                "note": i18n.t(profile_defaults.note) if profile_defaults.note else "",
+                "note": i18n.t(propres.note) if propres.note else "",
             }
         backup = {"available": False, "source": "", "destination": ""}
         if cfg is not None and self.previous_project_dir is not None:
@@ -406,7 +408,7 @@ class WizardState:
         platform = default_profile()
         vpn = VpnConfig().model_dump()
         vpn["provider"] = VPN_ALIASES.get(vpn.get("provider"), vpn.get("provider")) or DEFAULT_VPN
-        return self._form_for(None, platform, PROFILE_DEFAULTS[platform], vpn)
+        return self._form_for(None, platform, profile_defaults(platform), vpn)
 
     def _remote_form(self, cfg):
         platform = cfg.platform
@@ -414,7 +416,7 @@ class WizardState:
         for key in ("wireguard_private_key", "openvpn_password", "openvpn_user"):
             vpn[key] = ""  # Les champs vides conservent les identifiants existants.
         vpn["provider"] = VPN_ALIASES.get(vpn.get("provider"), vpn.get("provider"))
-        return self._form_for(cfg, platform, PROFILE_DEFAULTS[platform], vpn)
+        return self._form_for(cfg, platform, profile_defaults(platform), vpn)
 
     def _remote_connection_for(self, form: WizardInput):
         if form.install_target == "local":

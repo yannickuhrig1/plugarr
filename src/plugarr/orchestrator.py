@@ -21,9 +21,9 @@ from .clients.arr import ArrClient
 from .i18n import t
 from .layout import (
     CONTAINER_PATHS,
-    PROFILE_DEFAULTS,
     create_tree,
     ouvrir_donnees,
+    profile_defaults,
     resolve_ids,
 )
 from .models import PlatformProfile, ServiceInstance, StackConfig
@@ -104,7 +104,7 @@ def build_config(
     Les prerequis manquants sont ajoutes automatiquement : cocher Flood tire
     Transmission.
     """
-    defaults = PROFILE_DEFAULTS[platform]
+    defaults = profile_defaults(platform)
     uid, gid, source, certain = resolve_ids(platform)
 
     cfg = StackConfig(

@@ -12,7 +12,7 @@ import re
 import stat
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import catalog
@@ -226,6 +226,49 @@ PROFILE_DEFAULTS: dict[PlatformProfile, ProfileDefaults] = {
 }
 
 
+def _peut_creer_sous(chemin: str) -> bool:
+    """Vrai si l'utilisateur courant peut creer `chemin`, ou l'ecrire s'il existe.
+
+    On remonte au premier ancetre EXISTANT et on y teste le droit d'ecriture et
+    de traversee. `os.access` peut se tromper sur certains montages : c'est
+    seulement un aiguillage vers un autre defaut, le preflight fait ensuite
+    l'essai reel et reste seul juge.
+    """
+    ancetre = Path(chemin)
+    while not ancetre.exists() and ancetre != ancetre.parent:
+        ancetre = ancetre.parent
+    return ancetre.is_dir() and os.access(ancetre, os.W_OK | os.X_OK)
+
+
+def profile_defaults(profile: PlatformProfile) -> ProfileDefaults:
+    """Defauts d'un profil, adaptes a ce que CETTE machine autorise.
+
+    `PROFILE_DEFAULTS` reste la table statique. Seul `generic-linux` bouge :
+    `/srv` et `/opt` appartiennent a root, donc un compte ordinaire y echouait des
+    le preflight (« impossible d'ecrire dans /srv »), et l'utilisateur devait
+    deviner quels chemins saisir. Signale apres un essai sur un Linux natif, sans
+    root : il a fallu tout installer sous un dossier de test, a la main.
+
+    Le repli est le meme que celui de macOS, sous le dossier personnel. Sous
+    root ou `sudo`, `/srv` est inscriptible : le defaut ne change pas.
+    """
+    defauts = PROFILE_DEFAULTS[profile]
+    if profile is not PlatformProfile.GENERIC_LINUX or sys.platform == "win32":
+        return defauts
+    if _peut_creer_sous(defauts.data_root) and _peut_creer_sous(defauts.config_root):
+        return defauts
+    return replace(
+        defauts,
+        config_root=_sous_le_dossier_personnel("plugarr", "config"),
+        data_root=_sous_le_dossier_personnel("plugarr", "data"),
+        note=(
+            "/srv et /opt/plugarr ne sont pas inscriptibles par votre compte : les "
+            "dossiers proposes sont sous votre dossier personnel. Lancez avec sudo pour "
+            "retrouver /srv/data et /opt/plugarr/config."
+        ),
+    )
+
+
 def detect_ids() -> tuple[int, int] | None:
     """UID/GID de l'utilisateur courant, ou None si la plateforme ne les expose pas.
 
@@ -270,7 +313,7 @@ def resolve_ids(profile: PlatformProfile) -> tuple[int, int, str, bool]:
     Renvoie (uid, gid, explication, sur). `sur` a False signifie "l'utilisateur doit
     regarder cette valeur avant de continuer" : l'explication dit pourquoi.
     """
-    defaults = PROFILE_DEFAULTS[profile]
+    defaults = profile_defaults(profile)
     if not defaults.prefer_detection:
         return defaults.puid, defaults.pgid, defaults.source, True
 

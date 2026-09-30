@@ -13,7 +13,13 @@ import sys
 
 import pytest
 
-from plugarr.layout import PROFILE_DEFAULTS, default_profile, path_warning, resolve_ids
+from plugarr.layout import (
+    PROFILE_DEFAULTS,
+    default_profile,
+    path_warning,
+    profile_defaults,
+    resolve_ids,
+)
 from plugarr.models import PlatformProfile
 
 
@@ -98,7 +104,7 @@ async def test_l_assistant_preselectionne_le_profil_de_la_machine(tmp_path):
         assert str(coche.label) == default_profile().value
         assert (
             screen.query_one("#data-root", Input).value
-            == PROFILE_DEFAULTS[default_profile()].data_root
+            == profile_defaults(default_profile()).data_root
         )
 
 

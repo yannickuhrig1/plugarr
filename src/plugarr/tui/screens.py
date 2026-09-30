@@ -29,10 +29,10 @@ from ..clients import recyclarr as recyclarr_cfg
 from ..compose import GLUETUN_TAG
 from ..i18n import t
 from ..layout import (
-    PROFILE_DEFAULTS,
     default_profile,
     hardlink_supported,
     path_warning,
+    profile_defaults,
     resolve_ids,
 )
 from ..models import VPN_PROVIDERS, Category, PlatformProfile, VpnConfig
@@ -682,7 +682,7 @@ class PathsScreen(WizardScreen):
         # utilisateur Windows le menait droit dans le piege : il gardait des
         # chemins Linux, crees ensuite a la racine du disque courant.
         courant = self._profil_de_depart()
-        defaults = PROFILE_DEFAULTS[courant]
+        defaults = profile_defaults(courant)
         depart = self.depart
         # `VerticalScroll` et non `Vertical` : l'ecran a grossi (identifiant,
         # adresse de la machine) et depassait la fenetre. Sans defilement, les
@@ -821,7 +821,7 @@ class PathsScreen(WizardScreen):
     @on(RadioSet.Changed, "#platform")
     def _on_platform(self, event: RadioSet.Changed) -> None:
         profile = PlatformProfile(str(event.pressed.label))
-        defaults = PROFILE_DEFAULTS[profile]
+        defaults = profile_defaults(profile)
         self.query_one("#config-root", Input).value = defaults.config_root
         self.query_one("#data-root", Input).value = defaults.data_root
         self._update_note(profile)
@@ -840,7 +840,7 @@ class PathsScreen(WizardScreen):
         # Ce que le profil ne peut pas deviner passe AVANT les identifiants :
         # qu'un profil soit experimental, ou qu'un systeme impose une
         # contrainte, se decide avant de regarder un UID.
-        propre = PROFILE_DEFAULTS[profile].note
+        propre = profile_defaults(profile).note
         entete = f"[yellow]{t(propre)}[/yellow]\n{entete}" if propre else entete
         if certain:
             note.update(f"{entete} [dim]- {t(source)}[/dim]\n{t(self.IDS_EXPLICATION)}")

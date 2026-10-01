@@ -46,16 +46,16 @@ VEILLE_IMAGE = (
 #: greffon compose, que la console appelle. Tag DISTINCT, pour qu'elle ne soit
 #: jamais prise pour celle de la veille, qui n'a aucun client Docker.
 CONSOLE_IMAGE = (
-    "ghcr.io/yannickuhrig1/plugarr:0.10.0-stack7-preview.5-admin"
-    "@sha256:7a442274053d4a9b190f14aa8495f173a998b57ba6e73f8950568476dcbd86a5"
+    "ghcr.io/yannickuhrig1/plugarr:0.12.2-admin"
+    "@sha256:00b13a392acac0bfdd3f9f155eeace85473c95588dafbdb52c576e63d3fce787"
 )
 
 #: L'image ci-dessus connait-elle le tunnel Cloudflare et les sous-domaines
 #: personnalises ? Sur un serveur SSH, c'est ELLE qui lit stack.yml et active
 #: l'acces distant : une image qui ne les connait pas refuserait toute la pile.
-#: La meme image sert a la console en conteneur. A passer a True en epinglant
-#: `plugarr:0.12.0-admin` ou plus recente (publiee par le tag v0.12.0).
-CONSOLE_IMAGE_TUNNEL_CLOUDFLARE = False
+#: La meme image sert a la console en conteneur. Vrai depuis que l'image
+#: epinglee est `plugarr:0.12.0-admin` ou plus recente (publiee par le tag v0.12.0).
+CONSOLE_IMAGE_TUNNEL_CLOUDFLARE = True
 
 #: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et
 #: REFUSE tout POST, donc creer, demarrer ou arreter quoi que ce soit. Epingle

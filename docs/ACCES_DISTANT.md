@@ -109,9 +109,11 @@ Désactiver arrête le connecteur ; le tunnel et ses routes restent dans le comp
 Cloudflare.
 
 Sur un serveur SSH, l'activation tourne dans l'image d'administration PlugArr
-épinglée. Tant qu'elle ne connaît ni le tunnel ni les sous-domaines personnalisés
-(`catalog.CONSOLE_IMAGE_TUNNEL_CLOUDFLARE`), l'assistant refuse ces choix pour un
-serveur SSH plutôt que de laisser une image plus ancienne refuser toute la pile.
+épinglée (`catalog.CONSOLE_IMAGE`), tout comme la console en conteneur. Cette image
+est en 0.12.2 et connaît le tunnel et les sous-domaines personnalisés
+(`catalog.CONSOLE_IMAGE_TUNNEL_CLOUDFLARE`). Si on épingle un jour une image plus
+ancienne, remettre ce drapeau à `False` : l'assistant refusera alors ces choix
+plutôt que de laisser l'image refuser toute la pile.
 
 ## Sécurité et limites de cette livraison
 

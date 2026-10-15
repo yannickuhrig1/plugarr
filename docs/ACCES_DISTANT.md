@@ -74,8 +74,7 @@ rebinding). Les adresses marchent alors en 4G avec Tailscale, mais pas sur le
 Wi-Fi de la maison : autoriser le domaine dans les réglages DNS de la box.
 
 **État :** pas encore disponible sur un serveur SSH ni avec la console en conteneur
-(image d'administration à republier), et aucun essai réel n'a encore été fait. La
-passerelle attend la publication de l'image `plugarr-caddy`.
+(image d'administration à republier), et aucun essai réel n'a encore été fait.
 
 ## Domaine HTTPS
 

@@ -1,8 +1,8 @@
 # Adresses HTTPS privées par DNS-01
 
 Plan du 15 octobre 2026. Les étapes 0 à 4 sont en place, ainsi que l'indicateur
-de l'étape 5. Restent la publication des images (`plugarr-caddy`, puis image
-d'administration) et les essais réels.
+de l'étape 5, et l'image `plugarr-caddy` est publiée et épinglée. Restent : rendre
+son paquet public, republier l'image d'administration, et les essais réels.
 Idée reprise de [Caretakarr](https://github.com/caretakarr/caretakarr) (MIT, Go) :
 on reprend des idées, pas du code.
 
@@ -47,12 +47,19 @@ contient pas le module `caddy-dns/cloudflare`. PlugArr construit donc la sienne.
     avec un jeton de bonne forme ;
   - il est refusé sans jeton, ce qui prouve que le module est bien chargé.
 
-**Reste à faire :**
+**Publication du 15 octobre 2026 :**
 
-1. Pousser, puis lancer le workflow avec `publier` coché.
-2. Rendre public le paquet `plugarr-caddy` dans ses réglages GitHub : un nouveau
-   paquet ghcr naît privé, et personne ne pourrait le tirer.
-3. Épingler la référence donnée par le job dans `remote_access.py` (étape 2).
+- `ghcr.io/yannickuhrig1/plugarr-caddy:2.11.4-cloudflare-0.2.4@sha256:bced94f4…f70f0a`,
+  épinglée dans `remote_access.CADDY_DNS01_IMAGE`. Les plateformes amd64 et
+  arm64 sont présentes dans l'index, et l'essai amd64 de l'image publiée a
+  réussi.
+- L'essai arm64 n'a pas tourné : le stockage d'images classique de Docker
+  refuse de tirer le même condensat pour une seconde architecture (« cannot
+  overwrite digest »). Le workflow retire désormais l'image locale entre les
+  deux plateformes. L'image arm64 vient de la même recette que celle essayée
+  en local (émulée) le même jour.
+- Reste à faire : rendre public le paquet `plugarr-caddy` dans ses réglages
+  GitHub. Un nouveau paquet ghcr naît privé, et personne ne pourrait le tirer.
 
 **Écarté :**
 
@@ -190,10 +197,9 @@ l'activation (étape 3) :**
 - `_published()` donne les applications publiées sur le domaine.
   `_check_publishable()` s'en sert : il passait par `external_urls()`, qui ne
   connaît pas encore DNS-01, et n'aurait donc pas refusé un service adopté.
-- `CADDY_DNS01_IMAGE` est épinglée par tag seulement, en attendant la
-  publication. Un test vérifie que ce tag correspond aux versions de la recette.
-  Un autre, marqué `xfail` strict, échouera dès que le condensat sera ajouté,
-  pour rappeler de retirer le marqueur.
+- `CADDY_DNS01_IMAGE` est épinglée par tag et condensat depuis la publication.
+  Un test vérifie que le tag correspond aux versions de la recette, un autre que
+  le condensat est présent.
 
 ## Étape 3 : activation et diagnostic
 

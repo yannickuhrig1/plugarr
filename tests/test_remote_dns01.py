@@ -283,10 +283,9 @@ def test_l_image_epinglee_est_celle_de_la_recette():
     assert reference == f"ghcr.io/yannickuhrig1/plugarr-caddy:{caddy}-cloudflare-{module}"
 
 
-@pytest.mark.xfail(strict=True, reason="image plugarr-caddy pas encore publiee : epingler son condensat")
 def test_l_image_est_epinglee_par_condensat():
-    """Strict : des que le condensat est ajoute, ce test passe et le marqueur
-    doit partir. Il rappelle, d'ici la, que l'image n'est pas figee."""
+    """Comme le reste du catalogue : le tag reste lisible, le condensat fige le
+    contenu."""
     assert re.search(r"@sha256:[0-9a-f]{64}$", remote_access.CADDY_DNS01_IMAGE)
 
 

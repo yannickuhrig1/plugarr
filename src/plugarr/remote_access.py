@@ -24,8 +24,12 @@ CADDY_IMAGE = "caddy:2.11.4-alpine"
 #: Caddy avec le module caddy-dns/cloudflare, construit par PlugArr
 #: (packaging/caddy, .github/workflows/caddy.yml) : l'image officielle ne sait
 #: pas obtenir de certificat par DNS-01. Le tag suit les versions de la
-#: recette ; le condensat s'ajoute a la publication (docs/PLAN_HTTPS_DNS01.md).
-CADDY_DNS01_IMAGE = "ghcr.io/yannickuhrig1/plugarr-caddy:2.11.4-cloudflare-0.2.4"
+#: recette. Epingle tag ET condensat de l'index multi architecture (amd64,
+#: arm64), publie par le workflow le 2026-10-15.
+CADDY_DNS01_IMAGE = (
+    "ghcr.io/yannickuhrig1/plugarr-caddy:2.11.4-cloudflare-0.2.4"
+    "@sha256:bced94f41a72d7af0a89752016303eac4150f913936c4f7772846c0099f70f0a"
+)
 # Official stable channel; the actual image ID is recorded by Docker.
 TAILSCALE_IMAGE = "tailscale/tailscale:stable"
 #: Connecteur du tunnel Cloudflare. Epingle tag ET digest, comme le catalogue :

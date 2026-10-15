@@ -1,8 +1,8 @@
 # Adresses HTTPS privées par DNS-01
 
-Plan du 15 octobre 2026. Les étapes 0 (recette et CI, image pas encore publiée)
-et 1 (modèle), ainsi que l'indicateur de l'étape 5, sont en place. Le reste n'est
-pas implémenté, et aucun essai réel n'a été fait.
+Plan du 15 octobre 2026. Les étapes 0 (recette et CI, image pas encore publiée),
+1 (modèle) et 2 (Caddyfile et compose), ainsi que l'indicateur de l'étape 5, sont
+en place. Le reste n'est pas implémenté, et aucun essai réel n'a été fait.
 Idée reprise de [Caretakarr](https://github.com/caretakarr/caretakarr) (MIT, Go) :
 on reprend des idées, pas du code.
 
@@ -175,6 +175,25 @@ Côté compose :
   faire vérifier l'étiquette `plugarr.remote` sur chaque service.
 - `caddy.env` est supprimé dès qu'on quitte ce mode, comme `tunnel.env`
   aujourd'hui.
+
+**Fait, sauf l'écriture et la suppression de `caddy.env`, qui relèvent de
+l'activation (étape 3) :**
+
+- `caddyfile_dns01()` produit le Caddyfile ci-dessus. Un test vérifie qu'il est
+  identique, aux commentaires près, à `packaging/caddy/essai.Caddyfile`, que la
+  CI de l'image fait valider par Caddy. Changer le rendu oblige donc à changer
+  l'essai, ce qui relance cette validation.
+- `gateway_compose(cfg, tailscale_natif=...)` ajoute le service `caddy` à côté
+  de `gateway` (Tailscale en conteneur), ou le laisse seul si Tailscale est
+  installé sur la machine. Sans domaine, le compose Tailscale ne change pas.
+- `_check_owned()` exige l'étiquette `plugarr.remote` sur chaque service.
+- `_published()` donne les applications publiées sur le domaine.
+  `_check_publishable()` s'en sert : il passait par `external_urls()`, qui ne
+  connaît pas encore DNS-01, et n'aurait donc pas refusé un service adopté.
+- `CADDY_DNS01_IMAGE` est épinglée par tag seulement, en attendant la
+  publication. Un test vérifie que ce tag correspond aux versions de la recette.
+  Un autre, marqué `xfail` strict, échouera dès que le condensat sera ajouté,
+  pour rappeler de retirer le marqueur.
 
 ## Étape 3 : activation et diagnostic
 

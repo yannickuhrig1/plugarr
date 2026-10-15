@@ -1,7 +1,9 @@
 # Essai de la recette, lance par .github/workflows/caddy.yml : Caddy doit
-# accepter ce que la passerelle DNS-01 generera (docs/PLAN_HTTPS_DNS01.md,
-# etape 2). `caddy validate` charge et prepare la configuration sans la
-# demarrer : ni Cloudflare ni Let's Encrypt ne sont contactes.
+# accepter ce que la passerelle DNS-01 genere. C'est le rendu de
+# remote_access.caddyfile_dns01 pour la configuration de reference de
+# tests/test_remote_dns01.py, qui verifie que les deux concordent (aux
+# commentaires pres). `caddy validate` charge et prepare la configuration sans
+# la demarrer : ni Cloudflare ni Let's Encrypt ne sont contactes.
 {
 	admin off
 	auto_https disable_redirects

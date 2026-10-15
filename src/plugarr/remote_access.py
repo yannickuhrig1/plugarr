@@ -20,6 +20,11 @@ from .remote_models import identifiant_tunnel
 
 SUPPORTED = ("sonarr", "radarr", "qbittorrent")
 CADDY_IMAGE = "caddy:2.11.4-alpine"
+#: Caddy avec le module caddy-dns/cloudflare, construit par PlugArr
+#: (packaging/caddy, .github/workflows/caddy.yml) : l'image officielle ne sait
+#: pas obtenir de certificat par DNS-01. Le tag suit les versions de la
+#: recette ; le condensat s'ajoute a la publication (docs/PLAN_HTTPS_DNS01.md).
+CADDY_DNS01_IMAGE = "ghcr.io/yannickuhrig1/plugarr-caddy:2.11.4-cloudflare-0.2.4"
 # Official stable channel; the actual image ID is recorded by Docker.
 TAILSCALE_IMAGE = "tailscale/tailscale:stable"
 #: Connecteur du tunnel Cloudflare. Epingle tag ET digest, comme le catalogue :
@@ -108,10 +113,17 @@ def _private_write(path, text):
 
 
 def _check_owned(directory):
+    """Chaque service du compose doit porter l'etiquette de PlugArr : en mode
+    DNS-01, Caddy tourne a cote de Tailscale, et le compose peut ne contenir
+    que lui quand Tailscale est installe sur la machine."""
     path = directory / "compose.yml"
     if path.exists():
         config = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(config, dict) or config.get("services", {}).get("gateway", {}).get("labels", {}).get("plugarr.remote") != "true":
+        services = config.get("services") if isinstance(config, dict) else None
+        if not isinstance(services, dict) or not services or any(
+            not isinstance(service, dict) or (service.get("labels") or {}).get("plugarr.remote") != "true"
+            for service in services.values()
+        ):
             raise ValueError("Ce dossier contient une passerelle non gérée par PlugArr. Aucun remplacement effectué.")
 
 
@@ -126,18 +138,37 @@ def deactivate(cfg, project_dir, *, demo=False):
     return result
 
 
-def gateway_compose(cfg):
-    """Only the gateway: no application recreation or mount of the project folder."""
+def gateway_compose(cfg, *, tailscale_natif=False):
+    """Only the gateway: no application recreation or mount of the project folder.
+
+    En mode DNS-01, Caddy s'ajoute a Tailscale ; si Tailscale est deja installe
+    sur la machine (`tailscale_natif`), Caddy est seul.
+    """
     root = str(Path(cfg.config_root) / "plugarr-remote").replace("\\", "/")
     base = {"restart": "unless-stopped", "labels": {"plugarr.remote": "true"}}
-    if cfg.remote_access.mode == "tailscale":
-        base.update(image=TAILSCALE_IMAGE, network_mode="host", cap_add=["NET_ADMIN", "NET_RAW"],
-                    devices=["/dev/net/tun:/dev/net/tun"],
-                    volumes=[f"{root}/tailscale:/var/lib/tailscale"],
-                    entrypoint=["/usr/local/bin/tailscaled"],
-                    command=["--state=/var/lib/tailscale/tailscaled.state", "--socket=/tmp/tailscaled.sock"])
-        return {"services": {"gateway": base}}
     applications = {"applications": {"external": True, "name": cfg.project_name + "_plugarr"}}
+    if cfg.remote_access.mode == "tailscale":
+        services = {}
+        if not tailscale_natif:
+            services["gateway"] = {
+                **base, "image": TAILSCALE_IMAGE, "network_mode": "host", "cap_add": ["NET_ADMIN", "NET_RAW"],
+                "devices": ["/dev/net/tun:/dev/net/tun"],
+                "volumes": [f"{root}/tailscale:/var/lib/tailscale"],
+                "entrypoint": ["/usr/local/bin/tailscaled"],
+                "command": ["--state=/var/lib/tailscale/tailscaled.state", "--socket=/tmp/tailscaled.sock"],
+            }
+        if not cfg.remote_access.dns01:
+            return {"services": services}
+        # Seul le TCP est publie, et pas le port 80 : le defi DNS-01 n'en a pas
+        # besoin. Le jeton passe par CLOUDFLARE_API_TOKEN, lu dans un fichier
+        # prive, jamais dans ce compose ni dans le Caddyfile.
+        services["caddy"] = {
+            **base, "image": CADDY_DNS01_IMAGE, "env_file": ["./caddy.env"],
+            "ports": [f"{cfg.remote_access.https_port}:443"],
+            "volumes": ["./Caddyfile:/etc/caddy/Caddyfile:ro", f"{root}/caddy-data:/data", f"{root}/caddy-config:/config"],
+            "networks": ["applications"],
+        }
+        return {"services": services, "networks": applications}
     if cfg.remote_access.mode == "cloudflare":
         # Connexion SORTANTE vers Cloudflare : aucun port publie, rien a
         # rediriger sur la box, et le CGNAT n'y change rien. Les arguments sont
@@ -152,8 +183,16 @@ def gateway_compose(cfg):
     return {"services": {"gateway": base}, "networks": applications}
 
 
+def _published(cfg):
+    """Applications publiees sur le domaine, dans l'ordre de SUPPORTED."""
+    remote = cfg.remote_access
+    if remote.mode not in DOMAIN_MODES and not remote.dns01:
+        return []
+    return [sid for sid in SUPPORTED if sid in remote.services and cfg.enabled(sid)]
+
+
 def _check_publishable(cfg):
-    for sid in external_urls(cfg):
+    for sid in _published(cfg):
         inst = cfg.services[sid]
         if inst.adopted or inst.url_base:
             raise ValueError("L’accès HTTPS automatique est réservé aux services gérés par PlugArr, sans sous-chemin.")
@@ -165,6 +204,58 @@ def caddyfile(cfg):
     for sid, url in external_urls(cfg).items():
         blocks.append(f"{urlsplit(url).hostname} {{\n reverse_proxy {_upstream(cfg, sid)}\n}}")
     return "\n\n".join(blocks) + "\n"
+
+
+def caddyfile_dns01(cfg):
+    """Un seul bloc wildcard : un certificat `*.domaine` obtenu par DNS-01, donc
+    aucun nom d'application dans les journaux Certificate Transparency.
+
+    Le rendu de reference est `packaging/caddy/essai.Caddyfile`, que la CI fait
+    valider par la vraie image ; tests/test_remote_dns01.py verifie qu'ils
+    concordent.
+    """
+    _check_publishable(cfg)
+    remote = cfg.remote_access
+    lignes = [
+        "# Managed by PlugArr. Private credentials are never served here.",
+        "{",
+        "\tadmin off",
+        "\tauto_https disable_redirects",
+        # Seul le TCP est publie : sans cela, Caddy annoncerait HTTP/3 sur un
+        # port UDP ferme.
+        "\tservers {",
+        "\t\tprotocols h1 h2",
+        "\t}",
+        "}",
+        "",
+        f"*.{remote.domain} {{",
+        "\ttls {",
+        "\t\tdns cloudflare {env.CLOUDFLARE_API_TOKEN}",
+        # Un DNS local (box, Pi-hole) ne doit pas fausser la recherche de zone.
+        "\t\tresolvers 1.1.1.1 1.0.0.1",
+        # Les valeurs par defaut de Caddy echouent souvent chez Cloudflare
+        # (« timed out waiting for record to fully propagate »).
+        "\t\tpropagation_delay 2m",
+        "\t\tpropagation_timeout 10m",
+        "\t}",
+        # Le PREMIER `handle` : un `abort` pose a cote passerait apres les
+        # `handle`, a cause de l'ordre des directives, et ne filtrerait rien.
+        # `private_ranges` n'inclut pas la plage CGNAT de Tailscale.
+        "\t@hors_reseau not remote_ip private_ranges 100.64.0.0/10",
+        "\thandle @hors_reseau {",
+        "\t\tabort",
+        "\t}",
+    ]
+    for sid in _published(cfg):
+        lignes += [
+            f"\t@{sid} host {remote.hostname(sid)}",
+            f"\thandle @{sid} {{",
+            f"\t\treverse_proxy {_upstream(cfg, sid)}",
+            "\t}",
+        ]
+    # Un sous-domaine inconnu ne mene nulle part.
+    lignes += ["\thandle {", "\t\tabort", "\t}", "}"]
+    return "\n".join(lignes) + "\n"
 
 
 def _protect_applications(cfg, directory):

@@ -5,6 +5,8 @@ fictives : aucun compte n'est contacte.
 """
 import base64
 import json
+import re
+from pathlib import Path
 
 import pytest
 import yaml
@@ -177,6 +179,111 @@ def test_le_plan_et_les_erreurs_masquent_le_jeton(tmp_path):
     plan = state.validate(form)
     assert plan["remote_access"]["domain"] == "maison.example"
     assert JETON not in json.dumps(plan)
+
+
+# -- passerelle -----------------------------------------------------------------
+
+RECETTE = Path(__file__).resolve().parent.parent / "packaging" / "caddy"
+
+
+def _sans_commentaires(texte):
+    return [ligne.rstrip() for ligne in texte.splitlines() if ligne.strip() and not ligne.strip().startswith("#")]
+
+
+def test_le_caddyfile_est_celui_que_la_ci_fait_valider_par_caddy(tmp_path):
+    """La CI de l'image (`.github/workflows/caddy.yml`) passe
+    `packaging/caddy/essai.Caddyfile` a `caddy validate`. Le rendu doit lui
+    rester identique : sinon, PlugArr ecrirait une configuration que rien n'a
+    fait verifier par Caddy."""
+    _, cfg = config(tmp_path)
+    cfg.vpn.enabled = True
+    rendu = remote_access.caddyfile_dns01(cfg)
+    essai = (RECETTE / "essai.Caddyfile").read_text(encoding="utf-8")
+    assert _sans_commentaires(rendu) == _sans_commentaires(essai)
+
+
+def test_le_caddyfile_suit_les_noms_et_ne_porte_pas_le_jeton(tmp_path):
+    state = webwizard.WizardState(tmp_path, demo=True)
+    form = state.bootstrap()["form"]
+    form.update(services=["sonarr", "radarr", "qbittorrent"], host="192.0.2.50", reprendre=False,
+                remote_access={"mode": "tailscale", "domain": "maison.example",
+                               "services": ["radarr", "qbittorrent"], "names": {"radarr": "films"},
+                               "dns_token": JETON})
+    rendu = remote_access.caddyfile_dns01(state.build_config(form))
+    assert JETON not in rendu
+    assert "{env.CLOUDFLARE_API_TOKEN}" in rendu
+    # Un seul bloc de site, le wildcard ; Sonarr, non publie, n'y est pas.
+    blocs = [ligne for ligne in rendu.splitlines() if ligne.endswith("{") and not ligne[:1].isspace()]
+    assert blocs == ["{", "*.maison.example {"]
+    assert "@radarr host films.maison.example" in rendu
+    assert "@qbittorrent host qb.maison.example" in rendu
+    assert "sonarr" not in rendu
+    # Le filtre passe avant les applications, l'abort final apres.
+    assert rendu.index("@hors_reseau") < rendu.index("@radarr") < rendu.rindex("handle {")
+
+
+def test_un_service_adopte_n_est_pas_publie(tmp_path):
+    _, cfg = config(tmp_path)
+    cfg.services["sonarr"].adopted = True
+    with pytest.raises(ValueError, match="gérés par PlugArr"):
+        remote_access.caddyfile_dns01(cfg)
+
+
+def test_caddy_s_ajoute_a_tailscale_sans_port_80_ni_secret(tmp_path):
+    _, cfg = config(tmp_path, https_port=8443)
+    compose = remote_access.gateway_compose(cfg)
+    assert set(compose["services"]) == {"gateway", "caddy"}
+    caddy = compose["services"]["caddy"]
+    assert caddy["image"] == remote_access.CADDY_DNS01_IMAGE
+    assert caddy["ports"] == ["8443:443"]
+    assert caddy["env_file"] == ["./caddy.env"]
+    assert caddy["networks"] == ["applications"]
+    assert compose["networks"]["applications"] == {"external": True, "name": cfg.project_name + "_plugarr"}
+    assert compose["services"]["gateway"]["image"] == remote_access.TAILSCALE_IMAGE
+    assert all(s["labels"] == {"plugarr.remote": "true"} for s in compose["services"].values())
+    assert JETON not in json.dumps(compose)
+
+
+def test_avec_tailscale_installe_caddy_est_seul(tmp_path):
+    _, cfg = config(tmp_path)
+    compose = remote_access.gateway_compose(cfg, tailscale_natif=True)
+    assert set(compose["services"]) == {"caddy"}
+    assert compose["services"]["caddy"]["ports"] == ["443:443"]
+
+
+def test_sans_domaine_la_passerelle_tailscale_ne_change_pas(tmp_path):
+    _, cfg = config(tmp_path, domain="", services=[], dns_token="")
+    compose = remote_access.gateway_compose(cfg)
+    assert set(compose) == {"services"}
+    assert set(compose["services"]) == {"gateway"}
+
+
+def test_un_service_etranger_dans_le_compose_bloque_le_remplacement(tmp_path):
+    _, cfg = config(tmp_path)
+    dossier = tmp_path / ".plugarr-remote"
+    dossier.mkdir()
+    compose = remote_access.gateway_compose(cfg)
+    (dossier / "compose.yml").write_text(yaml.safe_dump(compose), encoding="utf-8")
+    remote_access._check_owned(dossier)
+    compose["services"]["autre"] = {"image": "nginx"}
+    (dossier / "compose.yml").write_text(yaml.safe_dump(compose), encoding="utf-8")
+    with pytest.raises(ValueError, match="non gérée par PlugArr"):
+        remote_access._check_owned(dossier)
+
+
+def test_l_image_epinglee_est_celle_de_la_recette():
+    recette = (RECETTE / "Dockerfile").read_text(encoding="utf-8")
+    caddy = re.search(r"^ARG CADDY_RELEASE=v(\S+)$", recette, re.MULTILINE).group(1)
+    module = re.search(r"^ARG CLOUDFLARE_RELEASE=v(\S+)$", recette, re.MULTILINE).group(1)
+    reference = remote_access.CADDY_DNS01_IMAGE.split("@")[0]
+    assert reference == f"ghcr.io/yannickuhrig1/plugarr-caddy:{caddy}-cloudflare-{module}"
+
+
+@pytest.mark.xfail(strict=True, reason="image plugarr-caddy pas encore publiee : epingler son condensat")
+def test_l_image_est_epinglee_par_condensat():
+    """Strict : des que le condensat est ajoute, ce test passe et le marqueur
+    doit partir. Il rappelle, d'ici la, que l'image n'est pas figee."""
+    assert re.search(r"@sha256:[0-9a-f]{64}$", remote_access.CADDY_DNS01_IMAGE)
 
 
 # -- images epinglees, reprise et veille ----------------------------------------

@@ -1,9 +1,8 @@
 # Adresses HTTPS privées par DNS-01
 
-Plan du 15 octobre 2026. Les étapes 0 (recette et CI, image pas encore publiée),
-1 (modèle), 2 (Caddyfile et compose) et 3 (activation et diagnostic), ainsi que
-l'indicateur de l'étape 5, sont en place. Restent les écrans (étape 4) et les
-essais réels.
+Plan du 15 octobre 2026. Les étapes 0 à 4 sont en place, ainsi que l'indicateur
+de l'étape 5. Restent la publication des images (`plugarr-caddy`, puis image
+d'administration) et les essais réels.
 Idée reprise de [Caretakarr](https://github.com/caretakarr/caretakarr) (MIT, Go) :
 on reprend des idées, pas du code.
 
@@ -275,6 +274,27 @@ leur texte exact n'a pas encore été relevé dans un journal réel.
 - Toutes les nouvelles phrases vont dans le catalogue anglais (sinon
   `scripts/audit_traductions.py` échoue) et dans le dictionnaire `english` de
   `remote.js`.
+
+**Fait, avec les détails suivants :**
+
+- Web : case `#remote-dns01` sous la carte Tailscale. Cochée, elle affiche le
+  bloc domaine et sous-domaines existant, puis le jeton d'API et le port.
+  L'aperçu des adresses suit le port. `remote.js` lit le jeton comme
+  `jeton_api_cloudflare()` (jeton seul ou commande `curl`) et refuse la clé
+  globale avec le même message. Après activation, les enregistrements A
+  s'affichent comme les routes du tunnel, champ par champ, prêts à copier.
+- TUI : même case et mêmes champs, mêmes refus. Les enregistrements A sont donnés
+  dans le rapport.
+- Récapitulatif web et TUI : « Tailscale · HTTPS · domaine ».
+- Parcours vérifié dans le navigateur, en démo, le 15 octobre 2026 : refus sans
+  jeton et avec la clé globale, jeton extrait d'une commande `curl`,
+  récapitulatif, activation simulée, adresses en `:8443`, enregistrements A vers
+  l'adresse de démo. Aucune erreur dans la console.
+- Tests : `tests/test_tui_parite.py` (choix et rapport dans la TUI), et un
+  scénario `dns01` dans `tests/js/wizard_remote.cjs` (Playwright, lancé à la
+  main ; pas exécuté ici faute du paquet `playwright`).
+- Documentation utilisateur : section « Tailscale avec votre domaine (HTTPS) »
+  dans `docs/ACCES_DISTANT.md`.
 
 ## Étape 5 : l'image d'administration
 

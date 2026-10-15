@@ -300,6 +300,80 @@ async def test_le_tunnel_cloudflare_et_les_noms_se_choisissent_dans_le_tui(app, 
 
 
 @pytest.mark.asyncio
+async def test_les_adresses_https_par_tailscale_se_choisissent_dans_le_tui(app, attendre):
+    """DNS-01 (docs/PLAN_HTTPS_DNS01.md) : une case sous Tailscale, puis le
+    domaine, le jeton d'API et le port."""
+    from textual.widgets import Checkbox, Input, RadioButton
+
+    from plugarr.tui.screens import RemoteAccessScreen
+
+    jeton = "plugarr-essai-jeton-api-0123456789abcdef"
+    cle_globale = "0123456789abcdef0123456789abcdef01234"
+    async with app.run_test() as pilot:
+        pilot.app.selection = ["sonarr", "qbittorrent"]
+        await pilot.app.push_screen(RemoteAccessScreen())
+        await pilot.pause()
+        ecran = pilot.app.screen
+        assert ecran.query_one("#ra-dns01", Checkbox).has_class("hidden")
+        ecran.query_one("#ra-tailscale", RadioButton).value = True
+        await pilot.pause()
+        assert not ecran.query_one("#ra-dns01", Checkbox).has_class("hidden")
+        assert ecran.query_one("#ra-domain", Input).has_class("hidden")
+        ecran.query_one("#ra-dns01", Checkbox).value = True
+        await pilot.pause()
+        for champ in ("#ra-domain", "#ra-jeton-api", "#ra-port"):
+            assert not ecran.query_one(champ, Input).has_class("hidden")
+        ecran.query_one("#ra-domain", Input).value = "exemple.fr"
+        ecran.query_one("#ra-port", Input).value = "8443"
+        # La cle globale : refusee, nommee, et jamais recopiee.
+        ecran.query_one("#ra-jeton-api", Input).value = cle_globale
+        ecran.query_one("#next", Button).press()
+        await pilot.pause()
+        aide = str(ecran.query_one("#ra-aide", Static).render())
+        assert pilot.app.remote_access is None
+        assert "globale" in aide and cle_globale not in aide
+        ecran.query_one("#ra-jeton-api", Input).value = jeton
+        ecran.query_one("#next", Button).press()
+        assert await attendre(pilot, lambda: isinstance(pilot.app.screen, SummaryScreen))
+
+        choix = pilot.app.remote_access
+        assert choix.dns01 and (choix.domain, choix.dns_token, choix.https_port) == ("exemple.fr", jeton, 8443)
+        assert set(choix.services) == {"sonarr", "qbittorrent"}
+
+
+@pytest.mark.asyncio
+async def test_le_rapport_tui_donne_les_enregistrements_a_creer(app, monkeypatch, attendre):
+    from textual.widgets import Checkbox
+
+    from plugarr import remote_access
+    from plugarr.remote_models import RemoteAccessConfig
+
+    monkeypatch.setattr(remote_access, "activate", lambda cfg, dossier, **_k: {
+        "mode": "tailscale", "status": "pending", "message": "Adresses HTTPS a terminer", "demo": False,
+        "urls": {"sonarr": "https://sonarr.exemple.fr"},
+        "records": [{"service": "sonarr", "hostname": "sonarr.exemple.fr", "type": "A",
+                     "content": "100.101.102.103", "proxied": False}],
+    })
+    async with app.run_test() as pilot:
+        pilot.app.selection = ["sonarr"]
+        pilot.app.remote_access = RemoteAccessConfig(
+            mode="tailscale", domain="exemple.fr", services=["sonarr"],
+            dns_token="plugarr-essai-jeton-api-0123456789abcdef")
+        pilot.app.stack_config = pilot.app.build_config()
+        pilot.app.results = []
+        await pilot.app.push_screen(ReportScreen())
+        await pilot.pause()
+        ecran = pilot.app.screen
+        ecran.query_one("#remote-confirm", Checkbox).value = True
+        await pilot.pause()
+        ecran.query_one("#remote-activate", Button).press()
+        zone = ecran.query_one("#report-remote", Static)
+        assert await attendre(pilot, lambda: "100.101.102.103" in str(zone.render()))
+        assert "sonarr.exemple.fr : Type A" in str(zone.render())
+        assert "DNS only" in str(zone.render())
+
+
+@pytest.mark.asyncio
 async def test_le_tunnel_est_refuse_avec_la_console_en_conteneur(app, monkeypatch):
     import base64
     import json

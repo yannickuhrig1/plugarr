@@ -36,6 +36,47 @@ ancienne passerelle : l'écran final le signale.
   adaptées. Les règles du réseau Tailscale peuvent autoriser d'autres ports du serveur.
 - Aucune clé d'authentification Tailscale à copier dans un formulaire PlugArr.
 
+### Tailscale avec votre domaine (HTTPS)
+
+Sous la carte Tailscale, la case **Adresses HTTPS sur mon domaine géré par
+Cloudflare** remplace `http://100.x.y.z:8989` par `https://sonarr.mondomaine.fr`,
+avec un vrai certificat. Aucun port n'est ouvert sur la box, et le CGNAT n'y change
+rien : le certificat s'obtient par le DNS (défi DNS-01), et les adresses ne
+répondent que par Tailscale ou le réseau local. Conception :
+[PLAN_HTTPS_DNS01.md](PLAN_HTTPS_DNS01.md).
+
+1. Dans Cloudflare : **My Profile**, **API Tokens**, **Create Token**, **Custom
+   token**. Droits **Zone · Zone · Read** et **Zone · DNS · Edit**, limités à la
+   zone du domaine. Ce n'est pas le jeton du tunnel. PlugArr accepte le jeton seul
+   ou la commande `curl` de vérification que Cloudflare affiche, et refuse la clé
+   d'API globale, qui ouvre tout le compte.
+2. Choisir le domaine, les applications et, si un NAS occupe déjà 443, un autre
+   port HTTPS (8443 par exemple).
+3. Après l'installation, activer l'accès distant. PlugArr vérifie que le jeton voit
+   la zone, puis démarre une passerelle Caddy à côté de Tailscale (seule, si
+   Tailscale est installé sur le serveur). Un certificat wildcard `*.mondomaine.fr`
+   est demandé : les noms des applications n'apparaissent pas dans les journaux
+   publics de certificats.
+4. Créer les enregistrements donnés par PlugArr : **DNS**, **Records**, **Add
+   record**, type **A**, vers l'adresse Tailscale du serveur, **Proxy status : DNS
+   only** (nuage gris).
+5. **Actualiser l'état**. Sont reconnus : nom absent du DNS, nom qui mène ailleurs
+   (nuage orange, ancien enregistrement), résolveur local qui tait une réponse que
+   le DNS public connaît, et certificat pas encore obtenu, avec sa raison.
+
+Le jeton est un secret : gardé dans `stack.yml` et dans
+`.plugarr-remote/caddy.env` (droits 600), jamais renvoyé au navigateur ni écrit
+dans le Caddyfile. Il est retiré de `.plugarr-remote` dès qu'on quitte ce mode.
+
+Piège à connaître : certaines box et certains résolveurs suppriment les réponses
+DNS publiques qui pointent vers une adresse privée (protection contre le DNS
+rebinding). Les adresses marchent alors en 4G avec Tailscale, mais pas sur le
+Wi-Fi de la maison : autoriser le domaine dans les réglages DNS de la box.
+
+**État :** pas encore disponible sur un serveur SSH ni avec la console en conteneur
+(image d'administration à republier), et aucun essai réel n'a encore été fait. La
+passerelle attend la publication de l'image `plugarr-caddy`.
+
 ## Domaine HTTPS
 
 PlugArr génère une passerelle Caddy séparée. Les services proposés sont Sonarr,

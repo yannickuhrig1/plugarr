@@ -771,7 +771,7 @@ function renderReview() {
   target.replaceChildren();
   const grid = E('div', undefined, 'summary-grid');
   const remoteMode = plan.remote_access?.mode;
-  grid.append(summaryBox(tr('remote'), remoteMode === 'https' ? `HTTPS · ${plan.remote_access.domain}` : remoteMode === 'cloudflare' ? `Cloudflare Tunnel · ${plan.remote_access.domain}` : remoteMode === 'tailscale' ? 'Tailscale' : 'Local'));
+  grid.append(summaryBox(tr('remote'), remoteMode === 'https' ? `HTTPS · ${plan.remote_access.domain}` : remoteMode === 'cloudflare' ? `Cloudflare Tunnel · ${plan.remote_access.domain}` : remoteMode === 'tailscale' && plan.remote_access.domain ? `Tailscale · HTTPS · ${plan.remote_access.domain}` : remoteMode === 'tailscale' ? 'Tailscale' : 'Local'));
   for (const [label, value] of [
     [tr('projectName'), plan.project_name], [tr('projectPath'), plan.project_dir], [tr('address'), plan.host], [tr('vpn'), tr(plan.vpn ? 'vpnOn' : 'vpnOff')],
     ...(plan.sabnzbd_route ? [[tr('sabRoute'), tr(plan.sabnzbd_route === 'vpn' ? 'sabVpnShort' : 'sabDirectShort')]] : []),

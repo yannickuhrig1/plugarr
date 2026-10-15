@@ -1686,8 +1686,8 @@ class RemoteAccessScreen(WizardScreen):
 
         if _console_en_place(self.app) and not remote_access.admin_image_ready(choix):
             self.query_one("#ra-aide", Static).update("[red]" + t(
-                "La console en conteneur ne connait pas encore le tunnel Cloudflare ni les "
-                "sous-domaines personnalises. Desactivez-la, ou choisissez un autre acces."
+                "La console en conteneur ne connait pas encore cet acces distant. "
+                "Desactivez-la, ou choisissez un autre acces."
             ) + "[/red]")
             return
         self.app.remote_access = choix

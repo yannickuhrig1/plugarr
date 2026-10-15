@@ -1,0 +1,223 @@
+"""Adresses HTTPS privees par DNS-01 : le modele (docs/PLAN_HTTPS_DNS01.md, etape 1).
+
+Les jetons de test ont la forme exacte de ceux de Cloudflare, avec des valeurs
+fictives : aucun compte n'est contacte.
+"""
+import base64
+import json
+
+import pytest
+import yaml
+from pydantic import ValidationError
+
+from plugarr import catalog, remote_access, reprise, veille_config, webwizard
+from plugarr.models import StackConfig
+from plugarr.remote_models import RemoteAccessConfig, jeton_api_cloudflare
+
+#: Jeton classique : 40 caracteres, comme ceux que Cloudflare delivre.
+JETON = "plugarr-essai-jeton-api-0123456789abcdef"
+#: Jeton d'utilisateur, nouvelle forme.
+JETON_UTILISATEUR = "cfut_" + "E" * 40
+CLE_GLOBALE = "0123456789abcdef0123456789abcdef01234"
+JETON_TUNNEL = base64.b64encode(json.dumps({
+    "a": "0123456789abcdef0123456789abcdef",
+    "t": "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    "s": base64.b64encode(b"fictif-" * 5).decode(),
+}).encode()).decode()
+
+
+def choix(**champs):
+    return RemoteAccessConfig(**{"mode": "tailscale", "domain": "maison.example",
+                                 "services": ["sonarr", "qbittorrent"], "dns_token": JETON, **champs})
+
+
+def config(tmp_path, **acces):
+    state = webwizard.WizardState(tmp_path, demo=True)
+    form = state.bootstrap()["form"]
+    form.update(services=["sonarr", "qbittorrent"], host="192.0.2.50", reprendre=False,
+                remote_access={"mode": "tailscale", "domain": "maison.example",
+                               "services": ["sonarr", "qbittorrent"], "dns_token": JETON, **acces})
+    return state, state.build_config(form)
+
+
+# -- jeton ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("colle, attendu", [
+    (JETON, JETON),
+    (f"  {JETON}\n", JETON),
+    (JETON_UTILISATEUR, JETON_UTILISATEUR),
+    ("cfat_" + "a1_-" * 10, "cfat_" + "a1_-" * 10),
+    # La commande de verification que Cloudflare affiche a la creation.
+    (('curl "https://api.cloudflare.com/client/v4/user/tokens/verify" \\\n'
+      f'     -H "Authorization: Bearer {JETON}"'), JETON),
+])
+def test_le_jeton_est_extrait_de_ce_que_cloudflare_affiche(colle, attendu):
+    assert jeton_api_cloudflare(colle) == attendu
+    assert choix(dns_token=colle).dns_token == attendu
+
+
+@pytest.mark.parametrize("colle, raison", [
+    (CLE_GLOBALE, "clé d’API globale"),
+    (JETON_TUNNEL, "jeton d’un tunnel"),
+    (f"sudo cloudflared service install {JETON_TUNNEL}", "jeton d’un tunnel"),
+    ("trop-court", "illisible"),
+    (f"{JETON} {JETON_UTILISATEUR}", "illisible"),
+    ("cfut_" + "x" * 20, "illisible"),
+])
+def test_un_autre_secret_est_refuse_sans_etre_recopie(colle, raison):
+    with pytest.raises(ValidationError) as erreur:
+        choix(dns_token=colle)
+    message = str(erreur.value.errors(include_input=False))
+    assert raison in message
+    for secret in (JETON, JETON_UTILISATEUR, CLE_GLOBALE, JETON_TUNNEL):
+        assert secret not in message
+
+
+# -- mode -----------------------------------------------------------------------
+
+
+def test_un_domaine_en_mode_tailscale_demande_applications_et_jeton():
+    actif = choix()
+    assert actif.dns01
+    assert JETON not in repr(actif)
+    with pytest.raises(ValidationError, match="jeton d’API"):
+        choix(dns_token="")
+    with pytest.raises(ValidationError, match="au moins une application"):
+        choix(services=[])
+
+
+def test_sans_domaine_tailscale_reste_par_adresse_ip():
+    simple = choix(domain="", services=[], https_port=8443)
+    assert not simple.dns01
+    assert simple.dns_token == ""
+    assert simple.https_port == 443
+
+
+@pytest.mark.parametrize("mode, extra", [
+    ("https", {}),
+    ("cloudflare", {"tunnel_token": JETON_TUNNEL}),
+    ("local", {"domain": "", "services": []}),
+])
+def test_les_autres_modes_ne_gardent_ni_jeton_ni_port(mode, extra):
+    autre = choix(mode=mode, https_port=8443, **extra)
+    assert not autre.dns01
+    assert autre.dns_token == ""
+    assert autre.https_port == 443
+
+
+def test_le_port_https_se_change_dans_les_limites():
+    assert choix(https_port=8443).https_port == 8443
+    for refuse in (0, 65536):
+        with pytest.raises(ValidationError):
+            choix(https_port=refuse)
+
+
+# -- stack.yml ------------------------------------------------------------------
+
+
+def test_une_pile_sans_dns01_reste_lisible_par_une_image_plus_ancienne(tmp_path):
+    """L'image d'administration epinglee refuse un champ inconnu : une pile qui
+    ne se sert pas de DNS-01 ne doit ecrire ni le jeton ni le port."""
+    _, cfg = config(tmp_path, domain="", services=[], dns_token="")
+    assert set(cfg.model_dump(mode="json")["remote_access"]) == {"mode", "domain", "services"}
+
+
+def test_le_port_par_defaut_n_est_pas_ecrit_et_tout_se_relit(tmp_path):
+    _, defaut = config(tmp_path)
+    assert "https_port" not in defaut.model_dump(mode="json")["remote_access"]
+    _, cfg = config(tmp_path / "p", https_port=8443, names={"sonarr": "series"})
+    relu = StackConfig.model_validate(yaml.safe_load(yaml.safe_dump(cfg.model_dump(mode="json"))))
+    assert relu.remote_access == cfg.remote_access
+    assert relu.remote_access.dns_token == JETON
+    assert relu.remote_access.https_port == 8443
+    assert relu.remote_access.hostname("sonarr") == "series.maison.example"
+
+
+# -- assistant web --------------------------------------------------------------
+
+
+def test_la_page_ne_recoit_jamais_le_jeton(tmp_path):
+    _, cfg = config(tmp_path)
+    state = webwizard.WizardState(tmp_path, demo=True)
+    state.previous = cfg
+    amorce = state.bootstrap()
+    assert JETON not in json.dumps(amorce)
+    assert amorce["form"]["remote_access"]["dns_token_saved"] is True
+    assert amorce["form"]["remote_access"]["tunnel_token_saved"] is False
+
+
+def test_un_champ_vide_garde_le_jeton_enregistre(tmp_path):
+    _, cfg = config(tmp_path)
+    state = webwizard.WizardState(tmp_path, demo=True)
+    state.previous = cfg
+    form = state.bootstrap()["form"]
+    form.update(reprendre=True, remote_access={**form["remote_access"], "dns_token": ""})
+    assert state.build_config(form).remote_access.dns_token == JETON
+    form.update(reprendre=False)
+    with pytest.raises(ValueError, match="jeton d’API"):
+        state.build_config(form)
+
+
+def test_un_jeton_invalide_est_refuse_sans_etre_renvoye(tmp_path):
+    with pytest.raises(ValueError) as erreur:
+        config(tmp_path, dns_token=CLE_GLOBALE)
+    assert "clé d’API globale" in str(erreur.value)
+    assert CLE_GLOBALE not in str(erreur.value)
+
+
+def test_le_plan_et_les_erreurs_masquent_le_jeton(tmp_path):
+    state, cfg = config(tmp_path)
+    state.cfg = cfg
+    assert state.redact(f"echec avec {JETON}") == "echec avec <masque>"
+    form = state.bootstrap()["form"]
+    form.update(services=["sonarr", "qbittorrent"], reprendre=False,
+                remote_access={"mode": "tailscale", "domain": "maison.example",
+                               "services": ["sonarr"], "dns_token": JETON})
+    plan = state.validate(form)
+    assert plan["remote_access"]["domain"] == "maison.example"
+    assert JETON not in json.dumps(plan)
+
+
+# -- images epinglees, reprise et veille ----------------------------------------
+
+
+def test_l_image_d_administration_doit_connaitre_dns01(monkeypatch):
+    monkeypatch.setattr(catalog, "CONSOLE_IMAGE_TUNNEL_CLOUDFLARE", True)
+    monkeypatch.setattr(catalog, "CONSOLE_IMAGE_DNS01", False)
+    assert not remote_access.admin_image_ready(choix())
+    assert remote_access.admin_image_ready(choix(domain="", services=[]))
+    monkeypatch.setattr(catalog, "CONSOLE_IMAGE_DNS01", True)
+    assert remote_access.admin_image_ready(choix())
+
+
+def test_la_console_en_conteneur_attend_une_image_qui_connait_dns01(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog, "CONSOLE_IMAGE_DNS01", False)
+    state = webwizard.WizardState(tmp_path, demo=True)
+    form = state.bootstrap()["form"]
+    form.update(services=["sonarr"], reprendre=False, console_enabled=True,
+                remote_access={"mode": "tailscale", "domain": "maison.example", "services": ["sonarr"],
+                               "dns_token": JETON})
+    with pytest.raises(ValueError, match="console en conteneur ne connaît pas encore cet accès"):
+        state.build_config(form)
+    form["remote_access"] = {"mode": "tailscale", "domain": "", "services": []}
+    assert state.build_config(form).console_enabled is True
+
+
+def test_sans_application_publiee_la_reprise_garde_tailscale_par_ip(tmp_path):
+    _, ancienne = config(tmp_path, services=["qbittorrent"], https_port=8443)
+    _, neuve = config(tmp_path / "n", domain="", services=[], dns_token="")
+    del neuve.services["qbittorrent"]
+    reprise.appliquer(neuve, ancienne)
+    assert neuve.remote_access.mode == "tailscale"
+    assert not neuve.remote_access.dns01
+    assert neuve.remote_access.dns_token == ""
+    assert neuve.remote_access.https_port == 443
+
+
+def test_la_veille_ne_recoit_pas_le_jeton(tmp_path):
+    _, cfg = config(tmp_path)
+    reduit = veille_config.reduire(cfg).model_dump(mode="json")
+    assert reduit["remote_access"] == {"mode": "local", "domain": "", "services": []}
+    assert JETON not in json.dumps(reduit)
+    assert cfg.remote_access.dns_token == JETON

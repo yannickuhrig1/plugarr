@@ -57,6 +57,12 @@ CONSOLE_IMAGE = (
 #: epinglee est `plugarr:0.12.0-admin` ou plus recente (publiee par le tag v0.12.0).
 CONSOLE_IMAGE_TUNNEL_CLOUDFLARE = True
 
+#: L'image ci-dessus connait-elle les adresses HTTPS par Tailscale (DNS-01) ?
+#: Meme raison : `dns_token` et `https_port` sont des champs inconnus pour
+#: elle, et elle refuserait la pile. Faux tant que l'image epinglee n'est pas
+#: une version qui les connait (docs/PLAN_HTTPS_DNS01.md, etape 5).
+CONSOLE_IMAGE_DNS01 = False
+
 #: Proxy du socket Docker, pour la veille en conteneur : il filtre l'API et
 #: REFUSE tout POST, donc creer, demarrer ou arreter quoi que ce soit. Epingle
 #: tag ET condensat, comme le reste. v0.5.0 du 2026-07-27, multi architecture.

@@ -44,6 +44,8 @@ def admin_image_ready(remote) -> bool:
     conteneur. Une image qui ne connait ni le tunnel ni les noms refuserait
     toute la pile ; la console, elle, redemarrerait en boucle.
     """
+    if remote.dns01 and not catalog.CONSOLE_IMAGE_DNS01:
+        return False
     return catalog.CONSOLE_IMAGE_TUNNEL_CLOUDFLARE or (remote.mode != "cloudflare" and not remote.names)
 
 

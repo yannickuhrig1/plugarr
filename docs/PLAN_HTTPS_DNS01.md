@@ -1,7 +1,8 @@
 # Adresses HTTPS privées par DNS-01
 
-Plan du 15 octobre 2026. L'étape 0 est en place (recette et CI, image pas encore
-publiée). Le reste n'est pas implémenté, et aucun essai réel n'a été fait.
+Plan du 15 octobre 2026. Les étapes 0 (recette et CI, image pas encore publiée)
+et 1 (modèle), ainsi que l'indicateur de l'étape 5, sont en place. Le reste n'est
+pas implémenté, et aucun essai réel n'a été fait.
 Idée reprise de [Caretakarr](https://github.com/caretakarr/caretakarr) (MIT, Go) :
 on reprend des idées, pas du code.
 
@@ -85,6 +86,22 @@ version se décidera pour tout PlugArr à la fois, pas seulement pour cette imag
   ni du port 443 pour obtenir le certificat. Si 443 est déjà occupé (c'est
   souvent le cas sur un Synology), on propose 8443. Les fiches téléphone gèrent
   déjà un port HTTPS non standard (`telephone.py`).
+
+**Fait, avec les détails suivants :**
+
+- La propriété `RemoteAccessConfig.dns01` (mode `tailscale` et domaine rempli)
+  est le seul critère du mode. Aucune version de PlugArr n'a jamais enregistré
+  de domaine en mode Tailscale : les piles existantes n'en sont pas affectées.
+- `jeton_api_cloudflare()` accepte le jeton seul ou la commande `curl` de
+  vérification que Cloudflare affiche à la création (`Bearer <jeton>`). Il
+  reconnaît et nomme les deux autres secrets qu'on risque de coller là : la clé
+  d'API globale (37 caractères hexadécimaux, qui ouvre tout le compte) et le
+  jeton du tunnel.
+- `https_port` revient à 443 hors de ce mode, et n'est pas écrit à 443.
+- Assistant web : le jeton est retiré de la page et du plan, masqué dans les
+  erreurs, et conservé quand le champ revient vide en reprise.
+- Reprise : sans application publiée, la pile garde Tailscale par adresse IP.
+- Tests : `tests/test_remote_dns01.py`.
 
 ## Étape 2 : Caddyfile et compose (`remote_access.py`)
 
@@ -219,6 +236,12 @@ refuserait le champ `dns_token`, puisque le modèle interdit les champs inconnus
 On reprend la méthode du tunnel : un indicateur `CONSOLE_IMAGE_DNS01 = False`
 dans `catalog.py`, lu par `admin_image_ready()`. Ce choix reste refusé tant que
 l'image admin n'a pas été republiée et réépinglée.
+
+**Fait dès l'étape 1**, puisque c'est elle qui ajoute les champs. Les messages de
+refus de l'assistant et de la TUI nommaient le tunnel et les sous-domaines : ils
+disent maintenant « cet accès distant », car le seul refus encore possible est
+celui de DNS-01. Reste à republier l'image d'administration, à la réépingler, puis
+à passer l'indicateur à `True`.
 
 ## Tests
 

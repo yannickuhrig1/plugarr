@@ -1,0 +1,177 @@
+name: Image Caddy DNS-01
+
+# Caddy avec le module caddy-dns/cloudflare (packaging/caddy), pour l'acces
+# HTTPS prive par DNS-01 : docs/PLAN_HTTPS_DNS01.md, etape 0.
+#
+# Construite et essayee quand sa recette change, pour amd64 et arm64. PUBLIEE
+# seulement a la demande, depuis main, sous un tag tire des versions de la
+# recette, et jamais par-dessus un tag existant : remote_access.py l'epinglera
+# par condensat, et le tag doit continuer de dire ce que l'image contient.
+#
+# Premiere publication : le paquet `plugarr-caddy` nait PRIVE sur ghcr.io. Le
+# rendre public dans ses reglages GitHub, sinon personne ne pourra le tirer.
+on:
+  push:
+    branches: [main]
+    paths: ["packaging/caddy/**", ".github/workflows/caddy.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["packaging/caddy/**", ".github/workflows/caddy.yml"]
+  workflow_dispatch:
+    inputs:
+      publier:
+        description: "Publier sur ghcr.io (depuis main uniquement)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/plugarr-caddy
+      # Forme d'un jeton Cloudflare classique, que le module verifie avant
+      # tout appel ; il n'ouvre rien.
+      JETON_FACTICE: jeton-factice-pour-caddy-validate-000000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag tire de la recette
+        id: recette
+        run: |
+          recette=packaging/caddy/Dockerfile
+          caddy=$(sed -n 's/^ARG CADDY_RELEASE=v//p' "$recette")
+          module=$(sed -n 's/^ARG CLOUDFLARE_RELEASE=v//p' "$recette")
+          test -n "$caddy" && test -n "$module"
+          # Une version annoncee qui ne serait pas celle des bases donnerait
+          # un tag qui ment sur le contenu.
+          grep -q "^ARG BUILDER_IMAGE=caddy:${caddy}-builder@sha256:" "$recette"
+          grep -q "^ARG RUNTIME_IMAGE=caddy:${caddy}-alpine@sha256:" "$recette"
+          {
+            echo "caddy=$caddy"
+            echo "module=$module"
+            echo "tag=${caddy}-cloudflare-${module}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      # D'abord l'architecture native, chargee localement pour etre essayee :
+      # une image qui se construit mais ne demarre pas ne doit pas partir.
+      - name: Construire (amd64) pour l'essai
+        uses: docker/build-push-action@v7
+        with:
+          context: packaging/caddy
+          platforms: linux/amd64
+          load: true
+          tags: plugarr-caddy:essai
+
+      - name: Les versions annoncees sont celles du binaire
+        env:
+          CADDY: ${{ steps.recette.outputs.caddy }}
+          MODULE: ${{ steps.recette.outputs.module }}
+        # Sorties lues en entier avant d'etre cherchees : `docker run | grep -q`
+        # peut echouer sous pipefail, quand grep ferme le tube avant la fin.
+        run: |
+          version=$(docker run --rm plugarr-caddy:essai caddy version)
+          echo "$version"
+          test "${version%% *}" = "v${CADDY}"
+          infos=$(docker run --rm plugarr-caddy:essai caddy build-info)
+          grep -P "^\s*dep\s+github\.com/caddy-dns/cloudflare\s+v\Q${MODULE}\E\s" <<< "$infos"
+          modules=$(docker run --rm plugarr-caddy:essai caddy list-modules)
+          grep -qx 'dns.providers.cloudflare' <<< "$modules"
+
+      - name: Le binaire peut ecouter 443 sans root, comme l'officiel
+        run: |
+          capacites=$(docker run --rm --entrypoint getcap plugarr-caddy:essai /usr/bin/caddy)
+          echo "$capacites"
+          grep -q cap_net_bind_service <<< "$capacites"
+
+      - name: La configuration DNS-01 prevue est acceptee
+        run: |
+          essai="$PWD/packaging/caddy/essai.Caddyfile:/etc/caddy/Caddyfile:ro"
+          docker run --rm -e CLOUDFLARE_API_TOKEN="$JETON_FACTICE" -v "$essai" plugarr-caddy:essai \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          # Sans jeton, le module DOIT refuser : sinon ce test ne prouverait
+          # pas qu'il a ete charge. Pas de `! commande` : `set -e` l'ignore.
+          if docker run --rm -v "$essai" plugarr-caddy:essai \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+            echo "Accepte sans jeton : le module Cloudflare n'est pas utilise."
+            exit 1
+          fi
+
+      - name: Publication demandee depuis main
+        id: publier
+        run: |
+          if [ "${{ inputs.publier }}" = "true" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            echo "oui=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.publier }}" = "true" ]; then
+            echo "Publication refusee hors de main : $GITHUB_REF"
+            exit 1
+          else
+            echo "oui=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Connexion a ghcr.io
+        if: steps.publier.outputs.oui == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ne jamais republier un tag
+        if: steps.publier.outputs.oui == 'true'
+        env:
+          TAG: ${{ steps.recette.outputs.tag }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE:$TAG" > /dev/null 2>&1; then
+            echo "$IMAGE:$TAG existe deja : changer une version de la recette pour publier."
+            exit 1
+          fi
+
+      - name: Construire amd64 + arm64 et publier si demande
+        id: multi
+        uses: docker/build-push-action@v7
+        with:
+          context: packaging/caddy
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.publier.outputs.oui == 'true' }}
+          tags: ${{ steps.publier.outputs.oui == 'true' && format('{0}:{1}', env.IMAGE, steps.recette.outputs.tag) || 'plugarr-caddy:multi' }}
+
+      - name: Verifier l'image publiee et donner la reference a epingler
+        if: steps.publier.outputs.oui == 'true'
+        env:
+          REFERENCE: ${{ env.IMAGE }}:${{ steps.recette.outputs.tag }}@${{ steps.multi.outputs.digest }}
+        run: |
+          manifeste=$(docker buildx imagetools inspect "$REFERENCE" --format '{{json .Manifest}}')
+          MANIFESTE="$manifeste" python3 - <<'PY'
+          import json
+          import os
+
+          manifeste = json.loads(os.environ["MANIFESTE"])
+          plateformes = {
+              (entree.get("platform") or {}).get("os", "") + "/"
+              + (entree.get("platform") or {}).get("architecture", "")
+              for entree in manifeste.get("manifests", [])
+              if (entree.get("platform") or {}).get("os") not in {None, "", "unknown"}
+          }
+          attendues = {"linux/amd64", "linux/arm64"}
+          if not attendues.issubset(plateformes):
+              raise SystemExit(f"Plateformes manquantes: {sorted(attendues - plateformes)}")
+          PY
+          for plateforme in linux/amd64 linux/arm64; do
+            modules=$(docker run --rm --platform "$plateforme" "$REFERENCE" caddy list-modules)
+            grep -qx 'dns.providers.cloudflare' <<< "$modules"
+          done
+          {
+            echo "Reference a epingler dans remote_access.py :"
+            echo
+            echo '```'
+            echo "$REFERENCE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

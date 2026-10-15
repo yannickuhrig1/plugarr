@@ -1,0 +1,39 @@
+# Essai de la recette, lance par .github/workflows/caddy.yml : Caddy doit
+# accepter ce que la passerelle DNS-01 generera (docs/PLAN_HTTPS_DNS01.md,
+# etape 2). `caddy validate` charge et prepare la configuration sans la
+# demarrer : ni Cloudflare ni Let's Encrypt ne sont contactes.
+{
+	admin off
+	auto_https disable_redirects
+	# Seul le TCP est publie : sans cela, Caddy annoncerait HTTP/3 sur un
+	# port UDP ferme.
+	servers {
+		protocols h1 h2
+	}
+}
+
+*.maison.example {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		resolvers 1.1.1.1 1.0.0.1
+		propagation_delay 2m
+		propagation_timeout 10m
+	}
+	# Premier `handle` : un `abort` pose a cote passerait apres les `handle`,
+	# a cause de l'ordre des directives.
+	@hors_reseau not remote_ip private_ranges 100.64.0.0/10
+	handle @hors_reseau {
+		abort
+	}
+	@sonarr host sonarr.maison.example
+	handle @sonarr {
+		reverse_proxy http://sonarr:8989
+	}
+	@qbittorrent host qb.maison.example
+	handle @qbittorrent {
+		reverse_proxy http://gluetun:8080
+	}
+	handle {
+		abort
+	}
+}

@@ -5,9 +5,13 @@ fictives : aucun compte n'est contacte.
 """
 import base64
 import json
+import os
 import re
+import stat
 from pathlib import Path
+from unittest.mock import Mock
 
+import httpx
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -284,6 +288,198 @@ def test_l_image_est_epinglee_par_condensat():
     """Strict : des que le condensat est ajoute, ce test passe et le marqueur
     doit partir. Il rappelle, d'ici la, que l'image n'est pas figee."""
     assert re.search(r"@sha256:[0-9a-f]{64}$", remote_access.CADDY_DNS01_IMAGE)
+
+
+# -- activation -----------------------------------------------------------------
+
+IP = "100.101.102.103"
+ZONES = "https://api.cloudflare.com/client/v4/zones?name="
+
+
+def _tailscale_natif(monkeypatch, etat="Running"):
+    """Tailscale installe sur la machine, connecte avec l'adresse IP."""
+    statut = {"BackendState": etat, "TailscaleIPs": [IP, "fd7a:115c:a1e0::1"]}
+    monkeypatch.setattr(remote_access.shutil, "which", lambda nom: "/usr/bin/tailscale" if nom == "tailscale" else None)
+    monkeypatch.setattr(remote_access.runner, "_run",
+                        lambda cmd, **_k: Mock(returncode=0, stdout=json.dumps(statut)))
+
+
+def _activer(tmp_path, monkeypatch, cfg):
+    commandes = []
+    proteger = Mock()
+    monkeypatch.setattr(remote_access, "_protect_applications", proteger)
+    monkeypatch.setattr(remote_access, "_command", lambda _cfg, _dir, *args, **_k: commandes.append(args) or "")
+    monkeypatch.setattr(remote_access, "inspect", lambda *_a, **_k: {"status": "pending"})
+    remote_access.activate(cfg, tmp_path)
+    return commandes, proteger
+
+
+def test_l_activation_pose_caddy_seul_a_cote_du_tailscale_installe(tmp_path, monkeypatch, httpx_mock):
+    _, cfg = config(tmp_path)
+    _tailscale_natif(monkeypatch)
+    httpx_mock.add_response(url=ZONES + "maison.example", json={"result": [{"name": "maison.example"}]})
+    commandes, proteger = _activer(tmp_path, monkeypatch, cfg)
+    dossier = tmp_path / ".plugarr-remote"
+    assert set(yaml.safe_load((dossier / "compose.yml").read_text(encoding="utf-8"))["services"]) == {"caddy"}
+    assert (dossier / "caddy.env").read_text(encoding="utf-8") == f"CLOUDFLARE_API_TOKEN={JETON}\n"
+    assert JETON not in (dossier / "Caddyfile").read_text(encoding="utf-8")
+    assert JETON not in (dossier / "compose.yml").read_text(encoding="utf-8")
+    # Pas de `tailscale up` dans un conteneur qui n'existe pas.
+    assert commandes == [("up", "-d", "--force-recreate")]
+    proteger.assert_called_once()
+    assert httpx_mock.get_requests()[0].headers["Authorization"] == f"Bearer {JETON}"
+    if os.name != "nt":
+        for nom in ("caddy.env", "Caddyfile", "compose.yml"):
+            assert stat.S_IMODE((dossier / nom).stat().st_mode) == 0o600
+
+
+def test_la_zone_se_trouve_en_remontant_le_domaine(tmp_path, httpx_mock):
+    _, cfg = config(tmp_path, domain="nas.maison.example")
+    httpx_mock.add_response(url=ZONES + "nas.maison.example", json={"result": []})
+    httpx_mock.add_response(url=ZONES + "maison.example", json={"result": [{"name": "maison.example"}]})
+    assert remote_access._zone_cloudflare(cfg.remote_access) == "maison.example"
+
+
+@pytest.mark.parametrize("reponse, extrait", [
+    ({"status_code": 403, "json": {"success": False, "errors": [{"code": 9109}]}}, "refuse ce jeton"),
+    ({"json": {"result": []}}, "ne voit aucune zone"),
+    ({"text": "<html>"}, "ne répond pas"),
+])
+def test_un_jeton_inutilisable_ne_change_rien(tmp_path, monkeypatch, httpx_mock, reponse, extrait):
+    _, cfg = config(tmp_path)
+    _tailscale_natif(monkeypatch)
+    httpx_mock.add_response(url=ZONES + "maison.example", **reponse)
+    with pytest.raises(ValueError, match=extrait) as erreur:
+        _activer(tmp_path, monkeypatch, cfg)
+    assert JETON not in str(erreur.value)
+    dossier = tmp_path / ".plugarr-remote"
+    assert not (dossier / "caddy.env").exists() and not (dossier / "compose.yml").exists()
+
+
+def test_quitter_dns01_retire_le_jeton_meme_sans_passerelle(tmp_path, monkeypatch):
+    _, cfg = config(tmp_path, domain="", services=[], dns_token="")
+    dossier = tmp_path / ".plugarr-remote"
+    dossier.mkdir()
+    (dossier / "caddy.env").write_text(f"CLOUDFLARE_API_TOKEN={JETON}\n", encoding="utf-8")
+    _tailscale_natif(monkeypatch)
+    assert remote_access.activate(cfg, tmp_path)["status"] == "connected"
+    assert not (dossier / "caddy.env").exists()
+
+
+def test_les_applications_publiees_ont_leur_adresse_https(tmp_path):
+    _, cfg = config(tmp_path, services=["sonarr"], https_port=8443)
+    assert remote_access.external_urls(cfg, IP) == {
+        "sonarr": "https://sonarr.maison.example:8443",
+        "qbittorrent": f"http://{IP}:8080",
+    }
+    assert remote_access.external_urls(cfg) == {"sonarr": "https://sonarr.maison.example:8443"}
+
+
+def test_la_simulation_montre_les_enregistrements_a_creer(tmp_path):
+    _, cfg = config(tmp_path)
+    resultat = remote_access.activate(cfg, tmp_path, demo=True)
+    assert resultat["urls"]["sonarr"] == "https://sonarr.maison.example"
+    assert resultat["records"] == [
+        {"service": s, "hostname": h, "type": "A", "content": IP, "proxied": False}
+        for s, h in (("sonarr", "sonarr.maison.example"), ("qbittorrent", "qb.maison.example"))
+    ]
+
+
+# -- diagnostic -----------------------------------------------------------------
+
+
+def _en_ligne(tmp_path, monkeypatch, adresses=(IP,), journal=""):
+    _, cfg = config(tmp_path, services=["sonarr"])
+    cfg.services["sonarr"].api_key = "cle-de-cette-instance"
+    dossier = tmp_path / ".plugarr-remote"
+    dossier.mkdir()
+    (dossier / "compose.yml").write_text(
+        yaml.safe_dump(remote_access.gateway_compose(cfg, tailscale_natif=True)), encoding="utf-8")
+    _tailscale_natif(monkeypatch)
+    monkeypatch.setattr(remote_access, "_command", lambda *_a, **_k: journal)
+    if adresses:
+        monkeypatch.setattr(remote_access.socket, "getaddrinfo",
+                            lambda *_a, **_k: [(2, 1, 6, "", (a, 0)) for a in adresses])
+    else:
+        monkeypatch.setattr(remote_access.socket, "getaddrinfo", Mock(side_effect=OSError("NXDOMAIN")))
+    return cfg
+
+
+URL_SONARR = "https://sonarr.maison.example/api/v3/system/status"
+
+
+def test_tout_est_en_place(tmp_path, monkeypatch, httpx_mock):
+    cfg = _en_ligne(tmp_path, monkeypatch)
+    httpx_mock.add_callback(
+        lambda r: httpx.Response(200 if r.headers.get("X-Api-Key") == "cle-de-cette-instance" else 401),
+        url=URL_SONARR, is_reusable=True)
+    resultat = remote_access.inspect(cfg, tmp_path)
+    assert resultat["status"] == "checked"
+    assert resultat["urls"] == {"sonarr": "https://sonarr.maison.example", "qbittorrent": f"http://{IP}:8080"}
+    assert resultat["records"][0]["content"] == IP
+
+
+def test_sans_tailscale_connecte_rien_n_est_teste(tmp_path, monkeypatch):
+    cfg = _en_ligne(tmp_path, monkeypatch)
+    _tailscale_natif(monkeypatch, etat="NeedsLogin")
+    monkeypatch.setattr(remote_access, "_check_dns01", Mock(side_effect=AssertionError("DNS")))
+    assert remote_access.inspect(cfg, tmp_path)["status"] == "association"
+
+
+def test_un_nom_qui_mene_ailleurs_est_signale(tmp_path, monkeypatch):
+    cfg = _en_ligne(tmp_path, monkeypatch, adresses=("104.16.0.1",))
+    resultat = remote_access.inspect(cfg, tmp_path)
+    assert resultat["checks"][0]["reason"] == "wrong_address"
+    assert "104.16.0.1" in resultat["message"] and "nuage gris" in resultat["message"]
+
+
+@pytest.mark.parametrize("publiques, raison, extrait", [
+    ([], "dns", f"Créez l’enregistrement A sonarr.maison.example vers {IP}"),
+    ([IP], "rebind", "DNS rebinding"),
+])
+def test_un_nom_absent_ou_bloque_par_la_box(tmp_path, monkeypatch, httpx_mock, publiques, raison, extrait):
+    cfg = _en_ligne(tmp_path, monkeypatch, adresses=())
+    httpx_mock.add_response(url=f"{remote_access.DOH_URL}?name=sonarr.maison.example&type=A",
+                            json={"Answer": [{"type": 1, "data": a} for a in publiques]})
+    resultat = remote_access.inspect(cfg, tmp_path)
+    assert resultat["checks"][0]["reason"] == raison
+    assert extrait in resultat["message"]
+
+
+@pytest.mark.parametrize("journal, extrait", [
+    ("", "quelques minutes"),
+    ('{"msg":"could not get certificate from issuer","error":"timed out waiting for record to fully propagate"}',
+     "pas encore propagé"),
+    ('{"msg":"could not get certificate from issuer","error":"HTTP 403: Authentication error"}', "DNS:Edit"),
+    ('{"msg":"could not get certificate from issuer"}\n{"msg":"certificate obtained successfully"}',
+     "Caddy l’a obtenu"),
+])
+def test_un_certificat_absent_s_explique_par_le_journal(tmp_path, monkeypatch, httpx_mock, journal, extrait):
+    cfg = _en_ligne(tmp_path, monkeypatch, journal=journal)
+    erreur = httpx.ConnectError("[SSL: TLSV1_ALERT_INTERNAL_ERROR] tlsv1 alert internal error")
+    httpx_mock.add_exception(erreur, url=URL_SONARR)
+    resultat = remote_access.inspect(cfg, tmp_path)
+    assert resultat["checks"][0]["reason"] == "certificate"
+    assert extrait in resultat["message"]
+
+
+@pytest.mark.parametrize("mode, extrait", [
+    ("https", "ports 80 et 443"),
+    ("cloudflare", "un niveau de sous-domaine"),
+])
+def test_un_certificat_refuse_hors_dns01_a_aussi_son_explication(tmp_path, mode, extrait):
+    """Avant, une erreur TLS passait pour une adresse muette ; elle se nomme
+    desormais, avec la cause propre a chaque mode."""
+    _, cfg = config(tmp_path, mode=mode, dns_token="", tunnel_token=JETON_TUNNEL if mode == "cloudflare" else "")
+    texte = remote_access._explain(cfg, {"service": "sonarr", "reason": "certificate"})
+    assert "pas encore valide" in texte and extrait in texte
+
+
+def test_une_passerelle_qui_ne_demarre_pas_nomme_son_port(tmp_path, monkeypatch):
+    _, cfg = config(tmp_path, https_port=8443)
+    monkeypatch.setattr(remote_access.runner, "_run", lambda *_a, **_k: Mock(returncode=1, stdout=""))
+    with pytest.raises(ValueError, match="port 8443"):
+        remote_access._command(cfg, tmp_path, "up")
 
 
 # -- images epinglees, reprise et veille ----------------------------------------

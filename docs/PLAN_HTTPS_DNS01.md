@@ -1,8 +1,9 @@
 # Adresses HTTPS privées par DNS-01
 
 Plan du 15 octobre 2026. Les étapes 0 (recette et CI, image pas encore publiée),
-1 (modèle) et 2 (Caddyfile et compose), ainsi que l'indicateur de l'étape 5, sont
-en place. Le reste n'est pas implémenté, et aucun essai réel n'a été fait.
+1 (modèle), 2 (Caddyfile et compose) et 3 (activation et diagnostic), ainsi que
+l'indicateur de l'étape 5, sont en place. Restent les écrans (étape 4) et les
+essais réels.
 Idée reprise de [Caretakarr](https://github.com/caretakarr/caretakarr) (MIT, Go) :
 on reprend des idées, pas du code.
 
@@ -229,6 +230,35 @@ explication dans `_explain` :
   suppriment les réponses publiques qui pointent vers une IP privée. Le serveur
   n'utilise pas forcément le même résolveur que le téléphone : ce test donne un
   indice, pas une preuve.
+
+**Fait, avec les détails suivants :**
+
+- L'ordre dans `activate()` est celui-ci : rendu du Caddyfile (qui refuse un
+  service adopté), puis zone Cloudflare, puis protections des applications, puis
+  fichiers. Un jeton refusé ne change donc ni qBittorrent, ni les fichiers.
+- `_zone_cloudflare()` remonte les étiquettes du domaine et distingue trois cas :
+  un jeton refusé, une zone invisible (droit Zone:Read) et une API muette. Il ne
+  recopie jamais le jeton dans un message.
+- Avec Tailscale installé sur la machine, le compose ne contient que Caddy, et
+  aucun `tailscale up` n'est lancé dans un conteneur.
+- `caddy.env` est retiré dès qu'on quitte DNS-01, avant tout retour anticipé :
+  Tailscale installé sur la machine ne passe pas par l'écriture du compose.
+- `external_urls()` donne `https://nom.domaine[:port]` aux applications
+  publiées, et l'adresse Tailscale par IP aux autres. Les fiches du téléphone
+  suivent sans changement.
+- Le résultat porte `records`, les enregistrements A à créer, y compris en
+  simulation : l'étape 4 les affichera comme les routes du tunnel.
+- Le journal de Caddy n'est lu que si un certificat manque. Après un
+  redémarrage, Caddy recharge son certificat sans rien écrire : le journal
+  explique un échec, il ne juge pas.
+- Une erreur TLS se nomme désormais `certificate` dans tous les modes, au lieu de
+  `unreachable`, avec une explication propre à chacun. En mode tunnel, c'est le
+  certificat gratuit de Cloudflare, qui ne couvre qu'un niveau de sous-domaine.
+
+Reste à vérifier sur un vrai Caddy : les lignes du journal cherchées
+(`CADDY_CERT_OK`, `CADDY_PROPAGATION`, `CADDY_JETON_REFUSE`,
+`CADDY_CERT_ECHEC`). Elles viennent de CertMagic et de l'API Cloudflare, mais
+leur texte exact n'a pas encore été relevé dans un journal réel.
 
 ## Étape 4 : interfaces web et TUI
 

@@ -19,7 +19,7 @@ globalThis.PlugArrRemote = (() => {
   const defaults={sonarr:'sonarr',radarr:'radarr',qbittorrent:'qb'}, domainModes=['https','cloudflare'];
   const labelPattern=/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
   let bootstrap, form, request, renderReport, language=()=>document.documentElement.lang;
-  let current, selected=[], effective=[], names={}, tokenSaved=false, pollTimer, mounted=false;
+  let current, selected=[], effective=[], names={}, tokenSaved=false, apiTokenSaved=false, pollTimer, mounted=false;
   // Sauvegardes chargees pour la fusion. Elles restent dans le navigateur.
   let nzbBase=null, nzbBaseError='', qbStatus='';
   const text = (fr,en) => language()==='en'?en:fr;
@@ -34,6 +34,11 @@ globalThis.PlugArrRemote = (() => {
     remoteNamesHelp:'You can rename each subdomain, for instance if sonarr is already used on this domain.',
     remoteToken:'Tunnel token',remoteTokenHelp:'In Cloudflare: Networking, Tunnels, Create a tunnel. Choose Docker and paste the displayed command here: PlugArr keeps only the token.',
     remoteTokenSaved:'Token saved: leave empty to keep it.',
+    remoteDns01:'HTTPS addresses on my Cloudflare-managed domain',
+    remoteApiToken:'Cloudflare API token',
+    remoteApiTokenHelp:'In Cloudflare: My Profile, API Tokens, Create Token, Custom token. Zone Read and DNS Edit permissions, limited to your zone. This is not the tunnel token.',
+    remoteHttpsPort:'HTTPS port',remoteHttpsPortHelp:'443 by default, or 8443 if a NAS already uses 443.',
+    remoteDns01Help:'The certificate is obtained through DNS, without opening any port. After installation, PlugArr lists the A records to create, pointing to the server Tailscale address, as DNS only (grey cloud).',
     remoteTunnelHelp:'Create a tunnel reserved for PlugArr: a token already running on another machine would split traffic between both. Use the Cloudflare zone domain (mydomain.com): the free certificate covers only one subdomain level. After installation, PlugArr lists the routes to add to the tunnel. No Cloudflare Access on these addresses: mobile apps would no longer get through. If Access protects the whole domain, add them to a Bypass application.',
     remoteHeading:'Remote access',remoteConfirm:'I authorize the chosen gateway configuration and access to the selected applications.',
     remoteActivate:'Activate remote access',remoteAssociate:'Connect my Tailscale account',remoteRefresh:'Refresh status',
@@ -42,7 +47,18 @@ globalThis.PlugArrRemote = (() => {
   };
   function mode(){return document.querySelector('input[name="remote-mode"]:checked')?.value||'local';}
   const subdomain=sid=>names[sid]||defaults[sid];
-  const address=sid=>`https://${subdomain(sid)}.${$('remote-domain').value.trim()||text('votre-domaine.fr','your-domain.com')}`;
+  // Tailscale, plus un domaine : adresses HTTPS dont le certificat s'obtient
+  // par le DNS (remote_models.RemoteAccessConfig.dns01).
+  const dns01=()=>mode()==='tailscale'&&!!$('remote-dns01')?.checked;
+  const onDomain=()=>domainModes.includes(mode())||dns01();
+  const httpsPort=()=>Number($('remote-https-port')?.value)||443;
+  const address=sid=>`https://${subdomain(sid)}.${$('remote-domain').value.trim()||text('votre-domaine.fr','your-domain.com')}${dns01()&&httpsPort()!==443?':'+httpsPort():''}`;
+  // Meme lecture que PlugArr (remote_models.jeton_api_cloudflare) : le jeton
+  // seul, ou la commande curl de verification qui le contient. Les deux formes
+  // qu'accepte le module Cloudflare de Caddy.
+  const apiCandidates=value=>[...new Set(value.split(/[\s"']+/).filter(w=>/^[A-Za-z0-9_-]{35,50}$/.test(w)||/^cf(?:ut|at)_[A-Za-z0-9_-]{32,256}$/.test(w)))];
+  const globalKey=value=>{const c=apiCandidates(value);return c.length===1&&/^[0-9a-f]{37}$/.test(c[0]);};
+  function apiToken(value){const c=apiCandidates(value);return c.length===1&&!globalKey(value)?c[0]:'';}
   // Meme lecture que PlugArr (remote_models.jeton_tunnel) : Cloudflare montre
   // une commande d'installation, le jeton est dedans. Base64 standard d'un JSON
   // portant le compte (a), le secret (s) et l'identifiant du tunnel (t).
@@ -58,10 +74,13 @@ globalThis.PlugArrRemote = (() => {
   function refresh(services=effective){
     effective=services;
     if(!$('remote-domain-box'))return;
-    $('remote-domain-box').hidden=!domainModes.includes(mode());
+    $('remote-domain-box').hidden=!onDomain();
     $('remote-dns-help').hidden=mode()!=='https';
     $('remote-tunnel-box').hidden=mode()!=='cloudflare';
     $('remote-token-saved').hidden=!tokenSaved;
+    $('remote-dns01-choice').hidden=mode()!=='tailscale';
+    $('remote-dns01-box').hidden=!dns01();
+    $('remote-api-token-saved').hidden=!apiTokenSaved;
     $('remote-tail-help').hidden=mode()!=='tailscale';
     $('remote-tail-help').textContent=bootstrap?.demo?text('Association simulée à la fin de la démonstration.','Account association is simulated at the end of this demo.'):text('Sur Linux, PlugArr prépare Tailscale et propose le lien de connexion à la fin. Sur Windows, installez et connectez Tailscale sur ce PC. Le réseau privé peut donner accès aux autres ports du serveur selon vos règles Tailscale.','On Linux, PlugArr prepares Tailscale and provides the login link after installation. On Windows, install and connect Tailscale on this PC. Your tailnet policy may also allow access to other server ports.');
     $('remote-services').replaceChildren();
@@ -84,19 +103,27 @@ globalThis.PlugArrRemote = (() => {
     remote=remote||{mode:'local',domain:'',services:[]};selected=[...(remote.services||[])];
     names={...(remote.names||{})};tokenSaved=!!remote.tunnel_token_saved;$('remote-token').value='';
     document.querySelectorAll('input[name="remote-mode"]').forEach(n=>{n.checked=n.value===remote.mode;});
-    $('remote-domain').value=remote.domain||'';refresh();
+    loadDns01(remote);$('remote-domain').value=remote.domain||'';refresh();
+  }
+  function loadDns01(remote){
+    $('remote-dns01').checked=remote.mode==='tailscale'&&!!remote.domain;
+    apiTokenSaved=!!remote.dns_token_saved;$('remote-api-token').value='';
+    $('remote-https-port').value=remote.https_port||443;
   }
   function read(services=effective){
-    const domain=domainModes.includes(mode()),chosen=domain?selected.filter(s=>services.includes(s)):[];
+    const domain=onDomain(),chosen=domain?selected.filter(s=>services.includes(s)):[];
     return {mode:mode(),domain:domain?$('remote-domain').value.trim():'',services:chosen,
       names:Object.fromEntries(chosen.filter(s=>names[s]).map(s=>[s,names[s]])),
       // Vide avec un jeton enregistre : PlugArr garde l'ancien.
-      tunnel_token:mode()==='cloudflare'?tunnelToken($('remote-token').value):''};
+      tunnel_token:mode()==='cloudflare'?tunnelToken($('remote-token').value):'',
+      dns_token:dns01()?apiToken($('remote-api-token').value):'',
+      https_port:dns01()?httpsPort():443};
   }
   function refuse(field,fr,en){field.setCustomValidity(text(fr,en));field.reportValidity();return false;}
   function valid(){
     $('remote-domain').setCustomValidity('');$('remote-token').setCustomValidity('');
-    if(domainModes.includes(mode())){
+    $('remote-api-token').setCustomValidity('');$('remote-https-port').setCustomValidity('');
+    if(onDomain()){
       const value=$('remote-domain').value.trim();
       if(!/^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+\.?$/.test(value)||!selected.some(s=>effective.includes(s)))
         return refuse($('remote-domain'),'Indiquez un domaine seul et choisissez au moins une application.','Enter a domain only and select at least one application.');
@@ -112,6 +139,13 @@ globalThis.PlugArrRemote = (() => {
       const raw=$('remote-token').value.trim();
       if(!raw&&!tokenSaved)return refuse($('remote-token'),'Collez la commande du tunnel affichée par Cloudflare.','Paste the tunnel command shown by Cloudflare.');
       if(raw&&!tunnelToken(raw))return refuse($('remote-token'),'Jeton de tunnel illisible : collez la commande d’installation affichée par Cloudflare, ou le jeton seul.','Unreadable tunnel token: paste the install command shown by Cloudflare, or the token alone.');
+    }
+    if(dns01()){
+      const raw=$('remote-api-token').value.trim(),port=$('remote-https-port').value.trim();
+      if(!raw&&!apiTokenSaved)return refuse($('remote-api-token'),'Collez le jeton d’API créé dans Cloudflare.','Paste the API token created in Cloudflare.');
+      if(raw&&globalKey(raw))return refuse($('remote-api-token'),'C’est la clé d’API globale, qui ouvre tout le compte Cloudflare. Créez plutôt un jeton d’API limité à la zone.','This is the global API key, which opens the whole Cloudflare account. Create an API token limited to the zone instead.');
+      if(raw&&!apiToken(raw))return refuse($('remote-api-token'),'Jeton d’API Cloudflare illisible : collez le jeton affiché par Cloudflare à sa création.','Unreadable Cloudflare API token: paste the token shown by Cloudflare when it was created.');
+      if(!/^\d+$/.test(port)||Number(port)<1||Number(port)>65535)return refuse($('remote-https-port'),'Port HTTPS invalide : un nombre entre 1 et 65535.','Invalid HTTPS port: a number between 1 and 65535.');
     }
     return true;
   }
@@ -129,10 +163,14 @@ globalThis.PlugArrRemote = (() => {
     bootstrap=boot;form=fields;request=api;renderReport=render;language=getLanguage;
     const remote=form.remote_access||{mode:'local',domain:'',services:[]};selected=[...remote.services];
     names={...(remote.names||{})};tokenSaved=!!remote.tunnel_token_saved;
-    document.querySelectorAll('input[name="remote-mode"]').forEach(n=>{n.checked=n.value===remote.mode;n.addEventListener('change',()=>{if(domainModes.includes(mode())&&!selected.length)selected=ids.filter(s=>effective.includes(s));refresh();});});
+    const allIfNone=()=>{if(onDomain()&&!selected.length)selected=ids.filter(s=>effective.includes(s));refresh();};
+    document.querySelectorAll('input[name="remote-mode"]').forEach(n=>{n.checked=n.value===remote.mode;n.addEventListener('change',allIfNone);});
+    loadDns01(remote);$('remote-dns01').addEventListener('change',allIfNone);
     $('remote-domain').value=remote.domain||'';
     $('remote-domain').addEventListener('input',()=>{$('remote-domain').setCustomValidity('');refresh();});
     $('remote-token').addEventListener('input',()=>$('remote-token').setCustomValidity(''));
+    $('remote-api-token').addEventListener('input',()=>$('remote-api-token').setCustomValidity(''));
+    $('remote-https-port').addEventListener('input',()=>{$('remote-https-port').setCustomValidity('');refresh();});
     $('remote-confirm').addEventListener('change',()=>$('remote-activate').disabled=!$('remote-confirm').checked);
     $('remote-activate').addEventListener('click',()=>action('activate'));
     $('remote-refresh').addEventListener('click',()=>action('inspect'));
@@ -172,6 +210,19 @@ globalThis.PlugArrRemote = (() => {
         }
         box.append(el('p',text('Si Cloudflare répond « An A, AAAA, or CNAME record with that host already exists », ce nom sert déjà : choisissez un autre sous-domaine dans PlugArr, ou supprimez l’ancien enregistrement.',
           'If Cloudflare answers “An A, AAAA, or CNAME record with that host already exists”, that name is taken: pick another subdomain in PlugArr, or delete the old record.')));
+        $('remote-links').append(box);
+      }
+      // DNS-01 : un enregistrement A par application, vers l'adresse Tailscale
+      // du serveur. Le nuage gris compte : proxifie, le nom menerait a Cloudflare.
+      if(remote.records?.length){
+        const box=el('div');box.className='remote-routes';
+        box.append(el('p',text('Dans Cloudflare : DNS, Records, Add record. Un enregistrement par application, Proxy status sur DNS only (nuage gris) :',
+          'In Cloudflare: DNS, Records, Add record. One record per application, Proxy status set to DNS only (grey cloud):')));
+        for(const record of remote.records){
+          const row=el('div');row.className='remote-route';row.append(el('strong',record.service));
+          row.append(field('Type',record.type),field(text('Nom (Name)','Name'),record.hostname),field(text('Adresse IPv4 (IPv4 address)','IPv4 address'),record.content));
+          box.append(row);
+        }
         $('remote-links').append(box);
       }
       clearTimeout(pollTimer);if(remote.status==='running')pollTimer=setTimeout(update,2500);

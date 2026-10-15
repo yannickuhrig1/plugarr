@@ -147,6 +147,7 @@ jobs:
         if: steps.publier.outputs.oui == 'true'
         env:
           REFERENCE: ${{ env.IMAGE }}:${{ steps.recette.outputs.tag }}@${{ steps.multi.outputs.digest }}
+          PAR_CONDENSAT: ${{ env.IMAGE }}@${{ steps.multi.outputs.digest }}
         run: |
           manifeste=$(docker buildx imagetools inspect "$REFERENCE" --format '{{json .Manifest}}')
           MANIFESTE="$manifeste" python3 - <<'PY'
@@ -164,9 +165,14 @@ jobs:
           if not attendues.issubset(plateformes):
               raise SystemExit(f"Plateformes manquantes: {sorted(attendues - plateformes)}")
           PY
+          # L'image locale est retiree entre deux plateformes : le stockage
+          # d'images classique de Docker refuse de tirer le MEME condensat pour
+          # une seconde architecture (« cannot overwrite digest », publication
+          # du 2026-10-15).
           for plateforme in linux/amd64 linux/arm64; do
             modules=$(docker run --rm --platform "$plateforme" "$REFERENCE" caddy list-modules)
             grep -qx 'dns.providers.cloudflare' <<< "$modules"
+            docker image rm "$PAR_CONDENSAT" > /dev/null
           done
           {
             echo "Reference a epingler dans remote_access.py :"

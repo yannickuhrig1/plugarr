@@ -7,10 +7,14 @@ const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 
 // Jeton fictif de la forme de cloudflared : base64 d'un JSON a/s/t.
+// Jeton d'API fictif, de la forme classique (35 a 50 caracteres).
+const API_TOKEN = 'plugarr-essai-jeton-api-0123456789abcdef';
 const TOKEN = Buffer.from(JSON.stringify({a:'0123456789abcdef0123456789abcdef',t:'6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',s:Buffer.from('fictif-'.repeat(5)).toString('base64')})).toString('base64');
 
 async function scenario(browser, mode, root) {
-  const domain = ['https','cloudflare'].includes(mode);
+  // dns01 : Tailscale, plus un domaine dont le certificat s'obtient par le DNS.
+  const domain = ['https','cloudflare','dns01'].includes(mode), radio = mode==='dns01'?'tailscale':mode;
+  const remotePort = mode==='dns01'?'8443':domain?'443':'8080';
   const project = path.join(root, mode);
   fs.mkdirSync(project, {recursive:true});
   const exe = process.env.PLUGARR_TEST_EXE;
@@ -50,7 +54,7 @@ async function scenario(browser, mode, root) {
     await page.locator('#vpn-enabled').uncheck();
     await next(); await expect(page.locator('[data-step="3"]')).toBeVisible();
     await next(); await expect(page.locator('[data-step="4"]')).toBeVisible();
-    await page.locator(`[name="remote-mode"][value="${mode}"]`).check();
+    await page.locator(`[name="remote-mode"][value="${radio}"]`).check();
     if(mode==='https') {
       await page.fill('#remote-domain','https://bad.example/path');
       await next(); await expect(page.locator('[data-step="4"]')).toBeVisible();
@@ -70,6 +74,20 @@ async function scenario(browser, mode, root) {
       await page.fill('#remote-name-qbittorrent','torrent');
       await page.screenshot({path:path.join(root,'tunnel-cloudflare.png'),fullPage:true});
     }
+    if(mode==='dns01') {
+      await expect(page.locator('#remote-domain-box')).toBeHidden();
+      await page.locator('#remote-dns01').check();
+      await expect(page.locator('#remote-dns01-box')).toBeVisible();
+      await page.fill('#remote-domain','maison.example');
+      await page.fill('#remote-https-port','8443');
+      await expect(page.locator('.remote-service .remote-address').first()).toHaveText('https://sonarr.maison.example:8443');
+      // Sans jeton, puis avec la cle globale : on reste sur l'etape.
+      await next(); await expect(page.locator('[data-step="4"]')).toBeVisible();
+      await page.fill('#remote-api-token','0123456789abcdef0123456789abcdef01234');
+      await next(); await expect(page.locator('[data-step="4"]')).toBeVisible();
+      await page.fill('#remote-api-token',`curl -H "Authorization: Bearer ${API_TOKEN}"`);
+      await page.screenshot({path:path.join(root,'https-tailscale.png'),fullPage:true});
+    }
     await next(); await expect(page.locator('[data-step="5"]')).toBeVisible();
     await page.locator('#confirm').check();
     await expect(page.locator('#next')).toBeEnabled({timeout:20000});
@@ -84,11 +102,16 @@ async function scenario(browser, mode, root) {
         assert.deepEqual(await page.locator('.remote-route').first().locator('input').evaluateAll(n=>n.map(i=>i.value)),['series','maison.example','http://sonarr:8989']);
         assert.equal(await page.content().then(html=>html.includes(TOKEN)),false);
       }
+      if(mode==='dns01'){
+        await expect(page.locator('.remote-route')).toHaveCount(3);
+        assert.deepEqual(await page.locator('.remote-route').first().locator('input').evaluateAll(n=>n.map(i=>i.value)),['A','sonarr.maison.example','100.101.102.103']);
+        assert.equal(await page.content().then(html=>html.includes(API_TOKEN)),false);
+      }
       await page.selectOption('#mobile-network','remote');
     } else await expect(page.locator('#remote-result')).toBeHidden();
     await page.selectOption('#mobile-client','qbremote');
     assert.equal(await page.locator('#mobile-service').inputValue(),'qbittorrent');
-    await expect(page.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(domain?'443':'8080');
+    await expect(page.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(mode==='local'?'8080':remotePort);
     await expect(page.locator('#mobile-fields input[type="password"]')).toHaveCount(1);
     const checkArrExport=async(target,suffix)=>{
       await target.selectOption('#mobile-client','arrcontrol');
@@ -145,7 +168,7 @@ async function scenario(browser, mode, root) {
     await offline.goto(pathToFileURL(destination).href);
     await offline.selectOption('#mobile-client','qbremote');
     if(mode!=='local')await offline.selectOption('#mobile-network','remote');
-    await expect(offline.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(domain?'443':'8080');
+    await expect(offline.locator('#mobile-fields input[aria-label="Port"]')).toHaveValue(mode==='local'?'8080':remotePort);
     await checkArrExport(offline,'offline');
     await checkNzbExport(offline,'offline');
     await offline.setViewportSize({width:390,height:844});
@@ -160,6 +183,6 @@ async function scenario(browser, mode, root) {
   const root=fs.mkdtempSync(path.resolve('build/wizard-remote-e2e-'));
   // PLAYWRIGHT_CHANNEL=msedge : le navigateur deja installe, sans telechargement.
   const browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||undefined});
-  try {for(const mode of ['https','cloudflare','tailscale','local'])await scenario(browser,mode,root);console.log(`Artifacts: ${root}`);}
+  try {for(const mode of ['https','cloudflare','tailscale','dns01','local'])await scenario(browser,mode,root);console.log(`Artifacts: ${root}`);}
   finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -55,6 +55,49 @@ def jeton_tunnel(texte: str) -> str:
     )
 
 
+#: Jeton d'API Cloudflare, sous les deux formes qu'accepte caddy-dns/cloudflare
+#: (cloudflare.go, v0.2.4) : classique, ou jeton d'utilisateur (`cfut_`) et de
+#: compte (`cfat_`). Le module recopie un jeton mal forme dans son message
+#: d'erreur, donc dans le journal de Caddy : il ne doit jamais l'atteindre.
+_JETON_API_CLASSIQUE = re.compile(r"[A-Za-z0-9_-]{35,50}")
+_JETON_API_NOUVEAU = re.compile(r"cf(?:ut|at)_[A-Za-z0-9_-]{32,256}")
+#: Cle d'API globale : 37 caracteres hexadecimaux. Elle a la forme d'un jeton
+#: classique pour le module, mais ouvre TOUT le compte, et ne fonctionne pas
+#: sans l'adresse du compte. Elle n'a rien a faire dans stack.yml.
+_CLE_GLOBALE = re.compile(r"[0-9a-f]{37}")
+
+
+def jeton_api_cloudflare(texte: str) -> str:
+    """Jeton d'API Cloudflare, extrait de ce que l'utilisateur a colle.
+
+    A la creation, Cloudflare affiche le jeton et une commande `curl` qui le
+    verifie et le contient (`Authorization: Bearer <jeton>`). On accepte les
+    deux. Les deux autres secrets Cloudflare qu'on risque de coller ici, la cle
+    globale et le jeton du tunnel, sont reconnus et nommes.
+    """
+    candidats = {
+        mot for mot in re.split(r"[\s\"']+", texte)
+        if _JETON_API_CLASSIQUE.fullmatch(mot) or _JETON_API_NOUVEAU.fullmatch(mot)
+    }
+    if len(candidats) == 1:
+        jeton = candidats.pop()
+        if _CLE_GLOBALE.fullmatch(jeton):
+            raise ValueError(
+                "C’est la clé d’API globale, qui ouvre tout le compte Cloudflare. "
+                "Créez plutôt un jeton d’API limité à la zone."
+            )
+        return jeton
+    try:
+        jeton_tunnel(texte)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("C’est le jeton d’un tunnel. Ce champ attend un jeton d’API Cloudflare.")
+    raise ValueError(
+        "Jeton d’API Cloudflare illisible : collez le jeton affiché par Cloudflare à sa création."
+    )
+
+
 def identifiant_tunnel(jeton: str) -> str:
     """Identifiant du tunnel porte par le jeton. Il n'a rien de secret : c'est
     celui que le tableau de bord affiche, et il aide a choisir le bon tunnel."""
@@ -77,6 +120,14 @@ class RemoteAccessConfig(BaseModel):
     #: n'importe ou. Meme rang que les mots de passe des applications, deja
     #: dans ce fichier (0600) ; jamais renvoye au navigateur.
     tunnel_token: str = Field(default="", max_length=4096, repr=False)
+    #: Jeton d'API Cloudflare du defi DNS-01, en mode Tailscale avec domaine :
+    #: droits `Zone:Zone:Read` et `Zone:DNS:Edit`, limites a la zone. Il peut
+    #: modifier le DNS du domaine : meme rang que `tunnel_token`.
+    dns_token: str = Field(default="", max_length=4096, repr=False)
+    #: Port HTTPS de la passerelle, en mode Tailscale avec domaine. Le defi
+    #: DNS-01 n'a besoin d'aucun port : 443 se change donc librement quand un
+    #: NAS l'occupe deja.
+    https_port: int = Field(default=443, ge=1, le=65535)
 
     @field_validator("domain")
     @classmethod
@@ -109,15 +160,25 @@ class RemoteAccessConfig(BaseModel):
     def token(cls, value):
         return jeton_tunnel(value) if value.strip() else ""
 
+    @field_validator("dns_token")
+    @classmethod
+    def api_token(cls, value):
+        return jeton_api_cloudflare(value) if value.strip() else ""
+
     @model_validator(mode="after")
     def complete(self):
         self.services = list(dict.fromkeys(self.services))
-        if self.mode in ("https", "cloudflare") and (not self.domain or not self.services):
+        if (self.mode in ("https", "cloudflare") or self.dns01) and (not self.domain or not self.services):
             raise ValueError("Un accès par domaine demande un domaine et au moins une application.")
         if self.mode == "cloudflare" and not self.tunnel_token:
             raise ValueError("Le tunnel Cloudflare demande le jeton du tunnel.")
+        if self.dns01 and not self.dns_token:
+            raise ValueError("Les adresses HTTPS sur votre domaine demandent un jeton d’API Cloudflare.")
         if self.mode != "cloudflare":
             self.tunnel_token = ""
+        if not self.dns01:
+            self.dns_token = ""
+            self.https_port = 443
         self.names = {sid: nom for sid, nom in self.names.items() if sid in self.services}
         adresses = [self.hostname(sid) for sid in self.services]
         if len(set(adresses)) != len(adresses):
@@ -128,16 +189,25 @@ class RemoteAccessConfig(BaseModel):
 
     @model_serializer(mode="wrap")
     def _compatible(self, handler):
-        # Pas de nouvelle version de stack.yml pour ces deux champs : une PlugArr
-        # plus ancienne REFUSE un champ inconnu ici (extra="forbid"), elle ne
-        # l'efface pas en silence. Les omettre quand ils sont vides garde donc
-        # lisibles, par l'image d'administration epinglee, toutes les piles qui
-        # ne s'en servent pas.
+        # Pas de nouvelle version de stack.yml pour ces champs : une PlugArr plus
+        # ancienne REFUSE un champ inconnu ici (extra="forbid"), elle ne
+        # l'efface pas en silence. Les omettre quand ils sont vides, ou a leur
+        # valeur par defaut, garde donc lisibles, par l'image d'administration
+        # epinglee, toutes les piles qui ne s'en servent pas.
         data = handler(self)
-        for champ in ("names", "tunnel_token"):
+        for champ in ("names", "tunnel_token", "dns_token"):
             if not data.get(champ):
                 data.pop(champ, None)
+        if data.get("https_port") == 443:
+            data.pop("https_port")
         return data
+
+    @property
+    def dns01(self) -> bool:
+        """Adresses HTTPS privees : Tailscale, plus un domaine dont Caddy obtient
+        le certificat wildcard par DNS-01 (docs/PLAN_HTTPS_DNS01.md). Sans
+        domaine, le mode Tailscale reste celui des adresses IP."""
+        return self.mode == "tailscale" and bool(self.domain)
 
     def label(self, sid: str) -> str:
         return self.names.get(sid) or NOMS_PAR_DEFAUT[sid]

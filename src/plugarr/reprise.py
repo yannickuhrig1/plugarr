@@ -234,6 +234,11 @@ def appliquer(
         if neuve.remote_access.mode in ("https", "cloudflare") and not neuve.remote_access.services:
             neuve.remote_access.mode = "local"
             neuve.remote_access.tunnel_token = ""
+        if neuve.remote_access.dns01 and not neuve.remote_access.services:
+            # Plus rien a publier sur le domaine : Tailscale reste, par adresse IP.
+            neuve.remote_access.domain = ""
+            neuve.remote_access.dns_token = ""
+            neuve.remote_access.https_port = 443
 
     # Les identifiants, service par service. C'est ce qui evite d'annoncer un
     # mot de passe que le service refusera.

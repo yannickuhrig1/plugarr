@@ -1575,6 +1575,9 @@ class RemoteAccessScreen(WizardScreen):
                 yield RadioButton("HTTPS avec votre domaine", id="ra-https")
                 yield RadioButton("Tunnel Cloudflare (sans port ouvert)", id="ra-cloudflare")
                 yield RadioButton("Tailscale (reseau prive)", id="ra-tailscale")
+            # Tailscale, plus un domaine : adresses HTTPS dont le certificat
+            # s'obtient par le DNS, sans ouvrir de port (docs/PLAN_HTTPS_DNS01.md).
+            yield Checkbox("Adresses HTTPS sur mon domaine gere par Cloudflare", id="ra-dns01", classes="hidden")
             yield Input(placeholder="votre-domaine.fr", id="ra-domain", classes="hidden")
             yield SelectionList(id="ra-services", classes="hidden")
             # Un sous-domaine par application, modifiable : un `sonarr.` deja
@@ -1589,6 +1592,18 @@ class RemoteAccessScreen(WizardScreen):
                 placeholder=t("Commande ou jeton du tunnel, copie depuis Cloudflare"),
                 password=True,
                 id="ra-jeton",
+                classes="hidden",
+            )
+            yield Input(
+                placeholder=t("Jeton d'API Cloudflare (Zone:Read et DNS:Edit sur la zone)"),
+                password=True,
+                id="ra-jeton-api",
+                classes="hidden",
+            )
+            yield Input(
+                placeholder=t("Port HTTPS, 443 par defaut"),
+                type="integer",
+                id="ra-port",
                 classes="hidden",
             )
             yield Static(id="ra-aide")
@@ -1613,24 +1628,38 @@ class RemoteAccessScreen(WizardScreen):
                 liste.add_option(Selection(catalog.get(sid).display_name, sid, sid in choisis))
             self.query_one(f"#ra-ligne-{sid}").set_class(sid not in self.app.selection, "hidden")
             self.query_one(f"#ra-nom-{sid}", Input).value = actuel.label(sid)
-        #: Jamais affiche : un champ vide le conserve, comme dans l'assistant web.
+        #: Jamais affiches : un champ vide les conserve, comme dans l'assistant web.
         self._jeton_enregistre = actuel.tunnel_token
+        self._jeton_api_enregistre = actuel.dns_token
         if actuel.tunnel_token:
             self.query_one("#ra-jeton", Input).placeholder = t(
                 "Jeton enregistre : laissez vide pour le garder"
             )
+        if actuel.dns_token:
+            self.query_one("#ra-jeton-api", Input).placeholder = t(
+                "Jeton enregistre : laissez vide pour le garder"
+            )
+        self.query_one("#ra-dns01", Checkbox).value = actuel.dns01
+        self.query_one("#ra-port", Input).value = str(actuel.https_port)
         self._afficher(actuel.mode)
 
     def _mode(self) -> str:
         bouton = self.query_one("#ra-mode", RadioSet).pressed_button
         return (bouton.id or "ra-local").removeprefix("ra-") if bouton else "local"
 
+    def _dns01(self, mode: str) -> bool:
+        return mode == "tailscale" and self.query_one("#ra-dns01", Checkbox).value
+
     def _afficher(self, mode: str) -> None:
-        domaine = mode in ("https", "cloudflare")
+        dns01 = self._dns01(mode)
+        domaine = mode in ("https", "cloudflare") or dns01
+        self.query_one("#ra-dns01", Checkbox).set_class(mode != "tailscale", "hidden")
         self.query_one("#ra-domain", Input).set_class(not domaine, "hidden")
         self.query_one("#ra-services", SelectionList).set_class(not domaine, "hidden")
         self.query_one("#ra-noms").set_class(not domaine, "hidden")
         self.query_one("#ra-jeton", Input).set_class(mode != "cloudflare", "hidden")
+        self.query_one("#ra-jeton-api", Input).set_class(not dns01, "hidden")
+        self.query_one("#ra-port", Input).set_class(not dns01, "hidden")
         aides = {
             "local": t("Vos applications restent joignables depuis votre reseau seulement."),
             "https": t(
@@ -1649,10 +1678,22 @@ class RemoteAccessScreen(WizardScreen):
                 "Sur Linux, PlugArr prepare Tailscale et donne le lien de connexion a la fin."
             ),
         }
-        self.query_one("#ra-aide", Static).update("[dim]" + aides[mode] + "[/dim]")
+        aide = aides[mode]
+        if dns01:
+            aide += " " + t(
+                "Avec votre domaine : le certificat s'obtient par le DNS, sans ouvrir de port. "
+                "Dans Cloudflare : My Profile, API Tokens, Create Token, Custom token, droits "
+                "Zone Read et DNS Edit limites a votre zone. Ce n'est pas le jeton du tunnel. "
+                "Les enregistrements A a creer sont donnes apres l'installation."
+            )
+        self.query_one("#ra-aide", Static).update("[dim]" + aide + "[/dim]")
 
     @on(RadioSet.Changed, "#ra-mode")
     def _changer(self, _event: RadioSet.Changed) -> None:
+        self._afficher(self._mode())
+
+    @on(Checkbox.Changed, "#ra-dns01")
+    def _changer_dns01(self, _event: Checkbox.Changed) -> None:
         self._afficher(self._mode())
 
     @on(Button.Pressed, "#next")
@@ -1660,18 +1701,26 @@ class RemoteAccessScreen(WizardScreen):
         from ..remote_models import RemoteAccessConfig
 
         mode = self._mode()
-        par_domaine = mode in ("https", "cloudflare")
+        dns01 = self._dns01(mode)
+        par_domaine = mode in ("https", "cloudflare") or dns01
         domaine = self.query_one("#ra-domain", Input).value.strip() if par_domaine else ""
         services = list(self.query_one("#ra-services", SelectionList).selected) if par_domaine else []
         noms = {sid: self.query_one(f"#ra-nom-{sid}", Input).value for sid in services}
         jeton = self.query_one("#ra-jeton", Input).value.strip() if mode == "cloudflare" else ""
         if mode == "cloudflare" and not jeton:
             jeton = self._jeton_enregistre
+        jeton_api = self.query_one("#ra-jeton-api", Input).value.strip() if dns01 else ""
+        if dns01 and not jeton_api:
+            jeton_api = self._jeton_api_enregistre
+        port = self.query_one("#ra-port", Input).value.strip() if dns01 else ""
         try:
             if par_domaine and (not domaine or not services):
                 raise ValueError(t("Indiquez un domaine seul et choisissez au moins une application."))
+            if dns01 and not (port.isdigit() and 1 <= int(port) <= 65535):
+                raise ValueError(t("Port HTTPS invalide : un nombre entre 1 et 65535."))
             choix = RemoteAccessConfig(
-                mode=mode, domain=domaine, services=services, names=noms, tunnel_token=jeton
+                mode=mode, domain=domaine, services=services, names=noms, tunnel_token=jeton,
+                dns_token=jeton_api, https_port=int(port) if dns01 else 443,
             )
         except ValueError as exc:
             # `include_input=False` : la valeur refusee peut etre le jeton.
@@ -1686,8 +1735,8 @@ class RemoteAccessScreen(WizardScreen):
 
         if _console_en_place(self.app) and not remote_access.admin_image_ready(choix):
             self.query_one("#ra-aide", Static).update("[red]" + t(
-                "La console en conteneur ne connait pas encore le tunnel Cloudflare ni les "
-                "sous-domaines personnalises. Desactivez-la, ou choisissez un autre acces."
+                "La console en conteneur ne connait pas encore cet acces distant. "
+                "Desactivez-la, ou choisissez un autre acces."
             ) + "[/red]")
             return
         self.app.remote_access = choix
@@ -1771,6 +1820,8 @@ class SummaryScreen(WizardScreen):
                 if cfg.remote_access.mode == "https"
                 else f"Cloudflare Tunnel · {cfg.remote_access.domain}"
                 if cfg.remote_access.mode == "cloudflare"
+                else f"Tailscale · HTTPS · {cfg.remote_access.domain}"
+                if cfg.remote_access.dns01
                 else "Tailscale" if cfg.remote_access.mode == "tailscale" else t("Local uniquement")
             )),
         ]
@@ -2297,6 +2348,15 @@ class ReportScreen(WizardScreen):
                     domaine=route["domain"], url=route["service_url"],
                 )
                 for route in resultat["routes"]
+            ]
+        if resultat.get("records"):
+            lignes.append(t(
+                "  Enregistrements a creer (Cloudflare : DNS, Records, Add record, "
+                "Proxy status DNS only) :"
+            ))
+            lignes += [
+                t("    {nom} : Type A, IPv4 address {adresse}", nom=r["hostname"], adresse=r["content"])
+                for r in resultat["records"]
             ]
         if resultat.get("auth_url"):
             lignes.append(t("  Lien d'association Tailscale : {lien}", lien=resultat["auth_url"]))

@@ -1,7 +1,8 @@
 # Adresses HTTPS privées par DNS-01
 
-Plan du 15 octobre 2026. L'étape 0 est en place (recette et CI, image pas encore
-publiée). Le reste n'est pas implémenté, et aucun essai réel n'a été fait.
+Plan du 15 octobre 2026. Les étapes 0 à 4 sont en place, ainsi que l'indicateur
+de l'étape 5, et l'image `plugarr-caddy` est publiée, publique, vérifiée et
+épinglée. Restent : republier l'image d'administration, et les essais réels.
 Idée reprise de [Caretakarr](https://github.com/caretakarr/caretakarr) (MIT, Go) :
 on reprend des idées, pas du code.
 
@@ -46,12 +47,21 @@ contient pas le module `caddy-dns/cloudflare`. PlugArr construit donc la sienne.
     avec un jeton de bonne forme ;
   - il est refusé sans jeton, ce qui prouve que le module est bien chargé.
 
-**Reste à faire :**
+**Publication du 15 octobre 2026 :**
 
-1. Pousser, puis lancer le workflow avec `publier` coché.
-2. Rendre public le paquet `plugarr-caddy` dans ses réglages GitHub : un nouveau
-   paquet ghcr naît privé, et personne ne pourrait le tirer.
-3. Épingler la référence donnée par le job dans `remote_access.py` (étape 2).
+- `ghcr.io/yannickuhrig1/plugarr-caddy:2.11.4-cloudflare-0.2.4@sha256:bced94f4…f70f0a`,
+  épinglée dans `remote_access.CADDY_DNS01_IMAGE`. Les plateformes amd64 et
+  arm64 sont présentes dans l'index, et l'essai amd64 de l'image publiée a
+  réussi.
+- Dans le workflow, l'essai arm64 n'a pas tourné : le stockage d'images
+  classique de Docker refuse de tirer le même condensat pour une seconde
+  architecture (« cannot overwrite digest »). Le workflow retire désormais
+  l'image locale entre les deux plateformes.
+- Paquet rendu public le même jour : l'index se lit sans authentification.
+- Image publiée essayée en local par son condensat, en arm64 (émulé) comme en
+  amd64 : Caddy v2.11.4, module `dns.providers.cloudflare` v0.2.4,
+  `cap_net_bind_service`. `essai.Caddyfile` est accepté avec un jeton de bonne
+  forme, et refusé sans jeton.
 
 **Écarté :**
 
@@ -85,6 +95,22 @@ version se décidera pour tout PlugArr à la fois, pas seulement pour cette imag
   ni du port 443 pour obtenir le certificat. Si 443 est déjà occupé (c'est
   souvent le cas sur un Synology), on propose 8443. Les fiches téléphone gèrent
   déjà un port HTTPS non standard (`telephone.py`).
+
+**Fait, avec les détails suivants :**
+
+- La propriété `RemoteAccessConfig.dns01` (mode `tailscale` et domaine rempli)
+  est le seul critère du mode. Aucune version de PlugArr n'a jamais enregistré
+  de domaine en mode Tailscale : les piles existantes n'en sont pas affectées.
+- `jeton_api_cloudflare()` accepte le jeton seul ou la commande `curl` de
+  vérification que Cloudflare affiche à la création (`Bearer <jeton>`). Il
+  reconnaît et nomme les deux autres secrets qu'on risque de coller là : la clé
+  d'API globale (37 caractères hexadécimaux, qui ouvre tout le compte) et le
+  jeton du tunnel.
+- `https_port` revient à 443 hors de ce mode, et n'est pas écrit à 443.
+- Assistant web : le jeton est retiré de la page et du plan, masqué dans les
+  erreurs, et conservé quand le champ revient vide en reprise.
+- Reprise : sans application publiée, la pile garde Tailscale par adresse IP.
+- Tests : `tests/test_remote_dns01.py`.
 
 ## Étape 2 : Caddyfile et compose (`remote_access.py`)
 
@@ -159,6 +185,24 @@ Côté compose :
 - `caddy.env` est supprimé dès qu'on quitte ce mode, comme `tunnel.env`
   aujourd'hui.
 
+**Fait, sauf l'écriture et la suppression de `caddy.env`, qui relèvent de
+l'activation (étape 3) :**
+
+- `caddyfile_dns01()` produit le Caddyfile ci-dessus. Un test vérifie qu'il est
+  identique, aux commentaires près, à `packaging/caddy/essai.Caddyfile`, que la
+  CI de l'image fait valider par Caddy. Changer le rendu oblige donc à changer
+  l'essai, ce qui relance cette validation.
+- `gateway_compose(cfg, tailscale_natif=...)` ajoute le service `caddy` à côté
+  de `gateway` (Tailscale en conteneur), ou le laisse seul si Tailscale est
+  installé sur la machine. Sans domaine, le compose Tailscale ne change pas.
+- `_check_owned()` exige l'étiquette `plugarr.remote` sur chaque service.
+- `_published()` donne les applications publiées sur le domaine.
+  `_check_publishable()` s'en sert : il passait par `external_urls()`, qui ne
+  connaît pas encore DNS-01, et n'aurait donc pas refusé un service adopté.
+- `CADDY_DNS01_IMAGE` est épinglée par tag et condensat depuis la publication.
+  Un test vérifie que le tag correspond aux versions de la recette, un autre que
+  le condensat est présent.
+
 ## Étape 3 : activation et diagnostic
 
 Dans `activate()` :
@@ -194,6 +238,35 @@ explication dans `_explain` :
   n'utilise pas forcément le même résolveur que le téléphone : ce test donne un
   indice, pas une preuve.
 
+**Fait, avec les détails suivants :**
+
+- L'ordre dans `activate()` est celui-ci : rendu du Caddyfile (qui refuse un
+  service adopté), puis zone Cloudflare, puis protections des applications, puis
+  fichiers. Un jeton refusé ne change donc ni qBittorrent, ni les fichiers.
+- `_zone_cloudflare()` remonte les étiquettes du domaine et distingue trois cas :
+  un jeton refusé, une zone invisible (droit Zone:Read) et une API muette. Il ne
+  recopie jamais le jeton dans un message.
+- Avec Tailscale installé sur la machine, le compose ne contient que Caddy, et
+  aucun `tailscale up` n'est lancé dans un conteneur.
+- `caddy.env` est retiré dès qu'on quitte DNS-01, avant tout retour anticipé :
+  Tailscale installé sur la machine ne passe pas par l'écriture du compose.
+- `external_urls()` donne `https://nom.domaine[:port]` aux applications
+  publiées, et l'adresse Tailscale par IP aux autres. Les fiches du téléphone
+  suivent sans changement.
+- Le résultat porte `records`, les enregistrements A à créer, y compris en
+  simulation : l'étape 4 les affichera comme les routes du tunnel.
+- Le journal de Caddy n'est lu que si un certificat manque. Après un
+  redémarrage, Caddy recharge son certificat sans rien écrire : le journal
+  explique un échec, il ne juge pas.
+- Une erreur TLS se nomme désormais `certificate` dans tous les modes, au lieu de
+  `unreachable`, avec une explication propre à chacun. En mode tunnel, c'est le
+  certificat gratuit de Cloudflare, qui ne couvre qu'un niveau de sous-domaine.
+
+Reste à vérifier sur un vrai Caddy : les lignes du journal cherchées
+(`CADDY_CERT_OK`, `CADDY_PROPAGATION`, `CADDY_JETON_REFUSE`,
+`CADDY_CERT_ECHEC`). Elles viennent de CertMagic et de l'API Cloudflare, mais
+leur texte exact n'a pas encore été relevé dans un journal réel.
+
 ## Étape 4 : interfaces web et TUI
 
 - Dans l'assistant web (`web/wizard.html`, `web/remote.js`) et la TUI
@@ -210,6 +283,27 @@ explication dans `_explain` :
   `scripts/audit_traductions.py` échoue) et dans le dictionnaire `english` de
   `remote.js`.
 
+**Fait, avec les détails suivants :**
+
+- Web : case `#remote-dns01` sous la carte Tailscale. Cochée, elle affiche le
+  bloc domaine et sous-domaines existant, puis le jeton d'API et le port.
+  L'aperçu des adresses suit le port. `remote.js` lit le jeton comme
+  `jeton_api_cloudflare()` (jeton seul ou commande `curl`) et refuse la clé
+  globale avec le même message. Après activation, les enregistrements A
+  s'affichent comme les routes du tunnel, champ par champ, prêts à copier.
+- TUI : même case et mêmes champs, mêmes refus. Les enregistrements A sont donnés
+  dans le rapport.
+- Récapitulatif web et TUI : « Tailscale · HTTPS · domaine ».
+- Parcours vérifié dans le navigateur, en démo, le 15 octobre 2026 : refus sans
+  jeton et avec la clé globale, jeton extrait d'une commande `curl`,
+  récapitulatif, activation simulée, adresses en `:8443`, enregistrements A vers
+  l'adresse de démo. Aucune erreur dans la console.
+- Tests : `tests/test_tui_parite.py` (choix et rapport dans la TUI), et un
+  scénario `dns01` dans `tests/js/wizard_remote.cjs` (Playwright, lancé à la
+  main ; pas exécuté ici faute du paquet `playwright`).
+- Documentation utilisateur : section « Tailscale avec votre domaine (HTTPS) »
+  dans `docs/ACCES_DISTANT.md`.
+
 ## Étape 5 : l'image d'administration
 
 Sur un serveur SSH, c'est l'image admin épinglée qui lit `stack.yml`. La 0.12.2
@@ -219,6 +313,12 @@ refuserait le champ `dns_token`, puisque le modèle interdit les champs inconnus
 On reprend la méthode du tunnel : un indicateur `CONSOLE_IMAGE_DNS01 = False`
 dans `catalog.py`, lu par `admin_image_ready()`. Ce choix reste refusé tant que
 l'image admin n'a pas été republiée et réépinglée.
+
+**Fait dès l'étape 1**, puisque c'est elle qui ajoute les champs. Les messages de
+refus de l'assistant et de la TUI nommaient le tunnel et les sous-domaines : ils
+disent maintenant « cet accès distant », car le seul refus encore possible est
+celui de DNS-01. Reste à republier l'image d'administration, à la réépingler, puis
+à passer l'indicateur à `True`.
 
 ## Tests
 

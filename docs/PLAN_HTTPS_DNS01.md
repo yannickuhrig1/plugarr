@@ -1,8 +1,8 @@
 # Adresses HTTPS privées par DNS-01
 
 Plan du 15 octobre 2026. Les étapes 0 à 4 sont en place, ainsi que l'indicateur
-de l'étape 5, et l'image `plugarr-caddy` est publiée et épinglée. Restent : rendre
-son paquet public, republier l'image d'administration, et les essais réels.
+de l'étape 5, et l'image `plugarr-caddy` est publiée, publique, vérifiée et
+épinglée. Restent : republier l'image d'administration, et les essais réels.
 Idée reprise de [Caretakarr](https://github.com/caretakarr/caretakarr) (MIT, Go) :
 on reprend des idées, pas du code.
 
@@ -53,13 +53,15 @@ contient pas le module `caddy-dns/cloudflare`. PlugArr construit donc la sienne.
   épinglée dans `remote_access.CADDY_DNS01_IMAGE`. Les plateformes amd64 et
   arm64 sont présentes dans l'index, et l'essai amd64 de l'image publiée a
   réussi.
-- L'essai arm64 n'a pas tourné : le stockage d'images classique de Docker
-  refuse de tirer le même condensat pour une seconde architecture (« cannot
-  overwrite digest »). Le workflow retire désormais l'image locale entre les
-  deux plateformes. L'image arm64 vient de la même recette que celle essayée
-  en local (émulée) le même jour.
-- Reste à faire : rendre public le paquet `plugarr-caddy` dans ses réglages
-  GitHub. Un nouveau paquet ghcr naît privé, et personne ne pourrait le tirer.
+- Dans le workflow, l'essai arm64 n'a pas tourné : le stockage d'images
+  classique de Docker refuse de tirer le même condensat pour une seconde
+  architecture (« cannot overwrite digest »). Le workflow retire désormais
+  l'image locale entre les deux plateformes.
+- Paquet rendu public le même jour : l'index se lit sans authentification.
+- Image publiée essayée en local par son condensat, en arm64 (émulé) comme en
+  amd64 : Caddy v2.11.4, module `dns.providers.cloudflare` v0.2.4,
+  `cap_net_bind_service`. `essai.Caddyfile` est accepté avec un jeton de bonne
+  forme, et refusé sans jeton.
 
 **Écarté :**
 

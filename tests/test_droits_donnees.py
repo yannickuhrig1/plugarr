@@ -83,11 +83,13 @@ def test_lance_en_sudo_les_dossiers_fermes_sont_rendus(tmp_path, monkeypatch):
         os, "chown", lambda chemin, uid, gid, **_: donnes.append((str(chemin), (uid, gid)))
     )
 
-    repares, restants = layout.ouvrir_donnees(data, (1000, 10))
+    compte = _autre_compte()
+    repares, restants = layout.ouvrir_donnees(data, compte)
 
     assert restants == []
+    assert donnes, "rien n'a ete rendu : le test ne prouverait rien"
     assert [str(p) for p in repares] == [nom for nom, _ in donnes]
-    assert all(owner == (1000, 10) for _, owner in donnes)
+    assert all(owner == compte for _, owner in donnes)
 
 
 def test_le_chown_ne_descend_pas_dans_la_mediatheque(tmp_path, monkeypatch):
@@ -101,7 +103,7 @@ def test_le_chown_ne_descend_pas_dans_la_mediatheque(tmp_path, monkeypatch):
     monkeypatch.setattr(layout, "_est_root", lambda: True)
     monkeypatch.setattr(os, "chown", lambda chemin, *_a, **_k: touches.append(str(chemin)))
 
-    layout.ouvrir_donnees(data, (1000, 10))
+    layout.ouvrir_donnees(data, _autre_compte())
 
     assert str(film) not in touches
     assert str(film / "un film.mkv") not in touches

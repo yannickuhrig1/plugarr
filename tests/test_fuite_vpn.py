@@ -18,11 +18,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import urllib.parse
 from pathlib import Path
 
 import pytest
 
-from plugarr import compose, diagnostics, orchestrator, vpncheck
+from plugarr import compose, diagnostics, orchestrator, seed, vpncheck
 from plugarr.models import Category, VpnConfig
 from plugarr.runner import Check
 
@@ -642,10 +643,65 @@ def test_un_port_qui_n_en_est_pas_un_est_ignore(tmp_path, port):
     assert journal == ""
 
 
+def _script_du_releve(monkeypatch):
+    """Le script tel que `ports_entrants` l'enverrait dans Gluetun."""
+    lance = {}
+
+    def exec_in(_conteneur, commande, **_kw):
+        lance["script"] = commande[-1]
+        return True, ""
+
+    monkeypatch.setattr(vpncheck, "exec_in", exec_in)
+    vpncheck.ports_entrants(_cfg_pf("qbittorrent"))
+    return lance["script"]
+
+
+def _formulaire_recu(journal):
+    """Le formulaire de connexion, decode comme qBittorrent le decode."""
+    corps = next(
+        ligne.removeprefix("CORPS ") for ligne in journal.splitlines() if ligne.startswith("CORPS ")
+    )
+    return urllib.parse.parse_qs(corps, keep_blank_values=True, strict_parsing=True)
+
+
+_MOTS_DE_PASSE_PIEGES = [
+    seed.PASSWORD_SPECIALS,
+    "avec+plus",
+    "100%",
+    "%41",
+    "a&b=c",
+    "+%&",
+]
+
+
 @posix
-def test_le_releve_des_ports_ne_montre_pas_le_mot_de_passe(tmp_path):
+@pytest.mark.parametrize("mot", _MOTS_DE_PASSE_PIEGES)
+def test_le_mot_de_passe_survit_au_decodage_du_formulaire(tmp_path, mot):
+    """`PASSWORD_SPECIALS` contient `+` et `%`. Envoyes tels quels, qBittorrent lit
+    une espace et un code : 45 % des mots de passe generes echouaient, et le port
+    n'etait jamais pose, sans un mot."""
+    script = compose.render_port_sync(_cfg_pf("qbittorrent"))
+
+    _, journal = _lancer_sh(tmp_path, script, "51413", QBT_USER="ad+min", QBT_PASS=mot)
+
+    assert _formulaire_recu(journal) == {"username": ["ad+min"], "password": [mot]}
+
+
+@posix
+@pytest.mark.parametrize("mot", _MOTS_DE_PASSE_PIEGES)
+def test_le_releve_encode_aussi_le_mot_de_passe(tmp_path, monkeypatch, mot):
+    """Sinon le diagnostic ne se connecte pas non plus, et ne peut rien signaler."""
+    script = _script_du_releve(monkeypatch)
+
+    _, journal = _lancer_sh(tmp_path, script, QBT_USER="ad+min", QBT_PASS=mot)
+
+    assert _formulaire_recu(journal) == {"username": ["ad+min"], "password": [mot]}
+
+
+@posix
+def test_le_releve_des_ports_ne_montre_pas_le_mot_de_passe(tmp_path, monkeypatch):
     """Meme piege que le script de synchronisation, a chaque diagnostic."""
-    script = vpncheck._LECTURE_PORTS % {"qbittorrent": 8080, "transmission": 9091}
+    script = _script_du_releve(monkeypatch)
 
     code, journal = _lancer_sh(tmp_path, script)
 

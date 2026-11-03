@@ -324,6 +324,14 @@ def _console_block(cfg: StackConfig) -> dict:
 #: serait illisible et impossible a deboguer.
 PORT_SYNC = "port-sync.sh"
 
+#: Encode une valeur de formulaire, en shell : l'image de Gluetun n'embarque ni
+#: python ni jq. qBittorrent lit `+` comme une espace et `%` comme le debut d'un
+#: code (son `requestparser.cpp`), et `seed.PASSWORD_SPECIALS` contient les deux.
+#: Mesure le 2026-11-03 : 45 % des mots de passe generes en contiennent un, la
+#: connexion echouait alors et le port n'etait jamais pose, sans un mot. `&` en
+#: plus, pour un mot de passe choisi a la main.
+ENCODER_SH = """encoder() { printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/&/%26/g' -e 's/+/%2B/g'; }"""
+
 
 def port_sync_clients(cfg: StackConfig) -> list[str]:
     """Client dont le port d'ecoute doit suivre celui que le VPN attribue.
@@ -393,10 +401,12 @@ def render_port_sync(cfg: StackConfig) -> str:
     if "qbittorrent" in clients:
         port = catalog.get("qbittorrent").internal_port
         lignes += [
+            ENCODER_SH,
             "poser_qbittorrent() {",
             "  # Par fichier, jamais en argument : depuis l'hote, n'importe quel compte",
             "  # lit la ligne de commande d'un conteneur avec un simple `ps`.",
-            '  printf "username=%s&password=%s" "$QBT_USER" "$QBT_PASS" > "$AUTH"',
+            '  printf "username=%s&password=%s" \\',
+            '    "$(encoder "$QBT_USER")" "$(encoder "$QBT_PASS")" > "$AUTH"',
             '  wget -q --save-cookies "$CK" --keep-session-cookies \\',
             '    --post-file "$AUTH" \\',
             f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/auth/login" || return 1',

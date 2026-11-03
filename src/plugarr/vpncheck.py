@@ -162,7 +162,8 @@ if [ -n "$QBT_USER" ]; then
   CK=/tmp/plugarr-controle.cookies
   AUTH=/tmp/plugarr-controle.auth
   umask 077
-  printf 'username=%%s&password=%%s' "$QBT_USER" "$QBT_PASS" > "$AUTH"
+  printf 'username=%%s&password=%%s' \
+    "$(encoder "$QBT_USER")" "$(encoder "$QBT_PASS")" > "$AUTH"
   if wget -q --save-cookies "$CK" --keep-session-cookies \
        --post-file "$AUTH" \
        -O /dev/null "http://127.0.0.1:%(qbittorrent)s/api/v2/auth/login" 2>/dev/null; then
@@ -195,16 +196,17 @@ def ports_entrants(cfg: StackConfig) -> dict[str, int]:
     obtenu : c'est le sentinel de Gluetun lui-meme, verifie contre la v3.41.3, et
     il distingue « pas de port » de « port different ».
     """
-    from .compose import port_sync_clients
+    from .compose import ENCODER_SH, port_sync_clients
 
     clients = port_sync_clients(cfg)
     if not clients:
         return {}
     # La cle du serveur de controle est relue DANS Gluetun, qui monte le
     # fichier : elle ne passe pas sur la ligne de commande.
-    script = gluetun_auth.LIRE_CLE_SH + "\n" + _LECTURE_PORTS % {
+    lecture = _LECTURE_PORTS % {
         sid: catalog.get(sid).internal_port for sid in ("qbittorrent", "transmission")
     }
+    script = f"{gluetun_auth.LIRE_CLE_SH}\n{ENCODER_SH}\n{lecture}"
     ok, sortie = exec_in(f"{cfg.project_name}-gluetun", ["sh", "-c", script])
     if not ok:
         return {}

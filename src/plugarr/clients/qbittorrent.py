@@ -79,14 +79,27 @@ class QBittorrentClient:
             )
         self.login()
 
+    def _call(self, method: str, path: str, **kw) -> httpx.Response:
+        """Envoie la requete, et rouvre la session une fois si elle est refusee.
+
+        Une session qBittorrent expire et ne survit pas a un redemarrage du client.
+        Le refus arrive en 403, ou en 200 avec "Forbidden" pour corps (voir
+        `categories`). Une seule reprise : au-dela, c'est a l'appelant de le dire.
+        """
+        resp = self._http.request(method, path, **kw)
+        if resp.status_code == 403 or resp.text.strip() == "Forbidden":
+            self.login()
+            resp = self._http.request(method, path, **kw)
+        return resp
+
     @property
     def version(self) -> str:
-        return self._http.get("/api/v2/app/version").text.strip()
+        return self._call("GET", "/api/v2/app/version").text.strip()
 
     # -- categories ----------------------------------------------------------
 
     def categories(self) -> dict:
-        resp = self._http.get("/api/v2/torrents/categories")
+        resp = self._call("GET", "/api/v2/torrents/categories")
         if not resp.content:
             return {}
         try:
@@ -110,7 +123,8 @@ class QBittorrentClient:
         """
         if name in self.categories():
             return False
-        resp = self._http.post(
+        resp = self._call(
+            "POST",
             "/api/v2/torrents/createCategory",
             data={"category": name, "savePath": save_path},
         )
@@ -127,7 +141,7 @@ class QBittorrentClient:
         return True
 
     def preferences(self) -> dict:
-        resp = self._http.get("/api/v2/app/preferences")
+        resp = self._call("GET", "/api/v2/app/preferences")
         if resp.status_code >= 400:
             raise WiringError(
                 f"{self.name}: preferences illisibles",
@@ -164,7 +178,7 @@ class QBittorrentClient:
         change = {k: v for k, v in voulu.items() if actuel.get(k) != v}
         if not change:
             return []
-        resp = self._http.post("/api/v2/app/setPreferences", data={"json": json.dumps(change)})
+        resp = self._call("POST", "/api/v2/app/setPreferences", data={"json": json.dumps(change)})
         if resp.status_code >= 400:
             raise WiringError(
                 f"{self.name}: activation du RSS refusee",
@@ -187,7 +201,8 @@ class QBittorrentClient:
         fichier a l'arret, donc une modification a chaud du fichier serait
         purement et simplement perdue.
         """
-        resp = self._http.post(
+        resp = self._call(
+            "POST",
             "/api/v2/app/setPreferences",
             data={"json": json.dumps({"web_ui_password": password})},
         )

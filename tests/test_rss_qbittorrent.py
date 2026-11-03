@@ -35,6 +35,7 @@ class _FauxQb(QBittorrentClient):
 
     class _Reponse:
         status_code = 200
+        text = ""
 
     def _poster(self, chemin, data):
         self.ecrits.append(json.loads(data["json"]))
@@ -47,7 +48,7 @@ class _FauxQb(QBittorrentClient):
 
         class _Client:
             @staticmethod
-            def post(chemin, data=None, **kw):
+            def request(methode, chemin, data=None, **kw):
                 return faux._poster(chemin, data)
 
         return _Client()

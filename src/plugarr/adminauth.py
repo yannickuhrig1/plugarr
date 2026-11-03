@@ -23,7 +23,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import math
 import secrets
+import threading
 import time
 
 ALGO = "pbkdf2-sha256"
@@ -34,10 +36,17 @@ SALT_BYTES = 16
 #: reglages, assez courte pour qu'un navigateur oublie ne reste pas ouvert.
 SESSION_SECONDS = 12 * 3600
 
-#: Au-dela, plus aucune tentative n'est acceptee pendant `LOCKOUT_SECONDS`. La
-#: console est jointe par le reseau local des qu'on la sort de 127.0.0.1 : sans
-#: cela, un mot de passe se devine en quelques heures.
+#: Essais permis par adresse pendant `LOCKOUT_SECONDS`. La console est jointe par
+#: le reseau local des qu'on la sort de 127.0.0.1 : sans cela, un mot de passe se
+#: devine en quelques heures.
+#:
+#: Par adresse et non en tout : avec un seul compteur, n'importe quel appareil du
+#: reseau bloquait aussi l'administrateur, en dix essais.
 MAX_ATTEMPTS = 10
+#: Essais permis toutes adresses confondues, pendant la meme duree. Seule, la
+#: limite par adresse se multiplierait par le nombre d'adresses. Ce plafond borne
+#: aussi la memoire : une fois atteint, plus rien n'est note.
+MAX_ATTEMPTS_TOTAL = 50
 LOCKOUT_SECONDS = 300
 
 
@@ -71,55 +80,86 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 class Sessions:
-    """Sessions en memoire, avec limitation des tentatives.
+    """Sessions en memoire, avec limitation des tentatives par adresse.
 
     En memoire et non sur disque, volontairement : redemarrer la console doit
     deconnecter tout le monde. C'est le comportement qu'on attend d'un outil
     d'administration, et cela evite d'avoir a expirer des jetons persistes.
+
+    Sous verrou : la console sert chaque requete dans son propre fil.
     """
 
     def __init__(self, *, now=time.monotonic) -> None:
         self._now = now
+        self._lock = threading.Lock()
         self._sessions: dict[str, float] = {}
-        self._failures: list[float] = []
+        self._failures: dict[str, list[float]] = {}
 
     # -- tentatives ----------------------------------------------------------
 
-    @property
-    def locked_out(self) -> bool:
+    def _attente(self, ip: str) -> int:
+        """Secondes avant le prochain essai permis a `ip`. 0 s'il l'est deja."""
         maintenant = self._now()
-        self._failures = [t for t in self._failures if maintenant - t < LOCKOUT_SECONDS]
-        return len(self._failures) >= MAX_ATTEMPTS
+        self._failures = {
+            adresse: recents
+            for adresse, essais in self._failures.items()
+            if (recents := [t for t in essais if maintenant - t < LOCKOUT_SECONDS])
+        }
+        tous = [t for essais in self._failures.values() for t in essais]
+        attente = 0.0
+        for essais, plafond in (
+            (self._failures.get(ip, []), MAX_ATTEMPTS),
+            (tous, MAX_ATTEMPTS_TOTAL),
+        ):
+            if len(essais) >= plafond:
+                # Une place se libere quand le plus ancien essai expire.
+                attente = max(attente, LOCKOUT_SECONDS - (maintenant - min(essais)))
+        # `ceil` : 0 veut dire « permis », pas « moins d'une seconde ».
+        return math.ceil(attente)
 
-    def record_failure(self) -> None:
-        self._failures.append(self._now())
+    def reserve_attempt(self, ip: str) -> bool:
+        """Compte un essai AVANT de verifier le mot de passe. False s'il est refuse.
 
-    def clear_failures(self) -> None:
-        self._failures.clear()
+        Compter apres l'echec laissait passer les rafales : le hachage prend une
+        fraction de seconde, et les requetes paralleles franchissaient toutes le
+        controle avant que la premiere ne soit notee. Mesure le 2026-11-03 : 22
+        essais verifies sur 40 envoyes ensemble, pour une limite de dix.
+        """
+        with self._lock:
+            if self._attente(ip):
+                return False
+            self._failures.setdefault(ip, []).append(self._now())
+            return True
 
-    def retry_in(self) -> int:
+    def clear_failures(self, ip: str) -> None:
+        with self._lock:
+            self._failures.pop(ip, None)
+
+    def retry_in(self, ip: str) -> int:
         """Secondes restantes avant une nouvelle tentative. 0 si aucune attente."""
-        if not self.locked_out:
-            return 0
-        return max(0, int(LOCKOUT_SECONDS - (self._now() - min(self._failures))))
+        with self._lock:
+            return self._attente(ip)
 
     # -- sessions ------------------------------------------------------------
 
     def open(self) -> str:
         jeton = secrets.token_urlsafe(32)
-        self._sessions[jeton] = self._now() + SESSION_SECONDS
+        with self._lock:
+            self._sessions[jeton] = self._now() + SESSION_SECONDS
         return jeton
 
     def valid(self, jeton: str) -> bool:
         if not jeton:
             return False
-        expiration = self._sessions.get(jeton)
-        if expiration is None:
-            return False
-        if self._now() > expiration:
-            del self._sessions[jeton]
-            return False
-        return True
+        with self._lock:
+            expiration = self._sessions.get(jeton)
+            if expiration is None:
+                return False
+            if self._now() > expiration:
+                del self._sessions[jeton]
+                return False
+            return True
 
     def close(self, jeton: str) -> None:
-        self._sessions.pop(jeton, None)
+        with self._lock:
+            self._sessions.pop(jeton, None)

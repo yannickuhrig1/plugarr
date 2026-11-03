@@ -83,6 +83,19 @@ def test_le_mot_de_passe_de_la_console_ouvre_puis_ferme_la_session(tmp_path, ser
         assert c.get("/api/veille").status_code == 401
 
 
+def test_la_veille_limite_elle_aussi_les_tentatives(tmp_path, serveur):
+    """Elle partage le mot de passe de la console : la deviner ici suffirait."""
+    base, _, _ = serveur(_cfg(tmp_path, mot_de_passe="s3cret"))
+    with httpx.Client(base_url=base) as c:
+        for _ in range(adminauth.MAX_ATTEMPTS):
+            assert c.post("/login", data={"password": "faux"}).status_code == 401
+
+        refus = c.post("/login", data={"password": "s3cret"})
+
+    assert refus.status_code == 429
+    assert "Trop de tentatives" in refus.text
+
+
 def test_aucune_route_ne_modifie_quoi_que_ce_soit(tmp_path, serveur):
     base, jeton, _ = serveur(_cfg(tmp_path))
     with httpx.Client(base_url=base) as c:

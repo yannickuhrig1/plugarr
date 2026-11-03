@@ -16,6 +16,7 @@ import http.client
 import threading
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ import pytest
 from plugarr import admin, adminauth, i18n, orchestrator
 
 MOT_DE_PASSE = "unmotdepassecorrect"
+IP = "10.0.0.1"
 
 
 # ------------------------------------------------------------------ empreinte
@@ -102,36 +104,102 @@ def test_la_deconnexion_ferme_la_session():
 # --------------------------------------------------------------- tentatives
 
 
+def _epuiser(sessions, ip=IP):
+    for _ in range(adminauth.MAX_ATTEMPTS):
+        assert sessions.reserve_attempt(ip)
+
+
 def test_les_tentatives_sont_limitees():
     """Des que la console sort de 127.0.0.1, un mot de passe se devine en
     quelques heures sans cette limite."""
     sessions = adminauth.Sessions()
-    for _ in range(adminauth.MAX_ATTEMPTS):
-        sessions.record_failure()
+    _epuiser(sessions)
 
-    assert sessions.locked_out
-    assert sessions.retry_in() > 0
+    assert not sessions.reserve_attempt(IP)
+    assert sessions.retry_in(IP) > 0
 
 
 def test_le_blocage_se_leve_avec_le_temps():
     horloge = [1000.0]
     sessions = adminauth.Sessions(now=lambda: horloge[0])
-    for _ in range(adminauth.MAX_ATTEMPTS):
-        sessions.record_failure()
-    assert sessions.locked_out
+    _epuiser(sessions)
+    assert not sessions.reserve_attempt(IP)
 
     horloge[0] += adminauth.LOCKOUT_SECONDS + 1
 
-    assert not sessions.locked_out
+    assert sessions.retry_in(IP) == 0
+    assert sessions.reserve_attempt(IP)
+
+
+def test_l_attente_annoncee_n_est_jamais_nulle_tant_que_c_est_bloque():
+    """« Reessayez dans 0 s » serait faux, et 0 veut dire que l'essai est permis."""
+    horloge = [1000.0]
+    sessions = adminauth.Sessions(now=lambda: horloge[0])
+    _epuiser(sessions)
+
+    horloge[0] += adminauth.LOCKOUT_SECONDS - 0.5
+
+    assert sessions.retry_in(IP) == 1
+    assert not sessions.reserve_attempt(IP)
 
 
 def test_une_connexion_reussie_remet_le_compteur_a_zero():
     sessions = adminauth.Sessions()
     for _ in range(adminauth.MAX_ATTEMPTS - 1):
-        sessions.record_failure()
-    sessions.clear_failures()
+        sessions.reserve_attempt(IP)
+    sessions.clear_failures(IP)
 
-    assert not sessions.locked_out
+    _epuiser(sessions)
+
+
+def test_une_connexion_reussie_ne_lave_que_son_adresse():
+    """Sinon l'administrateur qui se connecte rendrait ses essais a l'attaquant."""
+    sessions = adminauth.Sessions()
+    _epuiser(sessions, "10.0.0.66")
+
+    sessions.reserve_attempt(IP)
+    sessions.clear_failures(IP)
+
+    assert not sessions.reserve_attempt("10.0.0.66")
+
+
+def test_un_appareil_bloque_ne_bloque_pas_les_autres():
+    """Avec un compteur unique, dix essais depuis n'importe quel appareil du
+    reseau local empechaient aussi l'administrateur d'entrer."""
+    sessions = adminauth.Sessions()
+    _epuiser(sessions, "10.0.0.66")
+
+    assert sessions.retry_in(IP) == 0
+    assert sessions.reserve_attempt(IP)
+
+
+def test_multiplier_les_adresses_ne_multiplie_pas_les_essais():
+    """Seule, la limite par adresse se multiplierait par le nombre d'adresses."""
+    sessions = adminauth.Sessions()
+
+    permis = sum(
+        sessions.reserve_attempt(f"10.0.0.{n}")
+        for n in range(256)
+        for _ in range(adminauth.MAX_ATTEMPTS)
+    )
+
+    assert permis == adminauth.MAX_ATTEMPTS_TOTAL
+    assert sessions.retry_in("192.0.2.1") > 0
+
+
+def test_la_memoire_des_essais_reste_bornee():
+    """Une console joignable ne doit pas grossir a chaque adresse inconnue."""
+    horloge = [1000.0]
+    sessions = adminauth.Sessions(now=lambda: horloge[0])
+    for n in range(5000):
+        sessions.reserve_attempt(f"10.0.{n >> 8}.{n & 255}")
+
+    assert sum(map(len, sessions._failures.values())) == adminauth.MAX_ATTEMPTS_TOTAL
+
+    horloge[0] += adminauth.LOCKOUT_SECONDS + 1
+    sessions.retry_in(IP)
+
+    assert sessions._failures == {}
 
 
 # ------------------------------------------------------------------- serveur
@@ -272,6 +340,40 @@ def test_les_tentatives_repetees_finissent_bloquees(console):
     assert i18n.langue() == "fr", f"langue={i18n.langue()}"
     assert code == 429, f"page={page[:300]!r}"
     assert "Trop de tentatives" in page, f"code={code} page={page[:300]!r}"
+
+
+def test_une_rafale_ne_depasse_pas_la_limite(console):
+    """Compter apres le hachage laissait passer les requetes paralleles : 22 essais
+    verifies sur 40 envoyes ensemble, pour une limite de dix (mesure)."""
+    def essayer(_):
+        try:
+            return appel(console, "POST", "/login", {"password": "faux"})[0]
+        except OSError:
+            # La file d'attente du serveur (5 places) a deborde : rien n'a ete essaye.
+            return None
+
+    with ThreadPoolExecutor(max_workers=40) as pool:
+        codes = list(pool.map(essayer, range(40)))
+    # Jusqu'au blocage : les essais perdus ne doivent pas masquer un depassement.
+    while (code := essayer(None)) != 429:
+        codes.append(code)
+
+    assert codes.count(401) == adminauth.MAX_ATTEMPTS
+
+
+def test_le_refus_pour_trop_de_tentatives_arrive_entier(console):
+    """Refuser sans lire le corps fait repondre un RST a la pile TCP : le navigateur
+    affichait une connexion coupee au lieu de la phrase qui donne l'attente. Cinq Mo
+    pour que l'echec soit certain : un petit corps tient dans les tampons reseau."""
+    for _ in range(adminauth.MAX_ATTEMPTS):
+        appel(console, "POST", "/login", {"password": "faux"})
+
+    code, _, page = appel(
+        console, "POST", "/login", {"password": "faux", "bourrage": "x" * 5_000_000}
+    )
+
+    assert code == 429
+    assert "Trop de tentatives" in page
 
 
 def test_les_entetes_de_securite_sont_poses(console):

@@ -583,13 +583,17 @@ class _Handler(BaseHTTPRequestHandler):
         if not self.cfg.admin_password_hash:
             self._deny()
             return
-        if self.sessions.locked_out:
-            attente = self.sessions.retry_in()
+        # L'adresse de la connexion, jamais `X-Forwarded-For`, qui se forge. Derriere
+        # un mandataire, tout le monde partage donc le meme compteur.
+        ip = self.client_address[0]
+        if not self.sessions.reserve_attempt(ip):
+            attente = self.sessions.retry_in(ip)
             page = _page_connexion(
                 t("Trop de tentatives. Reessayez dans {secondes} s.", secondes=attente)
             )
             self._send(HTTPStatus.TOO_MANY_REQUESTS, page.encode("utf-8"),
                        "text/html; charset=utf-8")
+            vider_corps_requete(self)
             return
 
         longueur = int(self.headers.get("Content-Length") or 0)
@@ -599,12 +603,11 @@ class _Handler(BaseHTTPRequestHandler):
         propose = (champs.get("password") or [""])[0]
 
         if not adminauth.verify_password(propose, self.cfg.admin_password_hash):
-            self.sessions.record_failure()
             page = _page_connexion("Mot de passe refuse.")
             self._send(HTTPStatus.UNAUTHORIZED, page.encode("utf-8"), "text/html; charset=utf-8")
             return
 
-        self.sessions.clear_failures()
+        self.sessions.clear_failures(ip)
         jeton = self.sessions.open()
         self._send_dashboard(cookie_value=jeton)
 

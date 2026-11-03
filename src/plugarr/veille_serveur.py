@@ -185,18 +185,18 @@ class _Gestionnaire(BaseHTTPRequestHandler):
         if route != "/login" or not self.cfg.admin_password_hash:
             self._envoyer(HTTPStatus.NOT_FOUND, b"", "text/plain")
             return
-        if self.sessions.locked_out:
+        ip = self.client_address[0]
+        if not self.sessions.reserve_attempt(ip):
             self._connexion(
                 HTTPStatus.TOO_MANY_REQUESTS,
-                f"Trop de tentatives. Réessayez dans {self.sessions.retry_in()} s.",
+                f"Trop de tentatives. Réessayez dans {self.sessions.retry_in(ip)} s.",
             )
             return
         propose = (parse_qs(corps).get("password") or [""])[0]
         if not adminauth.verify_password(propose, self.cfg.admin_password_hash):
-            self.sessions.record_failure()
             self._connexion(HTTPStatus.UNAUTHORIZED, "Mot de passe refusé.")
             return
-        self.sessions.clear_failures()
+        self.sessions.clear_failures(ip)
         self._html(HTTPStatus.OK, _PAGE.format(style=_STYLE), cookie=self.sessions.open())
 
 

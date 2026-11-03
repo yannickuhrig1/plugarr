@@ -11,6 +11,8 @@ etre une rustine plus tard, meme si la Phase 1 n'expose que la forme sans VPN.
 from __future__ import annotations
 
 import os
+import secrets
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -322,6 +324,14 @@ def _console_block(cfg: StackConfig) -> dict:
 #: serait illisible et impossible a deboguer.
 PORT_SYNC = "port-sync.sh"
 
+#: Encode une valeur de formulaire, en shell : l'image de Gluetun n'embarque ni
+#: python ni jq. qBittorrent lit `+` comme une espace et `%` comme le debut d'un
+#: code (son `requestparser.cpp`), et `seed.PASSWORD_SPECIALS` contient les deux.
+#: Mesure le 2026-11-03 : 45 % des mots de passe generes en contiennent un, la
+#: connexion echouait alors et le port n'etait jamais pose, sans un mot. `&` en
+#: plus, pour un mot de passe choisi a la main.
+ENCODER_SH = """encoder() { printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/&/%26/g' -e 's/+/%2B/g'; }"""
+
 
 def port_sync_clients(cfg: StackConfig) -> list[str]:
     """Client dont le port d'ecoute doit suivre celui que le VPN attribue.
@@ -369,6 +379,10 @@ def render_port_sync(cfg: StackConfig) -> str:
         "",
         'PORT="$1"',
         '[ -n "$PORT" ] || exit 0',
+        "# Un port n'est fait que de chiffres, et il finit dans du JSON plus bas.",
+        'case "$PORT" in',
+        "  *[!0-9]*) exit 0 ;;",
+        "esac",
         "",
         "# Le client peut ne pas encore ecouter quand le port arrive.",
         "essayer() {",
@@ -384,33 +398,66 @@ def render_port_sync(cfg: StackConfig) -> str:
     ]
 
     clients = port_sync_clients(cfg)
+    temporaires = {}
+    if "qbittorrent" in clients:
+        temporaires["CK"] = "/tmp/plugarr-qbittorrent.cookies"
+        temporaires["AUTH"] = "/tmp/plugarr-qbittorrent.auth"
+    if "transmission" in clients:
+        temporaires["CONF"] = "/tmp/plugarr-transmission.wgetrc"
+    if temporaires:
+        a_effacer = " ".join(f'"${nom}"' for nom in temporaires)
+        lignes += [
+            "umask 077",
+            *(f"{nom}={chemin}" for nom, chemin in temporaires.items()),
+            # `trap` et non un `rm` en fin de bloc : le code de retour reste celui
+            # de la pose, et c'est lui que Gluetun journalise. Un seul pour tous
+            # les clients : un second remplacerait le premier.
+            f"trap 'rm -f {a_effacer}' EXIT",
+            "# dash et busybox ne passent pas par EXIT quand un signal les tue.",
+            "trap 'exit 143' HUP INT TERM",
+            "",
+        ]
+
     if "qbittorrent" in clients:
         port = catalog.get("qbittorrent").internal_port
         lignes += [
+            ENCODER_SH,
             "poser_qbittorrent() {",
+            "  # Par fichier, jamais en argument : depuis l'hote, n'importe quel compte",
+            "  # lit la ligne de commande d'un conteneur avec un simple `ps`.",
+            '  printf "username=%s&password=%s" \\',
+            '    "$(encoder "$QBT_USER")" "$(encoder "$QBT_PASS")" > "$AUTH"',
             '  wget -q --save-cookies "$CK" --keep-session-cookies \\',
-            '    --post-data "username=$QBT_USER&password=$QBT_PASS" \\',
+            '    --post-file "$AUTH" \\',
             f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/auth/login" || return 1',
             '  wget -q --load-cookies "$CK" \\',
             '    --post-data "json={\\"listen_port\\":$PORT}" \\',
             f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/app/setPreferences"',
             "}",
-            'CK=/tmp/plugarr-qbittorrent.cookies',
             'essayer poser_qbittorrent && echo "qbittorrent ecoute sur $PORT"',
             "",
         ]
 
     if "transmission" in clients:
         port = catalog.get("transmission").internal_port
+        # TODO(verify): `base64` et `--config` DANS l'image de Gluetun v3.41.3. Relus dans
+        # son Dockerfile et la configuration busybox d'Alpine, essayes avec wget 1.21.4.
         lignes += [
             f'RPC="http://127.0.0.1:{port}/transmission/rpc"',
             "poser_transmission() {",
+            "  # Par fichier, jamais en argument : depuis l'hote, n'importe quel compte",
+            "  # lit la ligne de commande d'un conteneur avec un simple `ps`.",
+            "  # L'en-tete plutot que `password=` : wgetrc retire les espaces autour de",
+            "  # la valeur, et un saut de ligne y ajouterait une commande. Base64 n'a",
+            "  # ni l'un ni l'autre, mais il coupe les lignes longues, d'ou `tr`.",
+            '  printf "header=Authorization: Basic %s\\n" \\',
+            '    "$(printf "%s:%s" "$TR_USER" "$TR_PASS" | base64 | tr -d "\\n")" > "$CONF"',
             "  # Transmission repond 409 au premier appel en donnant la session",
             "  # a reutiliser. Sans cet aller-retour, tout POST est refuse.",
-            '  SID=$(wget -S -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" \\',
+            '  SID=$(wget --config="$CONF" -S -q -O /dev/null \\',
             '        "$RPC" 2>&1 | sed -n "s/.*X-Transmission-Session-Id: *//p" | tr -d "\\r")',
             '  [ -n "$SID" ] || return 1',
-            '  wget -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" \\',
+            '  wget --config="$CONF" -q -O /dev/null \\',
             '    --header="X-Transmission-Session-Id: $SID" \\',
             '    --post-data "{\\"method\\":\\"session-set\\",\\"arguments\\":{\\"peer-port\\":$PORT}}" \\',
             '    "$RPC"',
@@ -858,6 +905,7 @@ _GITIGNORE_ENTETE = (
 _GITIGNORE = """.env
 stack.yml
 stack.yml.*
+.*.tmp
 docker-compose.yml
 acces-plugarr.html
 plugarr.log
@@ -948,20 +996,18 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     written: list[Path] = []
 
     compose_path = target_dir / "docker-compose.yml"
-    compose_path.write_text(render_compose(cfg), encoding="utf-8")
+    _ecrire_atomique(compose_path, render_compose(cfg))
     written.append(compose_path)
 
     env_path = target_dir / ".env"
-    env_path.write_text(render_env(cfg, target_dir), encoding="utf-8")
-    _restrict(env_path)
+    _ecrire_atomique(env_path, render_env(cfg, target_dir), secret=True)
     written.append(env_path)
 
     stack_path = target_dir / "stack.yml"
     # L'historique AVANT l'ecriture : c'est le fichier sur le point d'etre
     # ecrase qu'il faut garder, pas celui qu'on s'apprete a poser.
     _historiser(stack_path)
-    stack_path.write_text(render_stack(cfg), encoding="utf-8")
-    _restrict(stack_path)
+    _ecrire_atomique(stack_path, render_stack(cfg), secret=True)
     written.append(stack_path)
 
     # Le registre note OU vit cette installation. Sans lui, `stack.yml` n'est
@@ -1002,6 +1048,35 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     # lire.
     _rendre_les_artefacts(written, target_dir, cfg)
     return written
+
+
+def _ecrire_atomique(path: Path, contenu: str, *, secret: bool = False) -> None:
+    """Remplace `path` d'un seul coup, sans jamais le laisser tronque.
+
+    `write_text` vide d'abord le fichier : un arret en pleine ecriture laissait un
+    `stack.yml` incomplet, et un `.env` neuf restait lisible par tous jusqu'au
+    `chmod` qui suivait. Un secret nait donc en 600. Le reste garde les droits de
+    `write_text` : ceux du fichier existant, sinon l'umask.
+    """
+    # Resolu pour qu'un lien symbolique reste un lien : on remplace ce qu'il vise.
+    cible = path.resolve()
+    temporaire = cible.with_name(f".{cible.name}.{secrets.token_hex(4)}.tmp")
+    # O_EXCL : un nom deja pris, lien symbolique compris, echoue au lieu d'etre suivi.
+    descripteur = os.open(
+        temporaire, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if secret else 0o666
+    )
+    try:
+        with os.fdopen(descripteur, "w", encoding="utf-8") as flux:
+            flux.write(contenu)
+            flux.flush()
+            os.fsync(flux.fileno())
+        if secret:
+            _restrict(temporaire)
+        elif cible.exists():
+            shutil.copymode(cible, temporaire)
+        os.replace(temporaire, cible)
+    finally:
+        temporaire.unlink(missing_ok=True)
 
 
 def _restrict(path: Path) -> None:

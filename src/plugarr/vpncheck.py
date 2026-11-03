@@ -160,26 +160,36 @@ A=$(wget -qO- --header "X-API-Key: $K" http://127.0.0.1:8000/v1/portforward 2>/d
 echo "annonce=${A:-0}"
 if [ -n "$QBT_USER" ]; then
   CK=/tmp/plugarr-controle.cookies
+  AUTH=/tmp/plugarr-controle.auth
+  umask 077
+  printf 'username=%%s&password=%%s' \
+    "$(encoder "$QBT_USER")" "$(encoder "$QBT_PASS")" > "$AUTH"
   if wget -q --save-cookies "$CK" --keep-session-cookies \
-       --post-data "username=$QBT_USER&password=$QBT_PASS" \
+       --post-file "$AUTH" \
        -O /dev/null "http://127.0.0.1:%(qbittorrent)s/api/v2/auth/login" 2>/dev/null; then
     Q=$(wget -q --load-cookies "$CK" -O - \
         "http://127.0.0.1:%(qbittorrent)s/api/v2/app/preferences" 2>/dev/null \
         | sed -n 's/.*"listen_port":\([0-9]*\).*/\1/p')
     echo "qbittorrent=${Q:-0}"
   fi
+  rm -f "$CK" "$AUTH"
 fi
 if [ -n "$TR_USER" ]; then
   RPC="http://127.0.0.1:%(transmission)s/transmission/rpc"
-  S=$(wget -S -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" "$RPC" 2>&1 \
+  CONF=/tmp/plugarr-controle.wgetrc
+  umask 077
+  printf 'header=Authorization: Basic %%s\n' \
+    "$(printf '%%s:%%s' "$TR_USER" "$TR_PASS" | base64 | tr -d '\n')" > "$CONF"
+  S=$(wget --config="$CONF" -S -q -O /dev/null "$RPC" 2>&1 \
       | sed -n 's/.*X-Transmission-Session-Id: *//p' | tr -d '\r')
   if [ -n "$S" ]; then
-    T=$(wget -q -O - --user="$TR_USER" --password="$TR_PASS" \
+    T=$(wget --config="$CONF" -q -O - \
         --header="X-Transmission-Session-Id: $S" \
         --post-data '{"method":"session-get","fields":["peer-port"]}' "$RPC" 2>/dev/null \
         | sed -n 's/.*"peer-port":\([0-9]*\).*/\1/p')
     echo "transmission=${T:-0}"
   fi
+  rm -f "$CONF"
 fi
 """
 
@@ -191,16 +201,17 @@ def ports_entrants(cfg: StackConfig) -> dict[str, int]:
     obtenu : c'est le sentinel de Gluetun lui-meme, verifie contre la v3.41.3, et
     il distingue « pas de port » de « port different ».
     """
-    from .compose import port_sync_clients
+    from .compose import ENCODER_SH, port_sync_clients
 
     clients = port_sync_clients(cfg)
     if not clients:
         return {}
     # La cle du serveur de controle est relue DANS Gluetun, qui monte le
     # fichier : elle ne passe pas sur la ligne de commande.
-    script = gluetun_auth.LIRE_CLE_SH + "\n" + _LECTURE_PORTS % {
+    lecture = _LECTURE_PORTS % {
         sid: catalog.get(sid).internal_port for sid in ("qbittorrent", "transmission")
     }
+    script = f"{gluetun_auth.LIRE_CLE_SH}\n{ENCODER_SH}\n{lecture}"
     ok, sortie = exec_in(f"{cfg.project_name}-gluetun", ["sh", "-c", script])
     if not ok:
         return {}

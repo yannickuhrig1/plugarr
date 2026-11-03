@@ -159,6 +159,17 @@ def test_l_unite_systemd_a_la_forme_attendue(tmp_path):
     assert "After=docker.service" in unite
 
 
+def test_le_dossier_de_travail_n_est_jamais_entre_guillemets(tmp_path):
+    """Contrairement a `ExecStart=`, `WorkingDirectory=` prend sa ligne telle quelle,
+    espaces compris. Entre guillemets, systemd 255 refuse l'unite (« path is not
+    absolute ») et la console ne demarre plus : verifie avec `systemd-analyze verify`."""
+    dossier = tmp_path / "un dossier avec espaces"
+
+    unite = autostart._unite_systemd("/bin/plugarr serve", dossier)
+
+    assert f"WorkingDirectory={dossier}\n" in unite
+
+
 # ----------------------------------------------------- plateforme inconnue
 
 

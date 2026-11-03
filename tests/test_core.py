@@ -731,7 +731,11 @@ def test_la_reparation_ugreen_ne_touche_qu_aux_dossiers_root(tmp_path, monkeypat
         ),
     )
     monkeypatch.setattr(layout.os, "open", lambda path, _flags: ouverts.append(Path(path)) or 42)
-    monkeypatch.setattr(layout.os, "fstat", lambda _fd: informations)
+    # `layout.os` EST le module `os` : pytest y lit la taille de ses captures.
+    vrai_fstat = layout.os.fstat
+    monkeypatch.setattr(
+        layout.os, "fstat", lambda fd: informations if fd == 42 else vrai_fstat(fd)
+    )
     monkeypatch.setattr(
         layout.os,
         "fchown",

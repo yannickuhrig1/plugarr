@@ -15,11 +15,17 @@ dans le tunnel : le client de telechargement y est et perd son alias DNS.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
+import shutil
 import subprocess
+import threading
 import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -559,6 +565,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --post-file) echo "CORPS $(cat "$2")" >> "$JOURNAL"; ls -l "$2" >> "$JOURNAL" ;;
     --save-cookies) : > "$2" ;;
+    --config=*)
+      echo "CONFIG $(cat "${1#--config=}")" >> "$JOURNAL"
+      ls -l "${1#--config=}" >> "$JOURNAL"
+      ;;
+    -S) echo "  X-Transmission-Session-Id: session-de-test" >&2 ;;
   esac
   shift
 done
@@ -566,12 +577,13 @@ exit "${WGET_CODE:-0}"
 """
 
 
-def _lancer_sh(tmp_path, script, *args, wget_code=0, **env):
+def _lancer_sh(tmp_path, script, *args, wget_code=0, faux_wget=True, faux_sleep="exit 0", **env):
     """Execute `script` avec de faux `wget` et `sleep`, et ses fichiers dans `tmp_path`."""
     outils = tmp_path / "outils"
     outils.mkdir(exist_ok=True)
-    (outils / "wget").write_text(_FAUX_WGET, encoding="utf-8")
-    (outils / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    if faux_wget:
+        (outils / "wget").write_text(_FAUX_WGET, encoding="utf-8")
+    (outils / "sleep").write_text(f"#!/bin/sh\n{faux_sleep}\n", encoding="utf-8")
     for outil in outils.iterdir():
         outil.chmod(0o755)
     journal = tmp_path / "journal"
@@ -710,6 +722,217 @@ def test_le_releve_des_ports_ne_montre_pas_le_mot_de_passe(tmp_path, monkeypatch
     assert _MOT_DE_PASSE_QB not in "\n".join(arguments)
     assert f"CORPS username=admin&password={_MOT_DE_PASSE_QB}\n" in journal
     assert not list(tmp_path.glob("plugarr-controle.*"))
+
+
+_MOT_DE_PASSE_TR = "un-secret-de-transmission"
+
+#: Mesure avec GNU wget 1.21.4 : `#` et `=` passent dans `password=`, mais les espaces
+#: et tabulations autour de la valeur disparaissent (401), et un saut de ligne ajoute
+#: une commande a la configuration, ici un proxy que wget suit.
+_MOTS_DE_PASSE_PIEGES_TR = [
+    "ab#cd",
+    "#abcd",
+    "a=b=c",
+    " abcd",
+    "abcd ",
+    "abcd\t",
+    "a%sb",
+    "a'b\"c\\d",
+    "$(id)`id`",
+    "x" * 120,
+    "abcd\nhttp_proxy=http://127.0.0.1:1/",
+]
+
+
+def _script_transmission(quel, monkeypatch, adresse="127.0.0.1:9091"):
+    """Les deux scripts qui parlent a Transmission, et leurs arguments."""
+    if quel == "pose":
+        script, args = compose.render_port_sync(_cfg_pf("transmission")), ("51413",)
+    else:
+        script, args = _script_du_releve(monkeypatch), ()
+    return script.replace("127.0.0.1:9091", adresse), args
+
+
+def _lancer_transmission(tmp_path, monkeypatch, quel, mot=_MOT_DE_PASSE_TR, **options):
+    script, args = _script_transmission(quel, monkeypatch)
+    return _lancer_sh(
+        tmp_path, script, *args, QBT_USER="", TR_USER="admin", TR_PASS=mot, **options
+    )
+
+
+def _identifiants_du_fichier(journal):
+    """Ce que le fichier de configuration fait envoyer, decode comme Transmission."""
+    lignes = [ligne for ligne in journal.splitlines() if ligne.startswith("CONFIG ")]
+    assert len(lignes) == 2, journal
+    assert lignes[0] == lignes[1]
+    # Sur une seule ligne et sans espace : wgetrc n'a plus rien a retirer ni a interpreter.
+    valeur = re.fullmatch(r"CONFIG header=Authorization: Basic ([A-Za-z0-9+/=]+)", lignes[0])
+    assert valeur, lignes[0]
+    return base64.b64decode(valeur[1]).decode()
+
+
+@posix
+@pytest.mark.parametrize("quel", ["pose", "releve"])
+def test_le_mot_de_passe_transmission_quitte_la_ligne_de_commande(tmp_path, monkeypatch, quel):
+    """Meme piege que qBittorrent : `--password` se lit avec `ps` depuis l'hote. Et base64
+    ne cache rien : sa forme encodee n'a pas sa place sur la ligne de commande non plus."""
+    code, journal = _lancer_transmission(tmp_path, monkeypatch, quel)
+
+    assert code == 0
+    arguments = "\n".join(ligne for ligne in journal.splitlines() if ligne.startswith("ARGS"))
+    assert arguments.count("--config=") == 2, journal
+    assert _MOT_DE_PASSE_TR not in arguments
+    assert "--password" not in arguments
+    assert "Authorization" not in arguments
+    assert base64.b64encode(f"admin:{_MOT_DE_PASSE_TR}".encode()).decode() not in arguments
+    assert "-rw-------" in journal
+
+
+@posix
+@pytest.mark.parametrize("quel", ["pose", "releve"])
+@pytest.mark.parametrize("mot", _MOTS_DE_PASSE_PIEGES_TR)
+def test_le_fichier_transmission_ne_deforme_aucun_mot_de_passe(tmp_path, monkeypatch, quel, mot):
+    """Un mot de passe abime donne un 401, et le port n'est jamais pose. `x` * 120 garde
+    l'en-tete sur une ligne : base64 coupe a 76 colonnes, et wgetrc lit ligne par ligne."""
+    _, journal = _lancer_transmission(tmp_path, monkeypatch, quel, mot)
+
+    assert _identifiants_du_fichier(journal) == f"admin:{mot}"
+
+
+@posix
+@pytest.mark.parametrize("quel", ["pose", "releve"])
+@pytest.mark.parametrize("wget_code", [0, 1])
+def test_le_fichier_transmission_ne_reste_pas_sur_le_disque(
+    tmp_path, monkeypatch, quel, wget_code
+):
+    _lancer_transmission(tmp_path, monkeypatch, quel, wget_code=wget_code)
+
+    assert not list(tmp_path.glob("plugarr-*"))
+
+
+@posix
+def test_un_echec_de_pose_transmission_reste_visible_de_gluetun(tmp_path, monkeypatch):
+    """Le nettoyage ne doit pas masquer l'echec : c'est ce code que Gluetun journalise."""
+    code, _ = _lancer_transmission(tmp_path, monkeypatch, "pose", wget_code=1)
+
+    assert code != 0
+
+
+@posix
+@pytest.mark.parametrize("client", ["qbittorrent", "transmission"])
+def test_un_signal_pendant_l_attente_ne_laisse_pas_les_identifiants(tmp_path, client):
+    """dash et busybox ne passent pas par `trap EXIT` quand un signal les tue, et la pose
+    peut attendre une minute que le client ecoute : le fichier resterait dans `/tmp`."""
+    script = compose.render_port_sync(_cfg_pf(client))
+
+    code, _ = _lancer_sh(
+        tmp_path,
+        script,
+        "51413",
+        wget_code=1,
+        faux_sleep='kill -TERM "$PPID"',
+        TR_USER="admin",
+        TR_PASS=_MOT_DE_PASSE_TR,
+    )
+
+    assert code == 143
+    assert not list(tmp_path.glob("plugarr-*"))
+
+
+@posix
+def test_les_deux_clients_partagent_un_seul_nettoyage(tmp_path, monkeypatch):
+    """Un second `trap EXIT` remplacerait le premier, et les fichiers de l'autre client
+    resteraient. `port_sync_clients` n'en rend qu'un aujourd'hui : rien dans le script ne
+    doit reposer sur cette regle, qui depend du fournisseur de VPN et peut changer."""
+    monkeypatch.setattr(compose, "port_sync_clients", lambda _cfg: ["qbittorrent", "transmission"])
+    script = compose.render_port_sync(_cfg_pf("qbittorrent", "transmission"))
+
+    code, journal = _lancer_sh(
+        tmp_path, script, "51413", TR_USER="admin", TR_PASS=_MOT_DE_PASSE_TR
+    )
+
+    assert code == 0
+    assert "CORPS " in journal
+    assert "CONFIG " in journal
+    assert script.count("' EXIT") == 1
+    assert not list(tmp_path.glob("plugarr-*"))
+
+
+def _wget_gnu():
+    """`--config` n'existe que dans GNU wget, celui que l'image de Gluetun installe."""
+    if not shutil.which("wget"):
+        return False
+    version = subprocess.run(["wget", "--version"], capture_output=True, text=True, check=False)
+    return "GNU Wget" in version.stdout
+
+
+@pytest.fixture
+def faux_transmission():
+    """Transmission en miniature, dans l'ordre de ses controles : 401 sans les bons
+    identifiants, 409 sans la session, et alors seulement la methode demandee."""
+    etat = SimpleNamespace(identifiants=b"", peer_port=0)
+
+    class Reponses(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_args):
+            pass
+
+        def _repondre(self, code, en_tete=None, corps=b""):
+            self.send_response(code)
+            if en_tete:
+                self.send_header(*en_tete)
+            self.send_header("Content-Length", str(len(corps)))
+            self.end_headers()
+            self.wfile.write(corps)
+
+        def do_POST(self):
+            demande = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            attendu = "Basic " + base64.b64encode(etat.identifiants).decode()
+            if self.headers.get("Authorization") != attendu:
+                self._repondre(401, ("WWW-Authenticate", 'Basic realm="Transmission"'))
+            elif self.headers.get("X-Transmission-Session-Id") != "session-de-test":
+                self._repondre(409, ("X-Transmission-Session-Id", "session-de-test"))
+            else:
+                demande = json.loads(demande)
+                if demande["method"] == "session-set":
+                    etat.peer_port = demande["arguments"]["peer-port"]
+                reponse = {"arguments": {"peer-port": etat.peer_port}, "result": "success"}
+                self._repondre(200, corps=json.dumps(reponse, separators=(",", ":")).encode())
+
+        do_GET = do_POST
+
+    serveur = ThreadingHTTPServer(("127.0.0.1", 0), Reponses)
+    etat.adresse = f"127.0.0.1:{serveur.server_address[1]}"
+    threading.Thread(target=serveur.serve_forever, daemon=True).start()
+    yield etat
+    serveur.shutdown()
+    serveur.server_close()
+
+
+@posix
+@pytest.mark.skipif(not _wget_gnu(), reason="GNU wget absent")
+@pytest.mark.parametrize("mot", _MOTS_DE_PASSE_PIEGES_TR)
+def test_le_vrai_wget_pose_puis_relit_le_port(tmp_path, monkeypatch, faux_transmission, mot):
+    """`_FAUX_WGET` ne lit pas wgetrc : seul le vrai dit si la valeur arrive intacte, et si
+    l'en-tete du fichier s'ajoute bien a celui de la session, passe en argument."""
+    faux_transmission.identifiants = f"admin:{mot}".encode()
+    identifiants = {"QBT_USER": "", "TR_USER": "admin", "TR_PASS": mot}
+    # Le serveur de controle de Gluetun n'est pas la : on n'attend pas un service local.
+    pose, args = _script_transmission("pose", monkeypatch, faux_transmission.adresse)
+    releve, _ = _script_transmission("releve", monkeypatch, faux_transmission.adresse)
+    releve = releve.replace("127.0.0.1:8000", faux_transmission.adresse)
+
+    code, _ = _lancer_sh(tmp_path, pose, *args, faux_wget=False, **identifiants)
+
+    assert code == 0
+    assert faux_transmission.peer_port == 51413
+
+    # `_lancer_sh` ne rend que le journal, et le releve repond sur sa sortie standard.
+    _, sortie = _lancer_sh(tmp_path, f'exec >> "$JOURNAL"\n{releve}', faux_wget=False, **identifiants)
+
+    assert "transmission=51413" in sortie
+    assert not list(tmp_path.glob("plugarr-*"))
 
 
 # ------------------------------------------ controle du port reellement ecoute

@@ -176,15 +176,20 @@ if [ -n "$QBT_USER" ]; then
 fi
 if [ -n "$TR_USER" ]; then
   RPC="http://127.0.0.1:%(transmission)s/transmission/rpc"
-  S=$(wget -S -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" "$RPC" 2>&1 \
+  CONF=/tmp/plugarr-controle.wgetrc
+  umask 077
+  printf 'header=Authorization: Basic %%s\n' \
+    "$(printf '%%s:%%s' "$TR_USER" "$TR_PASS" | base64 | tr -d '\n')" > "$CONF"
+  S=$(wget --config="$CONF" -S -q -O /dev/null "$RPC" 2>&1 \
       | sed -n 's/.*X-Transmission-Session-Id: *//p' | tr -d '\r')
   if [ -n "$S" ]; then
-    T=$(wget -q -O - --user="$TR_USER" --password="$TR_PASS" \
+    T=$(wget --config="$CONF" -q -O - \
         --header="X-Transmission-Session-Id: $S" \
         --post-data '{"method":"session-get","fields":["peer-port"]}' "$RPC" 2>/dev/null \
         | sed -n 's/.*"peer-port":\([0-9]*\).*/\1/p')
     echo "transmission=${T:-0}"
   fi
+  rm -f "$CONF"
 fi
 """
 

@@ -398,6 +398,26 @@ def render_port_sync(cfg: StackConfig) -> str:
     ]
 
     clients = port_sync_clients(cfg)
+    temporaires = {}
+    if "qbittorrent" in clients:
+        temporaires["CK"] = "/tmp/plugarr-qbittorrent.cookies"
+        temporaires["AUTH"] = "/tmp/plugarr-qbittorrent.auth"
+    if "transmission" in clients:
+        temporaires["CONF"] = "/tmp/plugarr-transmission.wgetrc"
+    if temporaires:
+        a_effacer = " ".join(f'"${nom}"' for nom in temporaires)
+        lignes += [
+            "umask 077",
+            *(f"{nom}={chemin}" for nom, chemin in temporaires.items()),
+            # `trap` et non un `rm` en fin de bloc : le code de retour reste celui
+            # de la pose, et c'est lui que Gluetun journalise. Un seul pour tous
+            # les clients : un second remplacerait le premier.
+            f"trap 'rm -f {a_effacer}' EXIT",
+            "# dash et busybox ne passent pas par EXIT quand un signal les tue.",
+            "trap 'exit 143' HUP INT TERM",
+            "",
+        ]
+
     if "qbittorrent" in clients:
         port = catalog.get("qbittorrent").internal_port
         lignes += [
@@ -414,27 +434,30 @@ def render_port_sync(cfg: StackConfig) -> str:
             '    --post-data "json={\\"listen_port\\":$PORT}" \\',
             f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/app/setPreferences"',
             "}",
-            "umask 077",
-            'CK=/tmp/plugarr-qbittorrent.cookies',
-            'AUTH=/tmp/plugarr-qbittorrent.auth',
-            # `trap` et non un `rm` en fin de bloc : le code de retour reste celui
-            # de la pose, et c'est lui que Gluetun journalise.
-            "trap 'rm -f \"$CK\" \"$AUTH\"' EXIT",
             'essayer poser_qbittorrent && echo "qbittorrent ecoute sur $PORT"',
             "",
         ]
 
     if "transmission" in clients:
         port = catalog.get("transmission").internal_port
+        # TODO(verify): `base64` et `--config` DANS l'image de Gluetun v3.41.3. Relus dans
+        # son Dockerfile et la configuration busybox d'Alpine, essayes avec wget 1.21.4.
         lignes += [
             f'RPC="http://127.0.0.1:{port}/transmission/rpc"',
             "poser_transmission() {",
+            "  # Par fichier, jamais en argument : depuis l'hote, n'importe quel compte",
+            "  # lit la ligne de commande d'un conteneur avec un simple `ps`.",
+            "  # L'en-tete plutot que `password=` : wgetrc retire les espaces autour de",
+            "  # la valeur, et un saut de ligne y ajouterait une commande. Base64 n'a",
+            "  # ni l'un ni l'autre, mais il coupe les lignes longues, d'ou `tr`.",
+            '  printf "header=Authorization: Basic %s\\n" \\',
+            '    "$(printf "%s:%s" "$TR_USER" "$TR_PASS" | base64 | tr -d "\\n")" > "$CONF"',
             "  # Transmission repond 409 au premier appel en donnant la session",
             "  # a reutiliser. Sans cet aller-retour, tout POST est refuse.",
-            '  SID=$(wget -S -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" \\',
+            '  SID=$(wget --config="$CONF" -S -q -O /dev/null \\',
             '        "$RPC" 2>&1 | sed -n "s/.*X-Transmission-Session-Id: *//p" | tr -d "\\r")',
             '  [ -n "$SID" ] || return 1',
-            '  wget -q -O /dev/null --user="$TR_USER" --password="$TR_PASS" \\',
+            '  wget --config="$CONF" -q -O /dev/null \\',
             '    --header="X-Transmission-Session-Id: $SID" \\',
             '    --post-data "{\\"method\\":\\"session-set\\",\\"arguments\\":{\\"peer-port\\":$PORT}}" \\',
             '    "$RPC"',

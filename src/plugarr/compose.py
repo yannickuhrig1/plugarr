@@ -11,6 +11,8 @@ etre une rustine plus tard, meme si la Phase 1 n'expose que la forme sans VPN.
 from __future__ import annotations
 
 import os
+import secrets
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -858,6 +860,7 @@ _GITIGNORE_ENTETE = (
 _GITIGNORE = """.env
 stack.yml
 stack.yml.*
+.*.tmp
 docker-compose.yml
 acces-plugarr.html
 plugarr.log
@@ -948,20 +951,18 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     written: list[Path] = []
 
     compose_path = target_dir / "docker-compose.yml"
-    compose_path.write_text(render_compose(cfg), encoding="utf-8")
+    _ecrire_atomique(compose_path, render_compose(cfg))
     written.append(compose_path)
 
     env_path = target_dir / ".env"
-    env_path.write_text(render_env(cfg, target_dir), encoding="utf-8")
-    _restrict(env_path)
+    _ecrire_atomique(env_path, render_env(cfg, target_dir), secret=True)
     written.append(env_path)
 
     stack_path = target_dir / "stack.yml"
     # L'historique AVANT l'ecriture : c'est le fichier sur le point d'etre
     # ecrase qu'il faut garder, pas celui qu'on s'apprete a poser.
     _historiser(stack_path)
-    stack_path.write_text(render_stack(cfg), encoding="utf-8")
-    _restrict(stack_path)
+    _ecrire_atomique(stack_path, render_stack(cfg), secret=True)
     written.append(stack_path)
 
     # Le registre note OU vit cette installation. Sans lui, `stack.yml` n'est
@@ -1002,6 +1003,35 @@ def write_artifacts(cfg: StackConfig, target_dir: Path) -> list[Path]:
     # lire.
     _rendre_les_artefacts(written, target_dir, cfg)
     return written
+
+
+def _ecrire_atomique(path: Path, contenu: str, *, secret: bool = False) -> None:
+    """Remplace `path` d'un seul coup, sans jamais le laisser tronque.
+
+    `write_text` vide d'abord le fichier : un arret en pleine ecriture laissait un
+    `stack.yml` incomplet, et un `.env` neuf restait lisible par tous jusqu'au
+    `chmod` qui suivait. Un secret nait donc en 600. Le reste garde les droits de
+    `write_text` : ceux du fichier existant, sinon l'umask.
+    """
+    # Resolu pour qu'un lien symbolique reste un lien : on remplace ce qu'il vise.
+    cible = path.resolve()
+    temporaire = cible.with_name(f".{cible.name}.{secrets.token_hex(4)}.tmp")
+    # O_EXCL : un nom deja pris, lien symbolique compris, echoue au lieu d'etre suivi.
+    descripteur = os.open(
+        temporaire, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if secret else 0o666
+    )
+    try:
+        with os.fdopen(descripteur, "w", encoding="utf-8") as flux:
+            flux.write(contenu)
+            flux.flush()
+            os.fsync(flux.fileno())
+        if secret:
+            _restrict(temporaire)
+        elif cible.exists():
+            shutil.copymode(cible, temporaire)
+        os.replace(temporaire, cible)
+    finally:
+        temporaire.unlink(missing_ok=True)
 
 
 def _restrict(path: Path) -> None:

@@ -16,6 +16,8 @@ dans le tunnel : le client de telechargement y est et perd son alias DNS.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -540,6 +542,118 @@ def test_aucun_script_sans_port_entrant(tmp_path):
     compose.write_artifacts(cfg, tmp_path / "projet")
 
     assert not (tmp_path / "config" / "gluetun" / compose.PORT_SYNC).exists()
+
+
+# ------------------------------------------ le mot de passe et la ligne de commande
+
+posix = pytest.mark.skipif(os.name != "posix", reason="scripts sh")
+
+_MOT_DE_PASSE_QB = "un-mot-de-passe-de-test"
+
+#: Note ce que `ps` montrerait, et ce que le fichier d'identifiants contient a cet
+#: instant : il n'existe plus une fois le script termine.
+_FAUX_WGET = """#!/bin/sh
+echo "ARGS $*" >> "$JOURNAL"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --post-file) echo "CORPS $(cat "$2")" >> "$JOURNAL"; ls -l "$2" >> "$JOURNAL" ;;
+    --save-cookies) : > "$2" ;;
+  esac
+  shift
+done
+exit "${WGET_CODE:-0}"
+"""
+
+
+def _lancer_sh(tmp_path, script, *args, wget_code=0, **env):
+    """Execute `script` avec de faux `wget` et `sleep`, et ses fichiers dans `tmp_path`."""
+    outils = tmp_path / "outils"
+    outils.mkdir(exist_ok=True)
+    (outils / "wget").write_text(_FAUX_WGET, encoding="utf-8")
+    (outils / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for outil in outils.iterdir():
+        outil.chmod(0o755)
+    journal = tmp_path / "journal"
+    fichier = tmp_path / "script.sh"
+    fichier.write_text(script.replace("/tmp/", f"{tmp_path}/"), encoding="utf-8")
+    fini = subprocess.run(
+        ["sh", str(fichier), *args],
+        env={
+            "PATH": f"{outils}{os.pathsep}{os.environ['PATH']}",
+            "JOURNAL": str(journal),
+            "WGET_CODE": str(wget_code),
+            "QBT_USER": "admin",
+            "QBT_PASS": _MOT_DE_PASSE_QB,
+            **env,
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    return fini.returncode, journal.read_text(encoding="utf-8") if journal.exists() else ""
+
+
+@posix
+def test_le_mot_de_passe_ne_passe_pas_par_la_ligne_de_commande(tmp_path):
+    """Depuis l'hote, n'importe quel compte lit la ligne de commande d'un conteneur
+    avec `ps`. Le mot de passe passe donc par un fichier, en 600."""
+    script = compose.render_port_sync(_cfg_pf("qbittorrent"))
+
+    code, journal = _lancer_sh(tmp_path, script, "51413")
+
+    assert code == 0
+    arguments = [ligne for ligne in journal.splitlines() if ligne.startswith("ARGS")]
+    assert len(arguments) == 2, journal
+    assert _MOT_DE_PASSE_QB not in "\n".join(arguments)
+    assert f"CORPS username=admin&password={_MOT_DE_PASSE_QB}\n" in journal
+    assert "-rw-------" in journal
+
+
+@posix
+def test_les_identifiants_ne_restent_pas_sur_le_disque(tmp_path):
+    script = compose.render_port_sync(_cfg_pf("qbittorrent"))
+
+    _lancer_sh(tmp_path, script, "51413")
+
+    assert not list(tmp_path.glob("plugarr-qbittorrent.*"))
+
+
+@posix
+def test_un_echec_de_pose_reste_visible_de_gluetun_et_ne_laisse_rien(tmp_path):
+    """Le nettoyage ne doit pas masquer l'echec : c'est ce code que Gluetun journalise."""
+    script = compose.render_port_sync(_cfg_pf("qbittorrent"))
+
+    code, _ = _lancer_sh(tmp_path, script, "51413", wget_code=1)
+
+    assert code != 0
+    assert not list(tmp_path.glob("plugarr-qbittorrent.*"))
+
+
+@posix
+@pytest.mark.parametrize("port", ["51413;id", "12 34", "abc", "-1"])
+def test_un_port_qui_n_en_est_pas_un_est_ignore(tmp_path, port):
+    """Il finirait dans le JSON envoye au client."""
+    script = compose.render_port_sync(_cfg_pf("qbittorrent"))
+
+    code, journal = _lancer_sh(tmp_path, script, port)
+
+    assert code == 0
+    assert journal == ""
+
+
+@posix
+def test_le_releve_des_ports_ne_montre_pas_le_mot_de_passe(tmp_path):
+    """Meme piege que le script de synchronisation, a chaque diagnostic."""
+    script = vpncheck._LECTURE_PORTS % {"qbittorrent": 8080, "transmission": 9091}
+
+    code, journal = _lancer_sh(tmp_path, script)
+
+    assert code == 0
+    arguments = [ligne for ligne in journal.splitlines() if ligne.startswith("ARGS")]
+    assert _MOT_DE_PASSE_QB not in "\n".join(arguments)
+    assert f"CORPS username=admin&password={_MOT_DE_PASSE_QB}\n" in journal
+    assert not list(tmp_path.glob("plugarr-controle.*"))
 
 
 # ------------------------------------------ controle du port reellement ecoute

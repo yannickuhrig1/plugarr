@@ -371,6 +371,10 @@ def render_port_sync(cfg: StackConfig) -> str:
         "",
         'PORT="$1"',
         '[ -n "$PORT" ] || exit 0',
+        "# Un port n'est fait que de chiffres, et il finit dans du JSON plus bas.",
+        'case "$PORT" in',
+        "  *[!0-9]*) exit 0 ;;",
+        "esac",
         "",
         "# Le client peut ne pas encore ecouter quand le port arrive.",
         "essayer() {",
@@ -390,14 +394,22 @@ def render_port_sync(cfg: StackConfig) -> str:
         port = catalog.get("qbittorrent").internal_port
         lignes += [
             "poser_qbittorrent() {",
+            "  # Par fichier, jamais en argument : depuis l'hote, n'importe quel compte",
+            "  # lit la ligne de commande d'un conteneur avec un simple `ps`.",
+            '  printf "username=%s&password=%s" "$QBT_USER" "$QBT_PASS" > "$AUTH"',
             '  wget -q --save-cookies "$CK" --keep-session-cookies \\',
-            '    --post-data "username=$QBT_USER&password=$QBT_PASS" \\',
+            '    --post-file "$AUTH" \\',
             f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/auth/login" || return 1',
             '  wget -q --load-cookies "$CK" \\',
             '    --post-data "json={\\"listen_port\\":$PORT}" \\',
             f'    -O /dev/null "http://127.0.0.1:{port}/api/v2/app/setPreferences"',
             "}",
+            "umask 077",
             'CK=/tmp/plugarr-qbittorrent.cookies',
+            'AUTH=/tmp/plugarr-qbittorrent.auth',
+            # `trap` et non un `rm` en fin de bloc : le code de retour reste celui
+            # de la pose, et c'est lui que Gluetun journalise.
+            "trap 'rm -f \"$CK\" \"$AUTH\"' EXIT",
             'essayer poser_qbittorrent && echo "qbittorrent ecoute sur $PORT"',
             "",
         ]

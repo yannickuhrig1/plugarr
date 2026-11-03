@@ -160,14 +160,18 @@ A=$(wget -qO- --header "X-API-Key: $K" http://127.0.0.1:8000/v1/portforward 2>/d
 echo "annonce=${A:-0}"
 if [ -n "$QBT_USER" ]; then
   CK=/tmp/plugarr-controle.cookies
+  AUTH=/tmp/plugarr-controle.auth
+  umask 077
+  printf 'username=%%s&password=%%s' "$QBT_USER" "$QBT_PASS" > "$AUTH"
   if wget -q --save-cookies "$CK" --keep-session-cookies \
-       --post-data "username=$QBT_USER&password=$QBT_PASS" \
+       --post-file "$AUTH" \
        -O /dev/null "http://127.0.0.1:%(qbittorrent)s/api/v2/auth/login" 2>/dev/null; then
     Q=$(wget -q --load-cookies "$CK" -O - \
         "http://127.0.0.1:%(qbittorrent)s/api/v2/app/preferences" 2>/dev/null \
         | sed -n 's/.*"listen_port":\([0-9]*\).*/\1/p')
     echo "qbittorrent=${Q:-0}"
   fi
+  rm -f "$CK" "$AUTH"
 fi
 if [ -n "$TR_USER" ]; then
   RPC="http://127.0.0.1:%(transmission)s/transmission/rpc"
